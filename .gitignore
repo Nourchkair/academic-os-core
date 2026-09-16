@@ -1,0 +1,30 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Generated local instances and personal academic data
+local/
+instance/
+*.local.json
+profile.json
+academic-os.env
+HANDOFF.md
+generated_cron_jobs.json
+install_cron.sh
+
+# Secrets and runtime state
+.env
+.env.*
+!.env.example
+state/
+sessions/
+logs/
+auth.json
+token*.json
+*credentials*
+
+# OS/editor files
+.DS_Store
+.vscode/
+.idea/

@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "student": {
+    "name": "Example Student",
+    "institution": "Example University",
+    "program": "Not yet specified"
+  },
+  "academic": {
+    "semester": "Fall 2026",
+    "timezone": "UTC",
+    "root_directory": "~/Desktop/University",
+    "school_portal": "Brightspace"
+  },
+  "preferences": {
+    "explanation_style": "detailed",
+    "preferred_format": "markdown",
+    "use_visuals": true,
+    "study_method": "active recall"
+  },
+  "integrations": {
+    "gmail": false,
+    "calendar": false,
+    "drive": false,
+    "school_portal": false
+  },
+  "automation": {
+    "daily_brief_enabled": true,
+    "daily_brief_time": "09:00",
+    "inbox_processor_enabled": true,
+    "inbox_interval_minutes": 5
+  },
+  "browser": {
+    "name": "auto",
+    "user_data_dir": "",
+    "profile_directory": ""
+  },
+  "hermes": {
+    "home_directory": "~/.hermes",
+    "profile": "default",
+    "install_directory": "~/.academic-os"
+  }
+}

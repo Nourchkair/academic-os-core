@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Academic OS local profile",
+  "type": "object",
+  "required": ["schema_version", "student", "academic", "automation", "hermes"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "student": {
+      "type": "object",
+      "required": ["name", "institution", "program"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "institution": {"type": "string", "minLength": 1},
+        "program": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "academic": {
+      "type": "object",
+      "required": ["semester", "timezone", "root_directory"],
+      "properties": {
+        "semester": {"type": "string", "minLength": 1},
+        "timezone": {"type": "string", "minLength": 1},
+        "root_directory": {"type": "string", "minLength": 1},
+        "school_portal": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "automation": {
+      "type": "object",
+      "properties": {
+        "daily_brief_enabled": {"type": "boolean"},
+        "daily_brief_time": {"type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"},
+        "inbox_processor_enabled": {"type": "boolean"},
+        "inbox_interval_minutes": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": true
+    },
+    "hermes": {
+      "type": "object",
+      "required": ["home_directory", "install_directory"],
+      "properties": {
+        "home_directory": {"type": "string", "minLength": 1},
+        "profile": {"type": "string"},
+        "install_directory": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
