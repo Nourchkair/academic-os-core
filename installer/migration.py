@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
+from academia_os.semester import resolve_current_semester
+
 SKIP_DIRECTORIES = {".git", ".hermes", ".academic-os", "node_modules", "__pycache__", ".venv", "venv"}
 SKIP_SUFFIXES = {".crdownload", ".part", ".tmp", ".temp"}
 SEMESTER_PATTERN = re.compile(r"^(fall|winter|spring|summer)[ _-]*(\d{4})$", re.IGNORECASE)
@@ -108,6 +110,8 @@ def build_migration_plan(source_root: Path, academic_root: Path, current_semeste
     if source_root == academic_root:
         raise ValueError("migration source and new Academic OS root must be different")
     current_semester = current_semester.strip()
+    if current_semester.casefold() in {"current semester", "current"}:
+        current_semester = resolve_current_semester()
     if not current_semester:
         raise ValueError("current semester is required for migration")
     items: list[MigrationItem] = []

@@ -78,3 +78,30 @@ def test_handoff_filters_and_collision_names(tmp_path: Path) -> None:
     (dest / "lecture.pdf").write_bytes(b"existing")
     result = handoff.unique_destination(dest, "lecture.pdf", "2026-09-16")
     assert result.name == "lecture (School Portal 2026-09-16).pdf"
+
+
+def test_inbox_gate_persists_retryable_processing_state_outside_hermes(tmp_path: Path) -> None:
+    gate = load_module("runtime/scripts/academic_os_inbox_gate.py", "academic_os_inbox_gate_retryable_test")
+    root = tmp_path / "University"
+    course = root / "Fall 2026" / "HIS 101"
+    (course / "00_INBOX").mkdir(parents=True)
+    (course / "01_COURSE").mkdir()
+    item = course / "00_INBOX" / "notes.md"
+    item.write_text("one", encoding="utf-8")
+    config = write_profile(tmp_path)
+    first = gate.scan(config)
+    assert first["wakeAgent"] is True
+    assert first["processing"][0]["status"] == "PENDING"
+    assert (tmp_path / ".academic-os" / ".academia" / "processing.json").is_file()
+    assert not (tmp_path / ".hermes" / "state" / "academic_os_inbox_gate.json").exists()
+    second = gate.scan(config)
+    assert second == {"wakeAgent": False}
+    from academia_os.processing import ProcessingStore
+
+    record_id = first["processing"][0]["record_id"]
+    store = ProcessingStore(tmp_path / ".academic-os" / ".academia" / "processing.json")
+    store.begin(record_id)
+    store.fail(record_id, "temporary parser failure")
+    retry_signal = gate.scan(config)
+    assert retry_signal["wakeAgent"] is True
+    assert retry_signal["processing"][0]["status"] == "FAILED"

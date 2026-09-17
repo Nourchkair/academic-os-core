@@ -1,26 +1,35 @@
-# Security and privacy
+# Security and academic safety
 
-## Never commit
+Academia OS is local-first. Its core remains useful without an agent, browser automation, or school account access.
 
-- `.env` files containing secrets
-- OAuth tokens or credential caches
-- Browser profiles, cookies, session databases, or MFA data
-- Personal academic folders or exported course files
-- Hermes sessions, memory, logs, state databases, or live cron files
-- User-specific chat IDs, email addresses, API keys, or connection strings
+## Non-negotiable boundaries
 
-## Authorization boundary
+- Preserve original academic files and provenance.
+- Never casually overwrite, delete, rename, or move academic material.
+- Keep `current-confirmed`, `likely`, `unverified`, and `historical` distinctions visible.
+- Keep `ORIGINAL`, `USER-CREATED`, `AI-GENERATED`, and `EXTERNAL` provenance visible.
+- Never submit academic work, send school-account messages, make payments, or authenticate as the user.
+- Never read or store passwords, MFA codes, cookies, session tokens, or hidden API keys.
+- School websites are read-only in the current implementation.
+- Calendar changes and destructive/structural changes require explicit user approval.
+- Do not invent courses, deadlines, readings, versions, or institutional facts.
 
-The recipient authorizes Google services in their own browser/account. School-portal access is completed manually in the recipient's visible browser. The wizard does not request or store passwords, MFA codes, cookies, OAuth tokens, or API keys.
+## Browser privacy
 
-## Local data boundary
+Browser access is optional and defaults off. Manual import and watched folders are fully supported without it. The user chooses the browser and profile; “school browser account” is not a required concept. A dedicated profile is recommended to reduce unrelated browser information visible to an optional adapter, but it is not required and does not guarantee complete isolation.
 
-The generated University directory is personal data. Keep it outside this repository unless the user deliberately creates a separate private backup repository. The generated runtime directory is also personal and should not be committed.
+The current Chromium capability is limited to explicit visible handoff. Firefox and Safari are planned adapters, not implemented integrations. Domain allow-lists reduce intended scope but do not guarantee isolation against all browser capabilities.
 
-## Safe update behavior
+## Source legality and verification
 
-The bootstrapper refuses to overwrite differing files. Template updates must be reviewed and applied as migrations; they must not replace personal notes, original sources, drafts, submissions, grades, or generated course history.
+Prefer university library, Omni/OpenAthens, publisher, DOI/open-access, institutional repository, or author-released sources. Discovery-only results do not authorize downloading unclear copies. Never pay without explicit confirmation. Verify that a retrieved source matches the requested edition and retain `EXACT MATCH — HIGH CONFIDENCE`, `PROBABLE MATCH — VERIFY MANUALLY`, `MISMATCH`, or `NOT RETRIEVED` outcomes.
 
-## Reporting a problem
+## Verification scopes
 
-Do not paste secrets into GitHub issues or chat. Redact paths that reveal personal identities when sharing logs. Report the affected version and a minimal reproduction instead.
+System health checks validate configuration, workspace structure, index readability, runtime scripts, core modules, and processing state. It must not fail merely because a private workspace contains a normal email address or local path.
+
+Safe-to-share auditing is separate and flags emails, local paths, credentials, tokens, and private account information before a user exports or publishes a folder.
+
+## Reporting vulnerabilities
+
+Do not include private academic files, profile JSON, browser state, tokens, or personal paths in public issues. Use the repository’s private security-reporting process when one is configured, and provide a minimal reproducible description.

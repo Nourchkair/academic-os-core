@@ -32,6 +32,9 @@ from desktop.model import (
 from installer.core import initialize_installation, validate_manifest
 from installer.migration import build_migration_plan, execute_migration_plan, write_migration_plan
 from installer.verify import verify_installation
+from academia_os.config import load_config, runtime_directory, save_config
+from academia_os.semester import resolve_current_semester
+from academia_os.settings import config_diff, update_config
 
 DEFAULT_PROFILE = Path(os.environ.get("ACADEMIC_OS_CONFIG", str(Path.home() / ".academic-os" / "profile.json"))).expanduser()
 
@@ -53,7 +56,7 @@ class AcademicOSApp(tk.Tk):
     def __init__(self, profile_path: Path | None = None) -> None:
         super().__init__()
         self.profile_path = (profile_path or DEFAULT_PROFILE).expanduser().resolve()
-        self.title("Academic OS — Your workspace")
+        self.title("Academia OS — Your workspace")
         self.geometry("1180x800")
         self.minsize(980, 660)
         self.configure(bg=self.BG)
@@ -173,21 +176,28 @@ class AcademicOSApp(tk.Tk):
         right = ttk.Frame(outer, style="Panel.TFrame", padding=22)
         right.pack(side="left", fill="both", expand=True, padx=(10, 0))
 
+        self.editing_existing = self.profile_path.is_file()
+        existing_config: dict[str, Any] | None = None
+        if self.editing_existing:
+            try:
+                existing_config = load_config(self.profile_path)
+            except Exception:
+                existing_config = None
         self.setup_vars: dict[str, Any] = {
-            "workspace_mode": tk.StringVar(value="new"),
-            "name": tk.StringVar(),
-            "institution": tk.StringVar(),
-            "program": tk.StringVar(),
-            "semester": tk.StringVar(value=semester_suggestions()[0]),
-            "root": tk.StringVar(value=str(Path.home() / "Desktop" / "University OS")),
-            "timezone": tk.StringVar(value=friendly_timezone_label(detect_local_timezone() or "UTC")),
-            "school_portal": tk.StringVar(value="Brightspace"),
-            "gmail": tk.BooleanVar(value=False),
-            "calendar": tk.BooleanVar(value=False),
-            "drive": tk.BooleanVar(value=False),
-            "school_portal_enabled": tk.BooleanVar(value=False),
-            "daily_brief": tk.BooleanVar(value=True),
-            "inbox_processor": tk.BooleanVar(value=True),
+            "workspace_mode": tk.StringVar(value="existing" if self.editing_existing else "new"),
+            "name": tk.StringVar(value=str((existing_config or {}).get("student", {}).get("name", ""))),
+            "institution": tk.StringVar(value=str((existing_config or {}).get("student", {}).get("institution", ""))),
+            "program": tk.StringVar(value=str((existing_config or {}).get("student", {}).get("program", ""))),
+            "semester": tk.StringVar(value=str((existing_config or {}).get("academic", {}).get("semester", resolve_current_semester()))),
+            "root": tk.StringVar(value=str((existing_config or {}).get("academic", {}).get("root_directory", Path.home() / "Desktop" / "University OS"))),
+            "timezone": tk.StringVar(value=friendly_timezone_label(str((existing_config or {}).get("academic", {}).get("timezone", detect_local_timezone() or "UTC")))),
+            "school_portal": tk.StringVar(value=str((existing_config or {}).get("academic", {}).get("school_portal", "Brightspace"))),
+            "gmail": tk.BooleanVar(value=bool((existing_config or {}).get("integrations", {}).get("gmail", False))),
+            "calendar": tk.BooleanVar(value=bool((existing_config or {}).get("integrations", {}).get("calendar", False))),
+            "drive": tk.BooleanVar(value=bool((existing_config or {}).get("integrations", {}).get("drive", False))),
+            "school_portal_enabled": tk.BooleanVar(value=bool((existing_config or {}).get("integrations", {}).get("school_portal", False))),
+            "daily_brief": tk.BooleanVar(value=bool((existing_config or {}).get("automation", {}).get("daily_brief_enabled", True))),
+            "inbox_processor": tk.BooleanVar(value=bool((existing_config or {}).get("automation", {}).get("inbox_processor_enabled", True))),
         }
         ttk.Label(left, text="Your profile", style="PanelHeading.TLabel").pack(anchor="w", pady=(0, 14))
         self._field(left, "Your name", self.setup_vars["name"])
@@ -230,7 +240,7 @@ class AcademicOSApp(tk.Tk):
         footer = ttk.Frame(body, style="App.TFrame")
         footer.pack(fill="x", pady=(14, 0))
         ttk.Button(footer, text="Back", style="Secondary.TButton", command=self.show_welcome).pack(side="left")
-        ttk.Button(footer, text="Create my Academic OS", style="Accent.TButton", command=self._create_installation).pack(side="right")
+        ttk.Button(footer, text="Save settings" if self.editing_existing else "Create my Academic OS", style="Accent.TButton", command=self._create_installation).pack(side="right")
 
     def _workspace_mode_changed(self) -> None:
         current = self.setup_vars["root"].get().strip()
@@ -280,44 +290,57 @@ class AcademicOSApp(tk.Tk):
         values = self.setup_vars
         default_root = Path.home() / "Desktop" / ("University OS" if self.setup_vars["workspace_mode"].get() == "new" else "University")
         root = str(Path(values["root"].get().strip() or str(default_root)).expanduser())
+        timezone = timezone_from_friendly_label(values["timezone"].get().strip() or friendly_timezone_label(detect_local_timezone() or "UTC"))
+        semester = values["semester"].get().strip() or resolve_current_semester(timezone_name=timezone)
+        if semester.lower().startswith("current semester"):
+            semester = resolve_current_semester(timezone_name=timezone)
+        if self.editing_existing:
+            existing = load_config(self.profile_path)
+            candidate, changes = update_config(
+                existing,
+                {
+                    "student.name": values["name"].get().strip(),
+                    "student.institution": values["institution"].get().strip(),
+                    "student.program": values["program"].get().strip() or "Not yet specified",
+                    "academic.semester": semester,
+                    "academic.timezone": timezone,
+                    "academic.root_directory": root,
+                    "academic.school_portal": values["school_portal"].get().strip() or "Not yet specified",
+                    "integrations.gmail": bool(values["gmail"].get()),
+                    "integrations.calendar": bool(values["calendar"].get()),
+                    "integrations.drive": bool(values["drive"].get()),
+                    "integrations.school_portal": bool(values["school_portal_enabled"].get()),
+                    "automation.daily_brief_enabled": bool(values["daily_brief"].get()),
+                    "automation.inbox_processor_enabled": bool(values["inbox_processor"].get()),
+                },
+                approve_structural=True,
+            )
+            self._settings_changes = changes
+            return validate_manifest(candidate)
         return validate_manifest(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "student": {
                     "name": values["name"].get().strip(),
                     "institution": values["institution"].get().strip(),
                     "program": values["program"].get().strip() or "Not yet specified",
                 },
                 "academic": {
-                    "semester": values["semester"].get().strip() or semester_suggestions()[0],
-                    "timezone": timezone_from_friendly_label(values["timezone"].get().strip() or friendly_timezone_label(detect_local_timezone() or "UTC")),
+                    "semester": semester,
+                    "timezone": timezone,
                     "root_directory": root,
                     "school_portal": values["school_portal"].get().strip() or "Not yet specified",
                 },
-                "preferences": {
-                    "explanation_style": "detailed",
-                    "preferred_format": "markdown",
-                    "use_visuals": True,
-                    "study_method": "active recall",
-                },
+                "runtime": {"install_directory": str(Path.home() / ".academic-os")},
+                "preferences": {"explanation_style": "detailed", "preferred_format": "markdown", "use_visuals": True, "study_method": "active recall"},
                 "integrations": {
-                    "gmail": bool(values["gmail"].get()),
-                    "calendar": bool(values["calendar"].get()),
-                    "drive": bool(values["drive"].get()),
-                    "school_portal": bool(values["school_portal_enabled"].get()),
+                    "gmail": bool(values["gmail"].get()), "calendar": bool(values["calendar"].get()), "drive": bool(values["drive"].get()), "school_portal": bool(values["school_portal_enabled"].get())
                 },
-                "automation": {
-                    "daily_brief_enabled": bool(values["daily_brief"].get()),
-                    "daily_brief_time": "09:00",
-                    "inbox_processor_enabled": bool(values["inbox_processor"].get()),
-                    "inbox_interval_minutes": 5,
-                },
-                "browser": {"name": "auto", "user_data_dir": "", "profile_directory": ""},
-                "hermes": {
-                    "home_directory": str(Path.home() / ".hermes"),
-                    "profile": "default",
-                    "install_directory": str(Path.home() / ".academic-os"),
-                },
+                "automation": {"daily_brief_enabled": bool(values["daily_brief"].get()), "daily_brief_time": "09:00", "inbox_processor_enabled": bool(values["inbox_processor"].get()), "inbox_interval_minutes": 5},
+                "acquisition": {"manual_import_enabled": True, "watched_folders": [], "browser_companion_enabled": False, "browser_access_enabled": False, "advanced_browser_enabled": False, "allowed_sites": []},
+                "privacy": {"browser_access_enabled": False, "allowed_sites": [], "dedicated_profile_recommended": True},
+                "browser": {"name": "auto", "user_data_dir": "", "profile_directory": "", "access_enabled": False, "allowed_sites": []},
+                "agents": {"hermes": {"enabled": False, "profile": "default", "home_directory": ""}, "codex": {"enabled": False}, "claude": {"enabled": False}, "chatgpt": {"enabled": False}},
             }
         )
 
@@ -326,6 +349,31 @@ class AcademicOSApp(tk.Tk):
             manifest = self._manifest_from_setup()
         except Exception as exc:
             messagebox.showerror("A little more information is needed", str(exc))
+            return
+        if self.editing_existing:
+            try:
+                previous = load_config(self.profile_path)
+                changes = getattr(self, "_settings_changes", config_diff(previous, manifest))
+                if not changes:
+                    messagebox.showinfo("No changes", "Your settings are already up to date.")
+                    return
+                structural = [change for change in changes if change["structural"]]
+                if structural:
+                    summary = "\n".join(f"• {change['key']}: {change['before']} → {change['after']}" for change in structural)
+                    if not messagebox.askyesno("Review workspace impact", f"These changes affect workspace structure or semester state:\n\n{summary}\n\nI will never delete or move your existing files. Continue and create only missing structure?", parent=self):
+                        return
+                    target_root = Path(manifest["academic"]["root_directory"]).expanduser()
+                    if target_root.exists() and any(target_root.iterdir()) and not ((target_root / "ACADEMIC_OS_RULES.md").is_file() and (target_root / "COURSE_TEMPLATE").is_dir()):
+                        messagebox.showwarning("Workspace not changed", "The requested workspace contains files but is not a recognized Academia OS workspace. Use the migration flow to bring material into a new location.", parent=self)
+                        return
+                save_config(self.profile_path, manifest)
+                if structural:
+                    target_root = Path(manifest["academic"]["root_directory"]).expanduser()
+                    initialize_installation(manifest, template_root=REPO_ROOT / "templates" / "University", repo_root=REPO_ROOT, attach_existing=target_root.exists() and any(target_root.iterdir()))
+                messagebox.showinfo("Settings saved", "Your settings were updated without rebuilding or overwriting your academic workspace.", parent=self)
+                self.show_dashboard()
+            except Exception as exc:
+                messagebox.showerror("Settings were not saved", str(exc), parent=self)
             return
         root = Path(manifest["academic"]["root_directory"]).expanduser()
         requested_mode = self.setup_vars["workspace_mode"].get()
@@ -344,8 +392,8 @@ class AcademicOSApp(tk.Tk):
                 repo_root=REPO_ROOT,
                 attach_existing=attach_existing,
             )
-            self.profile_path = Path(manifest["hermes"]["install_directory"]).expanduser() / "profile.json"
-            messagebox.showinfo("Your Academic OS is ready", "The local folder and dashboard were created. The next screen shows what is ready and what still needs your account authorization.")
+            self.profile_path = runtime_directory(manifest) / "profile.json"
+            messagebox.showinfo("Your Academia OS is ready", "The local workspace and dashboard were created. Hermes and browser access remain optional.")
             self.show_dashboard()
             if requested_mode == "new" and legacy_candidates:
                 self.after(100, lambda: self._offer_migration(legacy_candidates))
@@ -376,7 +424,7 @@ class AcademicOSApp(tk.Tk):
         ttk.Label(brand, text="A", style="BrandMark.TLabel", width=2).pack(side="left", padx=(0, 10), ipady=3)
         brand_copy = ttk.Frame(brand, style="Sidebar.TFrame")
         brand_copy.pack(side="left", fill="x", expand=True)
-        ttk.Label(brand_copy, text="Academic OS", style="SidebarTitle.TLabel").pack(anchor="w")
+        ttk.Label(brand_copy, text="Academia OS", style="SidebarTitle.TLabel").pack(anchor="w")
         ttk.Label(brand_copy, text="PRIVATE STUDY SPACE", style="SidebarMuted.TLabel").pack(anchor="w", pady=(2, 0))
 
         tk.Frame(sidebar, background=self.BORDER, height=1, borderwidth=0).pack(fill="x", pady=(24, 22))
@@ -391,7 +439,8 @@ class AcademicOSApp(tk.Tk):
         ttk.Label(sidebar, text="QUICK ACCESS", style="SidebarSection.TLabel").pack(anchor="w", pady=(0, 8))
         self._nav_button(sidebar, "Open University folder", lambda: open_local_path(Path(dashboard["academic_root"])))
         self._nav_button(sidebar, "Today's dashboard", lambda: self._open_today(dashboard))
-        self._nav_button(sidebar, "Open Hermes", self._open_hermes)
+        if dashboard.get("hermes_enabled"):
+            self._nav_button(sidebar, "Open optional Hermes", self._open_hermes)
         tk.Frame(sidebar, background=self.BORDER, height=1, borderwidth=0).pack(fill="x", pady=(22, 14))
         ttk.Label(sidebar, text=dashboard["institution"], style="SidebarMuted.TLabel", wraplength=185).pack(anchor="w")
         ttk.Label(sidebar, text=dashboard["student_name"], style="SidebarTitle.TLabel", wraplength=185).pack(anchor="w", pady=(4, 0))

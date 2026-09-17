@@ -5,41 +5,45 @@ This installation belongs to **{{STUDENT_NAME}}** at **{{INSTITUTION}}**.
 ## Generated locations
 
 - Academic root: `{{ACADEMIC_ROOT}}`
-- Academic OS runtime: `{{INSTALL_ROOT}}`
-- Hermes home: `{{HERMES_HOME}}`
+- Academia OS runtime: `{{INSTALL_ROOT}}`
+- Optional Hermes home: `{{HERMES_HOME}}`
 - Semester shell: `{{ACADEMIC_ROOT}}/{{SEMESTER}}`
 - Time zone: `{{TIMEZONE}}`
 
-## Desktop app
+The academic workspace is human-readable and remains usable without Academia OS or any AI agent.
 
-If you received the repository, the easiest entry point is:
+## Desktop entry points
+
+Modern frontend development:
+
+```bash
+cd frontend
+npm install
+npm run typecheck
+npm run build
+```
+
+Compatibility app:
 
 ```bash
 python3 desktop/app.py
 ```
 
-On macOS, a clickable application can be built with:
-
-```bash
-python3 desktop/build_macos_app.py
-open 'dist/Academic OS.app'
-```
-
-The app's setup screen can look for an existing University folder, detect the computer's time zone, create or attach to a workspace, and show the local dashboard. It uses the same bootstrapper and verification logic described below.
+The setup/settings screen loads the existing profile when present. It does not silently recreate the workspace. Structural changes show an impact summary first.
 
 ## Required manual steps
 
-1. Verify the folder structure with:
+1. Verify the local installation:
 
    ```bash
    python3 installer/verify.py {{INSTALL_ROOT}}/profile.json
    ```
 
-2. Review `{{INSTALL_ROOT}}/generated_cron_jobs.json` and `{{INSTALL_ROOT}}/install_cron.sh`.
-3. Authorize selected Google services directly in the user's own account. Do not send credentials to the builder.
-4. Log into `{{SCHOOL_PORTAL}}` manually in the user's visible browser if the school-portal workflow is enabled.
+2. Review the profile and generated job specifications. Hermes scheduling is optional and should only be enabled if the user explicitly wants the Hermes adapter.
+3. Authorize selected Google services directly in the user’s own account, if enabled. Never send credentials to the builder or an agent.
+4. Log into any school site manually in the user’s chosen browser profile. Browser access is optional and read-only.
 5. Add authoritative course material only after confirming the course identity.
-6. Keep original syllabi, instructions, rubrics, and submissions preserved.
+6. Keep original syllabi, instructions, rubrics, and other academic sources preserved.
 
 ## Migration phase
 
@@ -56,15 +60,9 @@ If the recipient wants a fresh folder but has older University material, use **I
 
 To do nothing, close the migration window. The old folder remains available.
 
-## Enabling local automation
+## Optional automation
 
-After review, run:
-
-```bash
-sh {{INSTALL_ROOT}}/install_cron.sh
-```
-
-The generated commands use local delivery only. They do not copy the builder's Telegram, email, account, or chat destination.
+Academia OS core exposes local job specifications and the retryable inbox lifecycle. If Hermes is explicitly enabled, the optional adapter can translate those specifications into Hermes commands. No core workflow requires Hermes, cron, a messaging platform, or a school account.
 
 ## Important boundaries
 

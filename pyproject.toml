@@ -1,8 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "academic-os-core"
-version = "0.1.0"
-description = "Reusable local academic operating system templates and installer"
+dynamic = ["version"]
+description = "Local-first, agent-neutral academic operating system"
+readme = "README.md"
 requires-python = ">=3.11"
+license = {file = "LICENSE"}
+authors = [{name = "Academia OS contributors"}]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[project.scripts]
+academia = "academia_os.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "academia_os.version.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["academia_os*", "installer*", "desktop*", "adapters*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

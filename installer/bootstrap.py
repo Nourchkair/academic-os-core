@@ -17,7 +17,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from installer.core import initialize_installation, load_manifest, validate_manifest
-from desktop.model import detect_local_timezone, discover_academic_folders, semester_suggestions
+from academia_os.discovery import discover_academic_folders
+from academia_os.semester import resolve_current_semester, semester_suggestions
+from academia_os.timezones import detect_local_timezone
 
 
 def _ask(label: str, default: str = "") -> str:
@@ -36,7 +38,7 @@ def _yes_no(label: str, default: bool = False) -> bool:
 
 def _choose_academic_root() -> str:
     candidates = discover_academic_folders()
-    default_root = str(Path.home() / "Desktop" / "University")
+    default_root = str(Path.home() / "Desktop" / "University OS")
     if not candidates:
         return _ask("Where should your University folder live?", default_root)
     print("\nI found these likely academic folders:")
@@ -56,20 +58,21 @@ def interactive_manifest() -> dict[str, Any]:
     print(f"I detected your computer's time zone as {detected_timezone}.")
     timezone = _ask("Time zone (press Enter to use the detected one)", detected_timezone)
     install = str(Path.home() / ".academic-os")
-    hermes = str(Path.home() / ".hermes")
+    current_semester = resolve_current_semester(timezone_name=timezone)
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "student": {
             "name": _ask("Student name"),
             "institution": _ask("Institution"),
             "program": _ask("Program/faculty", "Not yet specified"),
         },
         "academic": {
-            "semester": _ask("Current semester", semester_suggestions()[0]),
+            "semester": _ask("Current semester", current_semester),
             "timezone": timezone,
             "root_directory": root,
             "school_portal": _ask("School portal name", "Not yet specified"),
         },
+        "runtime": {"install_directory": install},
         "preferences": {
             "explanation_style": _ask("Explanation style", "detailed"),
             "preferred_format": _ask("Preferred format", "markdown"),
@@ -88,8 +91,22 @@ def interactive_manifest() -> dict[str, Any]:
             "inbox_processor_enabled": _yes_no("Enable inbox processor job", True),
             "inbox_interval_minutes": int(_ask("Inbox polling interval in minutes", "5")),
         },
-        "browser": {"name": "auto", "user_data_dir": "", "profile_directory": ""},
-        "hermes": {"home_directory": hermes, "profile": "default", "install_directory": install},
+        "acquisition": {
+            "manual_import_enabled": True,
+            "watched_folders": [],
+            "browser_companion_enabled": False,
+            "browser_access_enabled": False,
+            "advanced_browser_enabled": False,
+            "allowed_sites": [],
+        },
+        "privacy": {"browser_access_enabled": False, "allowed_sites": [], "dedicated_profile_recommended": True},
+        "browser": {"name": "auto", "user_data_dir": "", "profile_directory": "", "access_enabled": False, "allowed_sites": []},
+        "agents": {
+            "hermes": {"enabled": _yes_no("Enable optional Hermes adapter", False), "profile": "default", "home_directory": str(Path.home() / ".hermes")},
+            "codex": {"enabled": False},
+            "claude": {"enabled": False},
+            "chatgpt": {"enabled": False},
+        },
     }
     return validate_manifest(manifest)
 

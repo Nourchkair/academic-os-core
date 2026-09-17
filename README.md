@@ -1,76 +1,152 @@
-# Academic OS Core
+# Academia OS
 
-Reusable local academic operating system for students. This repository contains the portable rules, blank University/course templates, parameterized runtime scripts, and a non-destructive onboarding wizard.
+Academia OS is a local-first academic operating system for a student’s computer. It organizes a human-readable University workspace, keeps provenance and uncertainty visible, provides a durable review/activity model, and exposes a stable local CLI/API contract for any authorized agent.
 
-It does **not** contain anyone's academic files, browser profile, sessions, memories, OAuth tokens, passwords, API keys, Telegram/chat destinations, or live cron state.
+It is **not** a Hermes product. Hermes is one optional adapter. Academia OS works without Hermes, Codex, ChatGPT/Work, Claude, browser automation, or a school account connection.
 
-## Quick start
+## What changed in the agent-neutral architecture
 
-From a clone of this repository:
-
-```bash
-python3 installer/bootstrap.py
+```text
+Hermes / Codex / ChatGPT / Claude / future agents
+                         │ optional adapters
+                         ▼
+              Academia OS interface (CLI / Tauri bridge)
+                         │
+                         ▼
+              academia_os core and local workspace
+              ├── human-readable files
+              ├── .academia indexes/state
+              └── proposals → approval → execute → verify → activity
 ```
 
-The wizard asks for identity, institution, semester, local folder, preferences, and optional integration choices. It never asks for passwords, tokens, cookies, or MFA codes.
+The core owns configuration, workspace discovery, semesters, courses, sources, provenance, source verification, review items, activity, processing state, migration, acquisition metadata, and action policy. It does not import Hermes.
 
-For a non-interactive setup, copy `config/manifest.example.json`, edit it, and run:
+## Install the core locally
 
-```bash
-python3 installer/bootstrap.py --manifest /path/to/profile.json
-python3 installer/verify.py /path/to/generated-install/profile.json
-```
-
-## What gets created
-
-The bootstrapper creates two separated locations:
-
-1. The user's academic root, such as `~/Desktop/University/`, containing blank rules, semester shell, and course template.
-2. The user's local runtime directory, normally `~/.academic-os/`, containing the profile, parameterized scripts, generated cron specifications, and handoff guide.
-
-Hermes integration files are copied into the configured Hermes home only when the user runs the bootstrapper. Existing differing files are never overwritten automatically.
-
-The wizard offers two workspace choices:
-
-- **Create a brand-new workspace** — starts in a new or empty location such as `~/Desktop/University OS`.
-- **Use an existing workspace** — attaches only to a recognized Academic OS folder and fills missing files without overwriting personal content.
-
-After a fresh setup, **Import older University material** opens a migration phase. The user can find or browse to a messy legacy folder, preview semester-aware destinations, select specific files, copy them safely by default, or explicitly move them after hash verification. Files with unclear semester/course evidence go to an intake/archive area for review. The old folder can always be left untouched.
-
-## First-use workflow
-
-1. Install or verify Hermes on the user's computer.
-2. Run the bootstrapper or open the desktop app.
-3. Run the generated verification command.
-4. Review `HANDOFF.md` and `generated_cron_jobs.json`.
-5. Authorize Google services directly in the user's own browser/account.
-6. Log into the school portal manually in the user's visible browser.
-7. Add syllabi and initial course documents to confirmed course inboxes.
-8. If older material exists, use the migration phase and review its plan.
-9. Run the generated local cron installer only after reviewing it.
-
-## Runtime boundaries
-
-- Original material is preserved before interpretation.
-- Unknown course facts remain unknown instead of being invented.
-- Calendar writes require user confirmation and duplicate checks.
-- School-portal automation is read-only and bounded to acquisition/handoff.
-- Credentials are handled by the user's own OAuth/browser flows, not by this repository.
-- Generated summaries and dashboards are not citation endpoints.
-
-## Desktop app
-
-The repository also includes a native local desktop wrapper:
+Requirements: Python 3.11+.
 
 ```bash
-python3 desktop/app.py
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+academia --help
 ```
 
-It provides the friendly onboarding flow, folder discovery, automatic time-zone detection, local dashboard, course creation, migration phase, verification, and quick links to the University folder and Hermes. On macOS, build a clickable app bundle with:
+The first-use wizard remains available through the compatibility installer:
 
 ```bash
-python3 desktop/build_macos_app.py
-open 'dist/Academic OS.app'
+python -m installer.bootstrap --manifest config/manifest.example.json
 ```
 
-The desktop app reuses the same installer/core and never stores credentials. See `desktop/README.md`.
+A generated profile uses schema version 2, resolves an actual semester such as `Fall 2026`, keeps browser access off by default, and does not require Hermes. Existing schema-version-1 profiles are migrated non-destructively when read.
+
+## Universal local interface
+
+Agents should request structured context through the CLI rather than parsing dozens of Markdown files:
+
+```bash
+academia status --json
+academia workspace --json
+academia courses --json
+academia course "POL 2103 - Politics" --json
+academia today --json
+academia tasks --json
+academia review --json
+academia inbox --json
+academia activity --json
+academia agents --json
+academia capabilities --json
+```
+
+Use `--profile /path/to/profile.json` when the profile is not at `~/.academic-os/profile.json`.
+
+Settings use a preview/apply model:
+
+```bash
+academia settings show --json
+academia settings update --set student.name="New name" --json
+academia settings update --set student.name="New name" --apply --json
+```
+
+Workspace root, runtime directory, and semester changes require `--approve-structural` and are never silently rebuilt or moved.
+
+## Workspace and readable files
+
+The configured academic root remains the source of truth for the user. It contains semesters, course folders, Markdown status files, readings, notes, and imported material. `.academia/` stores rebuildable `index.json`, processing records, review items, activity events, and action proposals. A user can inspect and use the workspace without Academia OS.
+
+The processing lifecycle is explicit:
+
+```text
+DETECTED → PENDING → PROCESSING → VERIFIED → ACKNOWLEDGED
+                                  └→ FAILED → retry → PENDING
+```
+
+A scan never acknowledges work. Stale processing leases return to retryable state. Only verified work can be acknowledged.
+
+## Import and acquisition
+
+Academia OS remains useful with no browser access:
+
+1. **Manual import** — the user downloads/selects PDF, DOCX, PPTX, text, HTML, or other normal academic files; originals are preserved and the imported copy enters review/intake.
+2. **Watched folders** — configured local directories such as `Downloads/School` are scanned for new files.
+3. **Browser companion** — architecture only for now. A future companion will support explicit actions such as “Send to Academia OS,” “Save reading,” and “Import this page.”
+4. **Advanced browser access** — optional and off by default.
+
+The current capability report is honest: manual imports and watched folders are supported; Chromium is limited to optional visible handoff; Firefox and Safari are planned, not claimed as connected. The user may choose Chrome, Firefox, Safari, or another profile. A dedicated school/research profile is recommended for privacy but not required. Domain allow-lists narrow intended access but are not a security guarantee.
+
+For readings, prefer legitimate library, Omni/OpenAthens, publisher, DOI/open-access, institutional, or author-released access. Discovery-only sources do not authorize downloading an unclear copy. Never pay without explicit confirmation, and never silently substitute an edition.
+
+## Safety and privacy
+
+- Originals are preserved; copies and collision-safe names are preferred.
+- Destructive changes require an approved proposal.
+- Calendar changes require approval and duplicate checking.
+- No academic submission, school-account message, payment, or authentication action is implemented or permitted.
+- Passwords, MFA codes, cookies, session tokens, and hidden secrets are not read or stored.
+- School/browser access is optional and read-only in the current architecture.
+- Local health verification is separate from safe-to-share auditing:
+
+```bash
+python -m installer.verify /path/to/profile.json
+python -m installer.verify /path/to/profile.json --share-audit /path/to/export
+```
+
+An email address or local path can be normal in a private workspace; it should be reported by the share audit, not treated as a broken local installation.
+
+## Review and activity
+
+Uncertain source matches, deadline conflicts, and approval-required changes are durable structured Review items under `.academia/review.json`. Activity events are append-only JSON lines under `.academia/activity.jsonl`, with human-readable fields such as title, course, source, confidence, authority, and action. The desktop Home/Review views consume these models rather than hardcoded notice text.
+
+## Desktop application
+
+The modern frontend lives under `frontend/`:
+
+```bash
+cd frontend
+npm install
+npm run typecheck
+npm run build
+npm run dev
+```
+
+It is a React + TypeScript application with a Tauri 2 shell and a typed bridge to the `academia` CLI. It includes Home, Courses, Tasks, Library, Review, and Settings views with local-data/error empty states. The Tauri bundle is currently a development foundation (`bundle.active` is false); macOS signing, notarization, and sidecar packaging remain release work. The old Tkinter app remains as a compatibility fallback while the new shell matures.
+
+## Optional agents
+
+- `adapters/hermes/` contains optional Hermes detection and job translation.
+- Codex, Claude, and ChatGPT adapters are represented as planned/configurable states only; no deep integration is falsely claimed.
+- Agents should read `AGENTS.md` and use `academia ... --json`.
+
+## Development and tests
+
+```bash
+python3 -m pytest tests/ -q
+python3 -m compileall academia_os installer desktop adapters
+cd frontend && npm run typecheck && npm run build
+```
+
+The canonical Python version is `academia_os/version.py`. The frontend/Tauri package metadata is checked against that value in CI.
+
+## Backward compatibility
+
+The existing installer, migration engine, and Tkinter app remain available. Existing v1 profiles migrate into v2 when loaded; the legacy `hermes` object is retained only as a compatibility alias. New profiles use `runtime`, `agents`, `acquisition`, and `privacy` sections. Migration and imports are copy-first and collision-safe; existing academic files are not silently moved or overwritten.

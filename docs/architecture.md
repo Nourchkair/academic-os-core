@@ -1,33 +1,56 @@
 # Architecture
 
-```text
-Reusable GitHub core
-├── templates/University/          blank academic workspace
-├── runtime/skills/                reusable Academic OS agent skill
-├── runtime/scripts/               parameterized local automation
-├── installer/core.py              manifest validation + safe generation
-├── installer/migration.py         previewable copy/move migration engine
-├── installer/bootstrap.py         interactive/non-interactive setup
-├── installer/verify.py             post-install checks
-└── desktop/                        native Tkinter UI + macOS app builder
+## Runtime layers
 
-Per-user local instance
-├── University/                    private academic data
-├── ~/.academic-os/                profile, scripts, jobs, state references
-└── ~/.hermes/                     user-authorized Hermes runtime/integrations
+```text
+frontend/                         React + TypeScript student-facing UI
+frontend/src-tauri/                optional Tauri 2 desktop shell
+         │ typed command bridge
+academia_os/                       agent-neutral core and CLI
+├── config.py                      canonical v2 config + migrations
+├── semester.py                    calendar-aware resolution
+├── discovery.py                   workspace discovery
+├── workspace.py                   rebuildable index/projection
+├── provenance.py                  labels + source verification
+├── review.py                      durable Review Queue
+├── activity.py                    durable append-only activity
+├── processing.py                  retryable inbox lifecycle
+├── actions.py                     proposal/approval policy
+├── acquisition.py                 manual/watched acquisition
+├── browser.py                     browser-neutral metadata/policy
+├── settings.py                    diff + safe update model
+└── cli.py                         universal local interface
+         │ optional adapters
+adapters/
+└── hermes/                        Hermes detection and translation only
+installer/                         bootstrap, templates, migration, health audit
+runtime/                           compatibility scripts copied into installations
+desktop/                           legacy Tkinter compatibility frontend
+templates/University/              readable academic workspace template
 ```
 
-The repository is the source of reusable behavior. The generated instance is the source of personal configuration. Existing personal files are never overwritten by the bootstrapper. The desktop app calls the same installer/model functions rather than introducing a second state store.
+## Source of truth and projections
 
-## Migration model
+The user’s workspace remains the human-readable source of truth. `.academia/` is local structured state: indexes, review/activity records, processing records, and proposals. Indexes can be rebuilt from the workspace; they are not a database dump that makes files inaccessible.
 
-A fresh workspace can import material from an explicitly selected legacy folder. The migration engine records hashes and proposed destinations in `~/.academic-os/migration/`, uses semester names only when they appear in the source path, routes unknown items to current-semester `00_INBOX/LEGACY_IMPORT`, copies by default, and verifies every copy before an explicit move. AI can review the generated plan but cannot perform the move itself.
+## Configuration
 
-## Cron model
+`academia_os.config` is the only canonical configuration model. It owns schema version 2, defaults, validation, atomic serialization, and v1 migration. The installer, CLI, desktop compatibility app, and adapters consume it. Hermes is an optional `agents.hermes` section, not a required core path.
 
-The bootstrapper generates two local-only Hermes job definitions:
+Structural settings use `academia_os.settings.update_config()`, which returns a field-level diff and refuses root/runtime/semester changes unless explicitly approved. The desktop UI displays an impact summary before initializing missing structure.
 
-- Daily Brief: reads the current academic root and writes the active semester dashboard.
-- Inbox Processor: runs the cheap metadata gate before asking the agent to process changed inbox files.
+## Reliability
 
-The generated `install_cron.sh` is intentionally separate from initialization so the recipient can review schedules and paths before enabling them.
+`academia_os.processing.ProcessingStore` persists each source signature and lifecycle status. Detection creates `PENDING` work; processing obtains a lease; verification must succeed before acknowledgement. Failures retain a reason and can be retried. The runtime inbox gate only detects/reports; it never acknowledges.
+
+## Acquisition
+
+Core acquisition normalizes manual files, watched-folder candidates, and browser metadata. Browser implementations are adapters. Current supported browser behavior is limited to optional visible Chromium handoff; Firefox, Safari, and a companion extension remain planned. Browser access defaults off and should not read credentials or browser secrets.
+
+## Action safety
+
+`ActionStore` represents proposed, approved, executed, verified, rejected, and failed actions. School submissions, school-account messaging, payments, and authentication are hard-prohibited. Calendar, file, and configuration changes require explicit approval according to their policy.
+
+## Optional Hermes boundary
+
+Core code may run with no Hermes executable or home directory. `adapters/hermes/` translates neutral job descriptions only when configured. The old generated cron script remains a compatibility path for v1 Hermes-enabled profiles; it is not part of the core installation contract.

@@ -1,26 +1,31 @@
-# Brightspace Acquisition Reference
+# Optional school-site acquisition reference
 
-## Safe retrieval sequence
+This reference applies only when the user explicitly enables a supported acquisition adapter. Academia OS does not require school-site access.
 
-For a request such as `Fetch Brightspace — [course] — Week [N]`:
+## Preferred acquisition levels
 
-1. Resolve the exact course folder and read its `README.md`, `USER_OVERRIDES.md`, `Course_Context.md`, and `Course_Status.md`.
-2. Run `python3 ~/.hermes/scripts/academic_os_brightspace_browser.py ensure`. Confirm the JSON says `real_profile_ready`, `real_profile: true`, `clean_hermes_profile: false`, and identifies the pinned supported Chromium-family browser/profile. Never continue with a clean Hermes browser. If the verifier cannot attach to the pinned real profile, stop and report the failure.
-3. Snapshot `~/Downloads` before opening Brightspace. Use a timestamped manifest outside the academic root.
-4. Navigate to the authenticated the configured institution Brightspace session and verify institution, course code/title, semester, and requested week/module before downloading.
-5. If redirected to the institution sign-in sign-in, stop at the authentication boundary. Never enter, request, store, or record credentials or MFA codes. Leave the visible local browser at the login screen for the user. After the user reports authentication complete, rerun the real-profile preflight and verify the same profile before resuming.
-6. After retrieval, compare Downloads against the pre-retrieval manifest. Only newly created or changed relevant academic files may be handed off.
-7. Use the deterministic handoff utility when available:
-   `python3 ~/.hermes/scripts/academic_os_brightspace_handoff.py snapshot`
-   then
-   `python3 ~/.hermes/scripts/academic_os_brightspace_handoff.py handoff --before <manifest> --course-dir <course> --request '<request>'`
-8. The utility uses SHA-256 identity checks, skips identical files, preserves changed versions with collision-safe names, and places accepted files only in the exact course `00_INBOX/`. It does not classify or sort them.
-9. Leave unsupported, ambiguous, or pre-existing Downloads content untouched. The existing Inbox Processor performs classification and downstream propagation.
+1. **Manual import** — the user downloads/selects the file; Academia OS stages a copy for review and keeps the original.
+2. **Watched folder** — the user configures a local folder such as `Downloads/School`; new files enter the retryable intake flow.
+3. **Browser companion** — planned. It should expose explicit actions such as `Send to Academia OS`, `Save reading`, `Add course page`, and `Import this file/page`.
+4. **Advanced browser adapter** — optional, off by default, and limited by an explicit user-selected profile and site allow-list.
 
-## Verification expectations
+## Safe sequence for any implemented browser adapter
 
-A successful retrieval requires evidence of: authenticated session, exact course/week match, source URL or module identity, files newly created/changed by the request, handoff result, and unchanged duplicate behavior. Verify the rendered page content for the exact course code/title and requested module/topic; do not rely on a successful HTTP navigation or a generic Brightspace URL. Record both the browser-facing profile label and actual profile directory when reporting preflight results, since labels such as `Work` can legitimately use a `Default` directory. Preserve stable course/module/topic IDs and the direct topic URL in provenance records when available. A browser login screen is not evidence of course access or download success. If no file was retrieved, say so explicitly and verify that the target inbox was not modified.
+1. Resolve the exact course folder and inspect its local context/rules.
+2. Confirm the configured browser access policy is enabled and the requested site matches the explicit allow-list.
+3. Let the user authenticate manually if authentication is needed. Never ask for, type, store, or record passwords, MFA codes, cookies, or session tokens.
+4. Verify the rendered page itself contains the exact institution/course/code/semester/module requested. A login page or generic URL is not evidence of access.
+5. Snapshot the relevant local download folder before acquisition and compare after. Only newly created or changed files from the explicit user action may be staged.
+6. Preserve originals, hash-check copies, avoid overwrites, and record normalized metadata: source type, browser/profile label, source URL, acquired-at timestamp, original file, and verification outcome.
+7. Leave ambiguous material in intake/review. Do not invent a course, deadline, edition, or source identity.
 
-## Safety boundary
+## Browser support status
 
-Brightspace is read-only acquisition. Do not submit work, answer quizzes, post, change settings, mark content complete intentionally, delete content, unenroll, or alter account settings. Preserve original files and log only operational metadata; the log and generated summaries are not academic sources.
+- Manual file import: supported.
+- Watched folders: supported.
+- Chromium-family visible handoff: optional supported adapter boundary.
+- Firefox automation: planned, not implemented.
+- Safari automation: planned, not implemented.
+- Browser companion extension: planned, not implemented.
+
+School sites remain read-only. No adapter may submit work, answer quizzes, post messages, change settings, delete content, unenroll, or alter account settings.

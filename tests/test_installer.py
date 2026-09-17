@@ -141,3 +141,19 @@ def test_cron_specs_are_local_and_do_not_use_messaging_destinations(tmp_path: Pa
         assert "telegram" not in json.dumps(spec).lower()
     inbox = next(spec for spec in specs if spec["name"].endswith("Inbox Processor"))
     assert inbox["script"] == "academic_os_inbox_gate.py"
+
+
+def test_hermes_free_installation_only_copies_neutral_runtime(tmp_path: Path) -> None:
+    manifest = sample_manifest(tmp_path)
+    manifest.pop("hermes", None)
+    manifest["schema_version"] = 2
+    manifest["runtime"] = {"install_directory": str(tmp_path / ".academic-os")}
+    manifest["agents"] = {"hermes": {"enabled": False, "profile": "default"}}
+    result = initialize_installation(
+        manifest,
+        template_root=ROOT / "templates" / "University",
+        repo_root=ROOT,
+    )
+    scripts = sorted(path.name for path in (Path(result["install_root"]) / "scripts").glob("*.py"))
+    assert scripts == ["academic_os_inbox_gate.py"]
+    assert not (Path(result["install_root"]) / "scripts" / "academic_os_brightspace_handoff.py").exists()

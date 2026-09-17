@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Academic OS local profile",
+  "title": "Academia OS local profile",
   "type": "object",
-  "required": ["schema_version", "student", "academic", "automation", "hermes"],
+  "required": ["schema_version", "student", "academic", "runtime", "automation", "acquisition", "privacy", "agents"],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
     "student": {
       "type": "object",
       "required": ["name", "institution", "program"],
@@ -19,11 +19,17 @@
       "type": "object",
       "required": ["semester", "timezone", "root_directory"],
       "properties": {
-        "semester": {"type": "string", "minLength": 1},
+        "semester": {"type": "string", "pattern": "^(Winter|Spring|Summer|Fall) [0-9]{4}$"},
         "timezone": {"type": "string", "minLength": 1},
         "root_directory": {"type": "string", "minLength": 1},
         "school_portal": {"type": "string"}
       },
+      "additionalProperties": true
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["install_directory"],
+      "properties": {"install_directory": {"type": "string", "minLength": 1}},
       "additionalProperties": true
     },
     "automation": {
@@ -36,16 +42,28 @@
       },
       "additionalProperties": true
     },
-    "hermes": {
+    "acquisition": {
       "type": "object",
-      "required": ["home_directory", "install_directory"],
       "properties": {
-        "home_directory": {"type": "string", "minLength": 1},
-        "profile": {"type": "string"},
-        "install_directory": {"type": "string", "minLength": 1}
+        "manual_import_enabled": {"type": "boolean"},
+        "watched_folders": {"type": "array", "items": {"type": "string"}},
+        "browser_companion_enabled": {"type": "boolean"},
+        "browser_access_enabled": {"type": "boolean"},
+        "advanced_browser_enabled": {"type": "boolean"},
+        "allowed_sites": {"type": "array", "items": {"type": "string"}}
       },
       "additionalProperties": true
-    }
+    },
+    "privacy": {
+      "type": "object",
+      "properties": {
+        "browser_access_enabled": {"type": "boolean"},
+        "allowed_sites": {"type": "array", "items": {"type": "string"}},
+        "dedicated_profile_recommended": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "agents": {"type": "object", "additionalProperties": {"type": "object"}}
   },
   "additionalProperties": true
 }

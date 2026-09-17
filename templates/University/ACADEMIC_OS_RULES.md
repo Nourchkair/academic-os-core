@@ -106,8 +106,8 @@ Build week summaries, active-recall questions, weak-area records, and exam knowl
 
 ## 10. School-portal acquisition boundary
 
-The browser helper may verify and attach to the user's real visible Chromium-family profile and the handoff utility may move newly downloaded supported files into a verified course inbox. The workflow is read-only with respect to the school portal. It must never enter or store passwords/MFA codes, read cookies, submit assignments, answer quizzes, post messages, change settings, or delete content.
+The acquisition adapter may use the user's explicitly selected visible browser profile when configured. Manual import and watched folders remain fully supported without browser access. The current browser implementation is limited to optional visible Chromium-family handoff; Firefox, Safari, and a companion extension are future adapters. The workflow is read-only with respect to school sites. It must never enter or store passwords/MFA codes, read cookies, submit assignments, answer quizzes, post messages, change settings, or delete content.
 
 ## 11. Safe automation
 
-The inbox gate must run before the agent. It must ignore `COURSE_TEMPLATE`, persist signatures outside the academic root, and emit no wake when nothing changed. The processor must preserve uncertain files and verify side effects. Scheduled jobs must use the configured local paths and local delivery only.
+The inbox gate runs before any processor. It ignores `COURSE_TEMPLATE`, persists retryable processing records under the workspace's rebuildable `.academia/` state, and emits no wake when nothing changed. The processor must preserve uncertain files, verify side effects before acknowledgement, and record failures for retry. Scheduled jobs must use configured local paths and local delivery only.

@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "student": {
     "name": "Example Student",
     "institution": "Example University",
@@ -8,8 +8,11 @@
   "academic": {
     "semester": "Fall 2026",
     "timezone": "UTC",
-    "root_directory": "~/Desktop/University",
-    "school_portal": "Brightspace"
+    "root_directory": "~/Desktop/University OS",
+    "school_portal": "Not yet specified"
+  },
+  "runtime": {
+    "install_directory": "~/.academic-os"
   },
   "preferences": {
     "explanation_style": "detailed",
@@ -29,14 +32,34 @@
     "inbox_processor_enabled": true,
     "inbox_interval_minutes": 5
   },
+  "acquisition": {
+    "manual_import_enabled": true,
+    "watched_folders": [],
+    "browser_companion_enabled": false,
+    "browser_access_enabled": false,
+    "advanced_browser_enabled": false,
+    "allowed_sites": []
+  },
+  "privacy": {
+    "browser_access_enabled": false,
+    "allowed_sites": [],
+    "dedicated_profile_recommended": true
+  },
   "browser": {
     "name": "auto",
     "user_data_dir": "",
-    "profile_directory": ""
+    "profile_directory": "",
+    "access_enabled": false,
+    "allowed_sites": []
   },
-  "hermes": {
-    "home_directory": "~/.hermes",
-    "profile": "default",
-    "install_directory": "~/.academic-os"
+  "agents": {
+    "hermes": {
+      "enabled": false,
+      "profile": "default",
+      "home_directory": ""
+    },
+    "codex": {"enabled": false},
+    "claude": {"enabled": false},
+    "chatgpt": {"enabled": false}
   }
 }

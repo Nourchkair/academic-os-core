@@ -42,7 +42,7 @@ Search Calendar for an equivalent before any create/update. Avoid duplicates. Ca
 
 ## School-portal acquisition
 
-If the configured school portal is Brightspace, use the real-profile browser preflight and the Downloads snapshot/handoff utility from the generated install directory. The browser workflow is read-only: never enter or store passwords/MFA codes, read cookies, submit work, answer quizzes, post messages, or change settings. The handoff only moves new/changed supported downloads into this course's `00_INBOX`; the Inbox Processor owns classification.
+If school-site acquisition is explicitly enabled, use the selected visible browser profile through the configured acquisition adapter. Manual import and watched folders work without browser access. The current browser workflow is limited to optional visible Chromium-family handoff; Firefox, Safari, and a browser companion are future adapters. The workflow is read-only: never enter or store passwords/MFA codes, read cookies, submit work, answer quizzes, post messages, or change settings. The handoff only moves new/changed supported downloads into this course's `00_INBOX`; the processing lifecycle owns classification and verification.
 
 ## Standard commands
 

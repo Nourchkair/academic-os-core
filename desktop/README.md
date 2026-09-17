@@ -1,54 +1,49 @@
-# Desktop app
+# Desktop applications
 
-The desktop app is a native Tkinter wrapper around the same Academic OS core. It does not introduce a second database or a second configuration system.
+Academia OS now has two desktop surfaces:
 
-## Run locally
+1. **Modern frontend foundation** — React + TypeScript under `frontend/`, with a Tauri 2 shell and typed bridge to the universal `academia` CLI.
+2. **Tkinter compatibility app** — `desktop/app.py`, retained while the modern shell reaches feature parity. It uses the same canonical config/core and is not authoritative over a second database.
+
+## Modern frontend development
+
+```bash
+cd frontend
+npm install
+npm run typecheck
+npm run build
+npm run dev
+```
+
+The browser preview intentionally shows a connection state if the local Tauri/CLI bridge is absent. It does not fabricate course data. The packaged shell calls the installed `academia` executable through a narrow allow-listed command bridge.
+
+Native packaging is currently a development foundation. `frontend/src-tauri/tauri.conf.json` has `bundle.active: false`; signing, notarization, Python/CLI sidecar packaging, and release installers remain future work.
+
+## Legacy compatibility app
 
 From the repository root:
 
 ```bash
 python3 desktop/app.py
-```
-
-For a headless health check:
-
-```bash
 python3 desktop/app.py --print-dashboard --profile ~/.academic-os/profile.json
 ```
 
-## Build a clickable macOS app
+It can still discover workspaces, create or attach safely, import legacy files through the migration phase, show the dashboard, edit existing settings, and run health verification. Settings load the existing profile rather than starting from an empty wizard. Structural changes show a diff/impact confirmation and never silently rebuild or overwrite the workspace.
 
-On macOS:
+## Development macOS bundle
 
 ```bash
 python3 desktop/build_macos_app.py
 open 'dist/Academic OS.app'
 ```
 
-The bundle contains the reusable templates and installer but leaves personal data in the user's local `University` and `~/.academic-os` directories. It uses the recipient's installed Python 3 and does not embed credentials.
+This is a lightweight development bundle around the local Python compatibility app. It does not require Hermes and does not embed credentials or academic data. The modern Tauri bundle is a separate path.
 
-## What the app can do
+## Product views in the modern shell
 
-- Find likely existing University/academic folders
-- Explain why a folder was selected
-- Browse for or create a local workspace
-- Detect the computer's IANA time zone
-- Offer friendly semester/time-zone choices
-- Create or attach to an Academic OS workspace without overwriting differing files
-- Show courses, inbox count, semester, and daily dashboard preview
-- Open the local University folder and dashboard
-- Add a course from the safe blank template
-- Import older University material in a reviewable migration phase
-- Find likely legacy folders without scanning the whole computer
-- Preview semester-aware destinations before importing
-- Select specific files, copy them safely, or explicitly move them after hash verification
-- Open a migration plan for AI/human review without allowing direct AI moves
-- Run installation verification
-- Open Hermes in Terminal
-- Show which integrations are prepared without claiming that authorization succeeded
-
-## Migrating an older University folder
-
-After creating a fresh workspace, open **Import older University material** from the dashboard. Choose or find the old folder, scan it, and review the exact destination of each file. The default action is **Copy selected safely**; the old folder remains intact. **Move selected** is explicit and removes only files whose copied destination hash matches the source hash. Existing destinations are never overwritten.
-
-Semester names found in original folder paths are used only as routing evidence. Files with no clear semester are placed in the current semester's `00_INBOX/LEGACY_IMPORT` for review. The generated `migration/MIGRATION_REVIEW.md` can be opened for AI assistance, but AI must propose classifications rather than execute moves.
+- **Home** — today’s academic focus, open tasks, attention queue, courses, and recent activity.
+- **Courses** — course state and intake/review signals rather than a raw folder tree.
+- **Tasks** — structured work with source and confidence labels.
+- **Library** — readings, syllabi, notes, references, and imported material entry points.
+- **Review** — durable uncertain/approval-required items plus activity history.
+- **Settings** — workspace, browser/acquisition, and optional agent connection summaries; raw paths and runtime details remain advanced concepts.

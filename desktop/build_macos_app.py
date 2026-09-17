@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
-"""Build a lightweight clickable Academic OS.app bundle on macOS.
+"""Build a lightweight clickable Academia OS.app bundle on macOS.
 
-The bundle keeps the same local Python implementation and templates. It does
-not embed credentials or academic data. The recipient still needs Python 3 and
-Hermes installed on their own computer.
+The bundle keeps the local Python compatibility frontend and templates. It does not embed credentials, academic data, or require Hermes; the modern Tauri frontend is built separately. The recipient still needs Python 3 for this development bundle.
 """
 from __future__ import annotations
 
@@ -11,15 +9,19 @@ import os
 import plistlib
 import shutil
 import stat
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from academia_os.version import __version__
 DIST = REPO_ROOT / "dist"
-APP = DIST / "Academic OS.app"
+APP = DIST / "Academia OS.app"
 RESOURCE_ROOT = APP / "Contents" / "Resources" / "academic-os-core"
 MACOS_ROOT = APP / "Contents" / "MacOS"
 
-EXCLUDED_PARTS = {".git", ".pytest_cache", "__pycache__", "dist", ".venv"}
+EXCLUDED_PARTS = {".git", ".pytest_cache", "__pycache__", "dist", ".venv", "node_modules", ".hermes", ".mypy_cache"}
 
 
 def copy_repository() -> None:
@@ -38,7 +40,7 @@ def copy_repository() -> None:
 
 def write_launcher() -> None:
     MACOS_ROOT.mkdir(parents=True, exist_ok=True)
-    launcher = MACOS_ROOT / "AcademicOS"
+    launcher = MACOS_ROOT / "AcademiaOS"
     launcher.write_text(
         """#!/bin/sh
 set -eu
@@ -62,13 +64,13 @@ def write_info_plist() -> None:
     contents = APP / "Contents"
     contents.mkdir(parents=True, exist_ok=True)
     plist = {
-        "CFBundleDisplayName": "Academic OS",
-        "CFBundleExecutable": "AcademicOS",
-        "CFBundleIdentifier": "local.academic-os.desktop",
-        "CFBundleName": "Academic OS",
+        "CFBundleDisplayName": "Academia OS",
+        "CFBundleExecutable": "AcademiaOS",
+        "CFBundleIdentifier": "com.academia.os.desktop",
+        "CFBundleName": "Academia OS",
         "CFBundlePackageType": "APPL",
-        "CFBundleShortVersionString": "0.2.0",
-        "CFBundleVersion": "0.2.0",
+        "CFBundleShortVersionString": __version__,
+        "CFBundleVersion": __version__,
         "LSMinimumSystemVersion": "12.0",
         "NSHighResolutionCapable": True,
     }
