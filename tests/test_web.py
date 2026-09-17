@@ -476,7 +476,25 @@ def test_dashboard_parser_and_launcher_forward_loopback_options(monkeypatch: pyt
 
     monkeypatch.setattr(cli, "serve_dashboard", fake_serve_dashboard)
     assert cli.main(["dashboard", "--host", "localhost", "--port", "8877"]) == 0
-    assert calls == [{"host": "localhost", "port": 8877, "open_browser": False, "profile": None}]
+    assert calls == [{"host": "localhost", "port": 8877, "open_browser": True, "profile": None}]
+
+
+def test_bare_academia_command_opens_the_dashboard(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(cli, "serve_dashboard", lambda **kwargs: calls.append(kwargs))
+
+    assert cli.main([]) == 0
+
+    assert calls == [{"host": "127.0.0.1", "port": 8765, "open_browser": True, "profile": None}]
+
+
+def test_dashboard_can_run_without_opening_a_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(cli, "serve_dashboard", lambda **kwargs: calls.append(kwargs))
+
+    assert cli.main(["dashboard", "--no-open"]) == 0
+
+    assert calls == [{"host": "127.0.0.1", "port": 8765, "open_browser": False, "profile": None}]
 
 
 def test_dashboard_parser_rejects_non_loopback_at_launch(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

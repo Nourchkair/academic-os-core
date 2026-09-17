@@ -99,18 +99,29 @@ Use `--profile /path/to/profile.json` when the profile is not at `~/.academic-os
 
 ### Browser dashboard
 
-Build the frontend first, then start the local-only browser dashboard:
+Build the frontend first, then start the local-only browser dashboard. The shortest command opens it directly:
 
 ```bash
 cd frontend
 npm install
 npm run build
 cd ..
-academia dashboard
-academia dashboard --port 8765 --open
+academia
 ```
 
-The dashboard transport binds to loopback only (`127.0.0.1` by default); it has no authentication, cookies, or remote-network access. It serves the built `frontend/dist` files and delegates browser commands to the existing JSON CLI. In browser mode, the Import view uses a native file input or drag/drop and streams the selected bytes to the same local server only; the server stages them temporarily, imports them through the normal copy-first import path, records `browser-upload:<filename>` provenance, and removes the temporary staging file. Native Tauri file and folder pickers remain available in the packaged/development shell. For live frontend development, keep `academia dashboard` running and use `npm run dev` in another terminal; Vite proxies `/api` to the local dashboard.
+The explicit equivalent is:
+
+```bash
+academia dashboard
+```
+
+Both commands start the local server and open the dashboard in the default browser. To start the server without opening a browser—for example, from a script or while using a different browser—use:
+
+```bash
+academia dashboard --no-open
+```
+
+The dashboard transport binds to loopback only (`127.0.0.1` by default); it has no authentication, cookies, or remote-network access. It serves the built `frontend/dist` files and delegates browser commands to the existing JSON CLI. In browser mode, the Import view uses a native file input or drag/drop and streams the selected bytes to the same local server only; the server stages them temporarily, imports them through the normal copy-first import path, records `browser-upload:<filename>` provenance, and removes the temporary staging file. Native Tauri file and folder pickers remain available in the packaged/development shell. For live frontend development, keep `academia dashboard --no-open` running and use `npm run dev` in another terminal; Vite proxies `/api` to the local dashboard.
 
 Settings use a preview/apply model:
 

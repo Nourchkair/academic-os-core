@@ -22,7 +22,7 @@ from .semester import resolve_current_semester
 from .settings import preview_config, update_config
 from .workspace import build_workspace_snapshot
 from .workflow import ApprovalWorkflow
-from .web import serve_dashboard, validate_loopback_host
+from .web import DEFAULT_HOST, DEFAULT_PORT, serve_dashboard, validate_loopback_host
 from installer.core import initialize_installation
 from installer.migration import MigrationPlan, build_migration_plan, ensure_safe_text_target, execute_migration_plan, load_migration_plan, safe_atomic_write_text, validate_migration_source, write_migration_plan
 from .version import __version__
@@ -311,7 +311,10 @@ def _migration(args: argparse.Namespace) -> dict[str, Any]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="academia", description="Agent-neutral local Academia OS interface")
     parser.add_argument("--profile", type=Path, help="Path to the local Academia OS profile.json")
-    sub = parser.add_subparsers(dest="command", required=True)
+    # A bare `academia` command is the friendly dashboard shortcut.  Keeping
+    # subparsers optional lets `main()` supply that default without changing
+    # the explicit machine-facing command surface.
+    sub = parser.add_subparsers(dest="command")
 
     for name in ("status", "courses", "today", "tasks", "inbox", "activity", "agents", "capabilities"):
         command = sub.add_parser(name)
@@ -365,9 +368,11 @@ def build_parser() -> argparse.ArgumentParser:
     watched = sub.add_parser("watch")
     watched.add_argument("--json", action="store_true")
     dashboard = sub.add_parser("dashboard", help="Serve the browser dashboard on the local machine")
-    dashboard.add_argument("--host", default="127.0.0.1", help="Loopback bind host (127.0.0.1, ::1, or localhost)")
-    dashboard.add_argument("--port", type=int, default=8765, help="TCP port; use 0 to select an available test port")
+    dashboard.add_argument("--host", default=DEFAULT_HOST, help="Loopback bind host (127.0.0.1, ::1, or localhost)")
+    dashboard.add_argument("--port", type=int, default=DEFAULT_PORT, help="TCP port; use 0 to select an available test port")
     dashboard.add_argument("--open", action="store_true", dest="open", help="Open the dashboard URL after the server is ready")
+    dashboard.add_argument("--no-open", action="store_false", dest="open", help="Start the server without opening a browser")
+    dashboard.set_defaults(open=True)
     imported = sub.add_parser("import", help="Copy one local file into a selected workspace inbox")
     imported.add_argument("source", type=Path)
     imported.add_argument("--destination", type=Path, required=True, help="Workspace inbox directory; source files are never moved")
@@ -399,6 +404,11 @@ def _human_status(value: dict[str, Any]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command is None:
+        args.command = "dashboard"
+        args.host = DEFAULT_HOST
+        args.port = DEFAULT_PORT
+        args.open = True
     try:
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
