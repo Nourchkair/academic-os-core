@@ -356,6 +356,31 @@ def test_migration_plan_command_writes_plan_and_review_under_runtime_directory(t
     assert value["plan_path"] == str(tmp_path / ".academic-os" / "migration" / "migration-plan.json")
 
 
+def test_migration_plan_rejects_custom_runtime_directory_as_source(tmp_path: Path) -> None:
+    config = minimal_config(tmp_path)
+    runtime_root = tmp_path / "private-cache"
+    config["runtime"]["install_directory"] = str(runtime_root)
+    profile = runtime_root / "profile.json"
+    save_config(profile, config)
+    (runtime_root / "migration").mkdir()
+    (runtime_root / "migration" / "old-plan.json").write_text("runtime state", encoding="utf-8")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(ROOT)
+
+    result = subprocess.run(
+        [sys.executable, "-m", "academia_os", "--profile", str(profile), "migration", "plan", str(runtime_root), "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 2
+    assert "configured runtime directory" in result.stdout
+    assert not (runtime_root / "migration" / "migration-plan.json").exists()
+    assert (runtime_root / "migration" / "old-plan.json").read_text(encoding="utf-8") == "runtime state"
+
+
 def test_migration_status_is_read_only_and_returns_existing_report(tmp_path: Path) -> None:
     source = tmp_path / "Legacy University"
     source.mkdir()
@@ -377,6 +402,45 @@ def test_migration_status_is_read_only_and_returns_existing_report(tmp_path: Pat
     assert value["action"] == "status"
     assert value["report"] == report
     assert {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+
+
+def test_migration_status_rejects_symlinked_report_without_reading_target(tmp_path: Path) -> None:
+    source = tmp_path / "Legacy University"
+    source.mkdir()
+    (source / "notes.txt").write_text("notes", encoding="utf-8")
+    planned = run_cli(tmp_path, "migration", "plan", str(source), "--json")
+    assert planned.returncode == 0, planned.stderr
+    plan_path = Path(json.loads(planned.stdout)["plan_path"])
+    report_path = plan_path.parent / "migration-report.json"
+    protected = tmp_path / "protected-report.json"
+    protected.write_text('{"status": "protected"}\n', encoding="utf-8")
+    report_path.symlink_to(protected)
+
+    result = run_cli(tmp_path, "migration", "status", "--plan", str(plan_path), "--json")
+
+    assert result.returncode == 2
+    assert "symlink" in result.stdout
+    assert report_path.is_symlink()
+    assert protected.read_text(encoding="utf-8") == '{"status": "protected"}\n'
+
+
+def test_migration_status_rejects_symlinked_plan_even_when_target_is_inside_runtime(tmp_path: Path) -> None:
+    source = tmp_path / "Legacy University"
+    source.mkdir()
+    (source / "notes.txt").write_text("notes", encoding="utf-8")
+    planned = run_cli(tmp_path, "migration", "plan", str(source), "--json")
+    assert planned.returncode == 0, planned.stderr
+    plan_path = Path(json.loads(planned.stdout)["plan_path"])
+    real_plan = plan_path.with_name("real-migration-plan.json")
+    plan_path.replace(real_plan)
+    plan_path.symlink_to(real_plan)
+
+    result = run_cli(tmp_path, "migration", "status", "--plan", str(plan_path), "--json")
+
+    assert result.returncode == 2
+    assert "symlink" in result.stdout
+    assert plan_path.is_symlink()
+    assert real_plan.is_file()
 
 
 def test_migration_execute_selects_items_collision_safely_and_preserves_source(tmp_path: Path) -> None:

@@ -30,7 +30,7 @@ from desktop.model import (
     timezone_from_friendly_label,
 )
 from installer.core import initialize_installation, validate_manifest
-from installer.migration import build_migration_plan, execute_migration_plan, write_migration_plan
+from installer.migration import build_migration_plan, ensure_safe_text_target, execute_migration_plan, is_runtime_migration_source, safe_atomic_write_text, validate_migration_source, write_migration_plan
 from installer.verify import verify_installation
 from academia_os.config import load_config, runtime_directory, save_config
 from academia_os.semester import resolve_current_semester
@@ -378,7 +378,12 @@ class AcademicOSApp(tk.Tk):
         root = Path(manifest["academic"]["root_directory"]).expanduser()
         requested_mode = self.setup_vars["workspace_mode"].get()
         attach_existing = requested_mode == "existing" and (root / "ACADEMIC_OS_RULES.md").is_file() and (root / "COURSE_TEMPLATE").is_dir()
-        legacy_candidates = [candidate for candidate in discover_academic_folders() if candidate.path != root.resolve()]
+        runtime_root = runtime_directory(manifest)
+        legacy_candidates = [
+            candidate
+            for candidate in discover_academic_folders()
+            if candidate.path != root.resolve() and not is_runtime_migration_source(candidate.path, runtime_root)
+        ]
         if requested_mode == "existing" and root.exists() and any(root.iterdir()) and not attach_existing:
             messagebox.showwarning("I could not identify that workspace", "This folder contains files but does not look like an Academic OS folder. Choose the actual structured folder, or switch to Create a brand-new workspace and choose an empty location.")
             return
@@ -653,7 +658,12 @@ class AcademicOSApp(tk.Tk):
         def find_sources() -> None:
             source_candidates_list.delete(0, tk.END)
             current = Path(dashboard["academic_root"]).expanduser().resolve()
-            source_candidates[:] = [candidate for candidate in discover_academic_folders() if candidate.path != current]
+            runtime_root = Path(dashboard["install_root"]).expanduser().resolve()
+            source_candidates[:] = [
+                candidate
+                for candidate in discover_academic_folders()
+                if candidate.path != current and not is_runtime_migration_source(candidate.path, runtime_root)
+            ]
             if not source_candidates:
                 source_candidates_list.insert(tk.END, "No likely older folder found — use Browse to choose one.")
             else:
@@ -676,7 +686,10 @@ class AcademicOSApp(tk.Tk):
 
         def scan() -> None:
             try:
-                source = Path(source_var.get().strip()).expanduser().resolve()
+                source = validate_migration_source(
+                    Path(source_var.get().strip()).expanduser(),
+                    Path(dashboard["install_root"]).expanduser(),
+                )
                 plan = build_migration_plan(source, Path(dashboard["academic_root"]), dashboard["semester"])
                 paths = write_migration_plan(plan, Path(dashboard["install_root"]) / "migration")
                 plan_ref["plan"] = plan
@@ -709,6 +722,7 @@ class AcademicOSApp(tk.Tk):
             if plan is None:
                 messagebox.showinfo("Scan first", "Choose an old folder and scan it before importing.", parent=dialog)
                 return
+            validate_migration_source(plan.source_root, Path(dashboard["install_root"]).expanduser())
             selected_indexes = migration_list.curselection()
             selected_items = [plan.items[index] for index in selected_indexes]
             if not selected_items:
@@ -716,10 +730,17 @@ class AcademicOSApp(tk.Tk):
                 return
             if mode == "move" and not messagebox.askyesno("Move selected originals?", "This will remove only the selected original files after hash verification. Copy is safer and recommended. Continue?", parent=dialog):
                 return
-            result = execute_migration_plan(plan, items=selected_items, mode=mode)
             report_dir = Path(dashboard["install_root"]) / "migration"
+            report_path = report_dir / "migration-report.json"
+            ensure_safe_text_target(report_path)
+            if os.path.lexists(report_dir) and report_dir.is_symlink():
+                raise ValueError(f"refusing to use symlink migration directory: {report_dir}")
+            if os.path.lexists(report_dir) and not report_dir.is_dir():
+                raise ValueError(f"migration output directory is not a folder: {report_dir}")
             report_dir.mkdir(parents=True, exist_ok=True)
-            (report_dir / "migration-report.json").write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            ensure_safe_text_target(report_path)
+            result = execute_migration_plan(plan, items=selected_items, mode=mode)
+            safe_atomic_write_text(report_path, json.dumps(result, indent=2, ensure_ascii=False) + "\n")
             if result["failed"]:
                 messagebox.showwarning("Migration needs review", f"Completed with {result['failed']} failure(s). See migration-report.json.", parent=dialog)
             else:

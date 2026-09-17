@@ -23,7 +23,7 @@ from .settings import preview_config, update_config
 from .workspace import build_workspace_snapshot
 from .workflow import ApprovalWorkflow
 from installer.core import initialize_installation
-from installer.migration import MigrationPlan, build_migration_plan, ensure_safe_text_target, execute_migration_plan, load_migration_plan, safe_atomic_write_text, write_migration_plan
+from installer.migration import MigrationPlan, build_migration_plan, ensure_safe_text_target, execute_migration_plan, load_migration_plan, safe_atomic_write_text, validate_migration_source, write_migration_plan
 from .version import __version__
 
 
@@ -170,19 +170,53 @@ def _active_academic_root(config: dict[str, Any]) -> Path:
     return Path(config["academic"]["root_directory"]).expanduser().resolve()
 
 
+def _lexical_migration_path(path: Path) -> Path:
+    return Path(os.path.abspath(os.fspath(Path(path).expanduser())))
+
+
+def _reject_migration_symlink_components(path: Path, label: str) -> None:
+    path = _lexical_migration_path(path)
+    for component in reversed(path.parents):
+        if not os.path.lexists(component):
+            break
+        if os.path.islink(component):
+            raise ValueError(f"migration {label} contains symlink component: {component}")
+    if os.path.lexists(path) and os.path.islink(path):
+        raise ValueError(f"migration {label} is a symlink: {path}")
+
+
+def _validate_migration_directory(path: Path, label: str) -> Path:
+    path = _lexical_migration_path(path)
+    _reject_migration_symlink_components(path, label)
+    if os.path.lexists(path) and not path.is_dir():
+        raise ValueError(f"migration {label} is not a directory: {path}")
+    return path
+
+
 def _load_active_migration_plan(args: argparse.Namespace) -> tuple[MigrationPlan, Path]:
     config = load_config(_profile_path(args))
-    plan_path = args.plan.expanduser().resolve()
-    migration_directory = (runtime_directory(config) / "migration").resolve()
+    runtime_root = runtime_directory(config)
+    migration_directory = _validate_migration_directory(runtime_root / "migration", "active runtime migration directory")
+    plan_path = _lexical_migration_path(args.plan)
+    _reject_migration_symlink_components(plan_path, "plan")
+    if os.path.lexists(plan_path) and plan_path.is_dir():
+        raise ValueError(f"migration plan is a directory: {plan_path}")
     if migration_directory != plan_path and migration_directory not in plan_path.parents:
         raise ValueError("migration plan must be inside the active runtime migration directory")
     plan = load_migration_plan(plan_path)
+    validate_migration_source(plan.source_root, runtime_root)
     if plan.academic_root != _active_academic_root(config):
         raise ValueError("migration plan academic root does not match the active profile workspace")
     return plan, plan_path
 
 
 def _read_migration_report(path: Path) -> Any:
+    path = _lexical_migration_path(path)
+    _reject_migration_symlink_components(path, "report")
+    if not os.path.lexists(path):
+        return None
+    if path.is_dir():
+        raise ValueError(f"migration report is a directory: {path}")
     if not path.is_file():
         return None
     try:
@@ -204,8 +238,10 @@ def _migration_indexes(args: argparse.Namespace, item_count: int) -> list[int]:
 
 def _migration_plan(args: argparse.Namespace) -> dict[str, Any]:
     config = load_config(_profile_path(args))
-    plan = build_migration_plan(args.source, _active_academic_root(config), config["academic"]["semester"])
-    paths = write_migration_plan(plan, runtime_directory(config) / "migration")
+    runtime_root = runtime_directory(config)
+    source_root = validate_migration_source(args.source, runtime_root)
+    plan = build_migration_plan(source_root, _active_academic_root(config), config["academic"]["semester"])
+    paths = write_migration_plan(plan, runtime_root / "migration")
     value = plan.as_json()
     value.update({"plan_path": str(paths["json"]), "review_path": str(paths["markdown"]), "status": "planned", "action": "plan"})
     return value
