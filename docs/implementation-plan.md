@@ -15,6 +15,18 @@ Turn the current Hermes-coupled Python/Tkinter system into a local-first, agent-
 - No structured persisted Review Queue or Activity model.
 - No React/TypeScript/Tauri foundation.
 
+## Current implementation status
+
+The original architecture/refactor slices are implemented and verified. The current product pass adds the student-facing bridge without creating parallel core systems:
+
+- **Existing-workspace attachment:** `academia workspace discover` and `workspace inspect PATH` are profile-free and read-only. `workspace attach` previews the filesystem projection and writes only a local profile after `--apply`; stale/invalid test profiles are backed up first.
+- **Fresh-workspace setup:** `workspace create PATH` previews the existing installer/template plan and invokes `installer.core.initialize_installation` only after `--apply`.
+- **Modern onboarding:** the React/Tauri shell now detects missing/stale/unrecognized setup and guides Welcome → Profile → Workspace → Semester → Sources → Agents → Review → Ready.
+- **Modern import:** the frontend uses the native Tauri dialog and Tauri drag/drop paths, while every copy still goes through the existing `academia import` command. “Not sure where this belongs” stages general intake and creates a durable `import_classification` Review item.
+- **Still intentionally incomplete:** typed Review decision cards, fully editable modern Settings, persistent background watchers, structured Assignment/Deadline/Reading entities, bundled sidecar packaging, signing, and notarization.
+
+The live user workspace is never a repository fixture. Product tests use temporary sanitized workspaces only.
+
 ## Architecture target
 
 ```text

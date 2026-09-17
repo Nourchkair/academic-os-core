@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { ImportView } from './ImportView'
+import { Onboarding } from './Onboarding'
 import { api, BridgeUnavailableError } from './lib/api'
 import type { ActivityEvent, Course, ReviewItem, StatusPayload, Task } from './types'
 
@@ -7,6 +9,7 @@ const nav = [
   { id: 'courses', label: 'Courses', icon: '◫' },
   { id: 'tasks', label: 'Tasks', icon: '✓' },
   { id: 'library', label: 'Library', icon: '▤' },
+  { id: 'import', label: 'Import', icon: '↓' },
   { id: 'review', label: 'Review', icon: '◌' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
 ] as const
@@ -22,25 +25,55 @@ function App() {
   const [activity, setActivity] = useState<ActivityEvent[]>([])
   const [error, setError] = useState<string | null>(null)
   const [actionBusy, setActionBusy] = useState<string | null>(null)
+  const [onboarding, setOnboarding] = useState(false)
+  const [setupCandidates, setSetupCandidates] = useState<import('./types').WorkspaceCandidate[]>([])
+  const [booting, setBooting] = useState(true)
+
+  const beginOnboarding = async () => {
+    try {
+      const candidates = await api.workspaceDiscover()
+      setSetupCandidates(candidates)
+      setOnboarding(true)
+      setError(null)
+    } catch (reason) {
+      setError(reason instanceof BridgeUnavailableError ? reason.message : 'Open the Academia OS desktop app to begin setup.')
+    }
+  }
 
   const refresh = async () => {
     try {
       setError(null)
       const next = await api.status()
+      if (!next.workspace.workspace_exists) {
+        await beginOnboarding()
+        return
+      }
+      const inspected = await api.workspaceInspect(next.workspace.academic_root)
+      if (!inspected.recognized) {
+        await beginOnboarding()
+        return
+      }
       setStatus(next)
       const [courseData, taskData, reviewData, activityData] = await Promise.all([api.courses(), api.tasks(), api.review(), api.activity()])
       setCourses(courseData)
       setTasks(taskData)
       setReviews(reviewData)
       setActivity(activityData)
+      setOnboarding(false)
     } catch (reason) {
-      setError(reason instanceof BridgeUnavailableError ? reason.message : String(reason))
+      if (reason instanceof BridgeUnavailableError) setError(reason.message)
+      else await beginOnboarding()
+    } finally {
+      setBooting(false)
     }
   }
 
-  // This effect starts the external CLI read; refresh owns the resulting loading/error state.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
+  // This effect starts the external CLI read; refresh owns loading, setup, and error state.
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => { void refresh() }, [])
+
+  if (booting) return <main className="connection-screen"><div className="connection-art">✦</div><p className="eyebrow">Academia OS</p><h2>Checking your local workspace</h2><p>Your academic files stay on this computer while we check whether setup is already complete.</p></main>
+  if (onboarding) return <Onboarding candidates={setupCandidates} onComplete={refresh} />
 
   const title = nav.find((item) => item.id === view)?.label ?? 'Home'
   return (
@@ -55,7 +88,7 @@ function App() {
       </aside>
       <main className="main-content">
         <header className="topbar"><div><p className="eyebrow">{status?.workspace.semester ?? 'Local academic workspace'}</p><h1>{title}</h1></div><div className="top-actions"><button className="search-button" onClick={() => setError('Search will use the local Academia OS index when the desktop bridge is connected.')}><span>⌕</span> Search <kbd>⌘ K</kbd></button><button className="icon-button" aria-label="Refresh" onClick={() => void refresh()}>↻</button><div className="profile-badge">{status?.student.name?.slice(0, 1) ?? 'A'}</div></div></header>
-        {error ? <ConnectionNotice message={error} onRetry={() => void refresh()} /> : <>{view === 'home' && <Home status={status} tasks={tasks} reviews={reviews} activity={activity} onNavigate={setView} />}{view === 'courses' && <Courses courses={courses} />}{view === 'tasks' && <Tasks tasks={tasks} />}{view === 'library' && <Library courses={courses} />}{view === 'review' && <Review reviews={reviews} activity={activity} actionBusy={actionBusy} onReviewAction={async (action, itemId) => { try { setActionBusy(itemId); setError(null); await api.reviewAction(action, itemId); await refresh() } catch (reason) { setError(String(reason)) } finally { setActionBusy(null) } }} />}{view === 'settings' && <Settings status={status} />}</>}
+        {error ? <ConnectionNotice message={error} onRetry={() => void refresh()} /> : <>{view === 'home' && <Home status={status} tasks={tasks} reviews={reviews} activity={activity} onNavigate={setView} />}{view === 'courses' && <Courses courses={courses} />}{view === 'tasks' && <Tasks tasks={tasks} />}{view === 'library' && <Library courses={courses} onNavigate={setView} />}{view === 'import' && status && <ImportView status={status} courses={courses} onImported={refresh} />}{view === 'review' && <Review reviews={reviews} activity={activity} actionBusy={actionBusy} onReviewAction={async (action, itemId) => { try { setActionBusy(itemId); setError(null); await api.reviewAction(action, itemId); await refresh() } catch (reason) { setError(String(reason)) } finally { setActionBusy(null) } }} />}{view === 'settings' && <Settings status={status} />}</>}
       </main>
     </div>
   )
@@ -83,10 +116,10 @@ function Tasks({ tasks }: { tasks: Task[] }) {
   return <div className="page-stack"><PageIntro eyebrow="Plan" title="Tasks" subtitle="Deadlines and study work derived from supported academic sources."/><div className="filter-row">{(['all', 'open', 'completed'] as const).map((value) => <button key={value} className={`filter-pill ${filter === value ? 'active' : ''}`} onClick={() => setFilter(value)}>{value === 'all' ? 'All tasks' : value === 'open' ? 'Open' : 'Completed'}</button>)}</div><div className="task-list">{visible.map((task) => <article className={`task-row ${task.completed ? 'done' : ''}`} key={task.id}><span className="task-check">{task.completed ? '✓' : ''}</span><div className="task-body"><h3>{task.title}</h3><p>{task.course || 'Semester'} · <span className="confidence">{task.confidence}</span></p></div><span className="task-source">{task.source.split('/').pop()}</span></article>)}{!visible.length && <EmptyCard title={filter === 'completed' ? 'No completed tasks' : 'No tasks yet'} body="Tasks will be derived from confirmed material. Unverified dates remain visibly unverified." action="Import material" />}</div></div>
 }
 
-function Library({ courses }: { courses: Course[] }) {
+function Library({ courses, onNavigate }: { courses: Course[]; onNavigate: (view: View) => void }) {
   const [query, setQuery] = useState('')
   const filteredCourses = courses.filter((course) => `${course.code} ${course.name}`.toLowerCase().includes(query.toLowerCase()))
-  return <div className="page-stack"><PageIntro eyebrow="Sources" title="Library" subtitle="Readings, syllabi, notes, and source history in one human-friendly place."/><label className="library-search"><span aria-hidden="true">⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search your local academic index" aria-label="Search your local academic index"/><kbd>⌘ K</kbd></label><div className="library-grid"><LibraryTile icon="◈" title="Syllabi & course guides" body="Authoritative course context and assessment instructions."/><LibraryTile icon="▤" title="Readings & references" body="Sources with provenance and edition verification."/><LibraryTile icon="✎" title="Notes & study aids" body="User-created and AI-generated material kept distinct."/><LibraryTile icon="↓" title="Imported material" body="Manual imports and watched-folder intake awaiting review."/></div><section className="source-note"><span className="info-icon">i</span><p>Browser access is optional. You can build a complete academic system with manual imports and watched folders alone.</p></section><div className="course-list compact">{filteredCourses.map((course) => <CourseRow course={course} key={course.id} />)}{courses.length > 0 && !filteredCourses.length ? <p className="muted-copy">No indexed courses match “{query}”.</p> : null}</div></div>
+  return <div className="page-stack"><PageIntro eyebrow="Sources" title="Library" subtitle="Readings, syllabi, notes, and source history in one human-friendly place."/><div className="library-toolbar"><label className="library-search"><span aria-hidden="true">⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search your local academic index" aria-label="Search your local academic index"/><kbd>⌘ K</kbd></label><button className="primary-button" onClick={() => onNavigate('import')}>Import material <span>↓</span></button></div><div className="library-grid"><LibraryTile icon="◈" title="Syllabi & course guides" body="Authoritative course context and assessment instructions."/><LibraryTile icon="▤" title="Readings & references" body="Sources with provenance and edition verification."/><LibraryTile icon="✎" title="Notes & study aids" body="User-created and AI-generated material kept distinct."/><LibraryTile icon="↓" title="Imported material" body="Manual imports and watched-folder intake awaiting review."/></div><section className="source-note"><span className="info-icon">i</span><p>Browser access is optional. You can build a complete academic system with manual imports and watched folders alone.</p></section><div className="course-list compact">{filteredCourses.map((course) => <CourseRow course={course} key={course.id} />)}{courses.length > 0 && !filteredCourses.length ? <p className="muted-copy">No indexed courses match “{query}”.</p> : null}</div></div>
 }
 
 function Review({ reviews, activity, actionBusy, onReviewAction }: { reviews: ReviewItem[]; activity: ActivityEvent[]; actionBusy: string | null; onReviewAction: (action: 'approve' | 'reject' | 'resolve', itemId: string) => Promise<void> }) {

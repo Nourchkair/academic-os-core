@@ -22,6 +22,10 @@ Use the installed CLI or its equivalent local API:
 ```text
 academia status --json
 academia workspace --json
+academia workspace discover --json
+academia workspace inspect /path/to/workspace --json
+academia workspace attach /path/to/workspace --name "Student" --institution "University" --timezone America/Toronto --semester "Fall 2026" --json
+academia import /path/to/file.pdf --destination /path/to/workspace/SEMESTER/COURSE/00_INBOX --json
 academia courses --json
 academia course "COURSE ID" --json
 academia today --json

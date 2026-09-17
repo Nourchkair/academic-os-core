@@ -44,6 +44,7 @@ fn academia_command(command: String, args: Vec<String>) -> Result<String, String
         "capabilities",
         "settings",
         "verify",
+        "import",
     ];
     if !allowed.contains(&command.as_str()) {
         return Err(format!("Unsupported Academia command: {command}"));
@@ -57,6 +58,7 @@ fn academia_command(command: String, args: Vec<String>) -> Result<String, String
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![academia_command])
         .run(tauri::generate_context!())
         .expect("error while running Academia OS desktop");

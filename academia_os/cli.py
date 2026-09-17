@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -11,13 +12,15 @@ from typing import Any, Callable
 from .acquisition import browser_access_policy, capability_report, configured_watched_folders, import_file, scan_watched_folder
 from .actions import ActionStore
 from .activity import ActivityLog
-from .config import load_config, save_config, runtime_directory
+from .attachment import assess_profile, attach_workspace, backup_profile, inspect_workspace
+from .config import load_config, save_config, runtime_directory, validate_config
 from .discovery import discover_academic_folders
 from .provenance import verify_source_metadata
 from .review import ReviewQueue
 from .settings import update_config
 from .workspace import build_workspace_snapshot
 from .workflow import ApprovalWorkflow
+from installer.core import initialize_installation
 from .version import __version__
 
 
@@ -97,6 +100,69 @@ def _hermes_status(config: dict[str, Any]) -> dict[str, Any]:
         return {"name": "Hermes", "status": "unavailable", "message": str(exc)}
 
 
+def _template_root() -> Path:
+    candidate = Path(__file__).resolve().parents[1] / "templates" / "University"
+    if not candidate.is_dir():
+        raise ValueError("the reusable University workspace template is not available in this installation")
+    return candidate
+
+
+def _create_workspace(args: argparse.Namespace) -> dict[str, Any]:
+    if not args.path:
+        raise ValueError("workspace create requires a destination path")
+    if not args.name.strip() or not args.institution.strip():
+        raise ValueError("name and institution are required to create a workspace")
+    root = args.path.expanduser().resolve()
+    if root.exists() and any(root.iterdir()):
+        raise ValueError("new workspace destination must be empty")
+    profile_path = _profile_path(args)
+    manifest = validate_config(
+        {
+            "schema_version": 2,
+            "student": {"name": args.name.strip(), "institution": args.institution.strip(), "program": args.program.strip()},
+            "academic": {
+                "root_directory": str(root),
+                "semester": args.semester or "Fall 2026",
+                "timezone": args.timezone,
+                "school_portal": "Not yet specified",
+            },
+            "runtime": {"install_directory": str(profile_path.parent)},
+        }
+    )
+    result: dict[str, Any] = {
+        "applied": False,
+        "requires_confirmation": True,
+        "academic_root": str(root),
+        "profile_path": str(profile_path),
+        "candidate": manifest,
+        "academic_files_changed": False,
+    }
+    if not args.apply:
+        return result
+    profile_backup = None
+    if profile_path.exists():
+        profile_state, _ = assess_profile(profile_path)
+        profile_backup = backup_profile(profile_path)
+        profile_path.unlink()
+        result["profile_state"] = profile_state
+        result["backup_profile"] = str(profile_backup)
+    try:
+        initialized = initialize_installation(
+            manifest,
+            template_root=_template_root(),
+            repo_root=Path(__file__).resolve().parents[1],
+            allow_existing=False,
+        )
+    except Exception:
+        if profile_backup and profile_backup.is_file():
+            shutil.copy2(profile_backup, profile_path)
+        raise
+    result.update(initialized)
+    result["applied"] = True
+    result["requires_confirmation"] = False
+    return result
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="academia", description="Agent-neutral local Academia OS interface")
     parser.add_argument("--profile", type=Path, help="Path to the local Academia OS profile.json")
@@ -113,7 +179,14 @@ def build_parser() -> argparse.ArgumentParser:
     course.add_argument("course_id", nargs="?")
     course.add_argument("--json", action="store_true")
     workspace = sub.add_parser("workspace")
-    workspace.add_argument("action", choices=["show", "discover", "rebuild"], nargs="?", default="show")
+    workspace.add_argument("action", choices=["show", "discover", "inspect", "rebuild", "attach", "create"], nargs="?", default="show")
+    workspace.add_argument("path", nargs="?", type=Path, help="Workspace path for inspect or attach")
+    workspace.add_argument("--name", default="", help="Student name for an explicit workspace attachment")
+    workspace.add_argument("--institution", default="", help="Institution for an explicit workspace attachment")
+    workspace.add_argument("--program", default="", help="Program or faculty for an explicit workspace attachment")
+    workspace.add_argument("--timezone", default="UTC", help="IANA timezone for an explicit workspace attachment")
+    workspace.add_argument("--semester", default="", help="Resolved semester such as Fall 2026")
+    workspace.add_argument("--apply", action="store_true", help="Apply an explicit attachment after preview")
     workspace.add_argument("--json", action="store_true")
     verify = sub.add_parser("verify")
     verify.add_argument("--json", action="store_true")
@@ -134,6 +207,7 @@ def build_parser() -> argparse.ArgumentParser:
     imported = sub.add_parser("import", help="Copy one local file into a selected workspace inbox")
     imported.add_argument("source", type=Path)
     imported.add_argument("--destination", type=Path, required=True, help="Workspace inbox directory; source files are never moved")
+    imported.add_argument("--uncertain", action="store_true", help="Keep the file in general intake and create a Review item")
     imported.add_argument("--json", action="store_true")
     return parser
 
@@ -175,14 +249,34 @@ def dispatch(args: argparse.Namespace) -> int:
             raise KeyError(f"course not found: {args.course_id}")
         _emit(matches[0], as_json=args.json); return 0
     if args.command == "workspace":
-        config, snapshot, _ = _context(args)
-        if args.action == "discover":
+        if args.action == "inspect":
+            if not args.path:
+                raise ValueError("workspace inspect requires a path")
+            value = inspect_workspace(args.path)
+        elif args.action == "attach":
+            if not args.path:
+                raise ValueError("workspace attach requires a path")
+            value = attach_workspace(
+                args.path,
+                _profile_path(args),
+                name=args.name,
+                institution=args.institution,
+                program=args.program,
+                timezone=args.timezone,
+                semester=args.semester or None,
+                apply=args.apply,
+            )
+        elif args.action == "create":
+            value = _create_workspace(args)
+        elif args.action == "discover":
             value = [asdict(item) for item in discover_academic_folders()]
             for item in value: item["path"] = str(item["path"])
-        elif args.action == "rebuild":
-            value = build_workspace_snapshot(config)
         else:
-            value = {"academic_root": snapshot["academic_root"], "semester": snapshot["semester"], "exists": snapshot["workspace_exists"]}
+            config, snapshot, _ = _context(args)
+            if args.action == "rebuild":
+                value = build_workspace_snapshot(config)
+            else:
+                value = {"academic_root": snapshot["academic_root"], "semester": snapshot["semester"], "exists": snapshot["workspace_exists"]}
         _emit(value, as_json=args.json); return 0
     if args.command == "review":
         _, snapshot, _ = _context(args)
@@ -243,6 +337,19 @@ def dispatch(args: argparse.Namespace) -> int:
             confidence="unverified",
             actor="user",
         )
+        if args.uncertain:
+            review_item = ReviewQueue(workspace_root / ".academia" / "review.json").add(
+                kind="import_classification",
+                title=f"Choose a destination for {Path(value['destination']).name}",
+                details={
+                    "destination": value["destination"],
+                    "original_file": value["original_file"],
+                    "reason": "The user marked this import as not yet classified.",
+                    "preserve_original": True,
+                },
+                priority="normal",
+            )
+            value["review_item_id"] = review_item.id
         value["state_path"] = str(workspace_root / ".academia" / "processing.json")
         _emit(value, as_json=args.json); return 0
     if args.command == "verify-source":

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActivityEvent, Course, ReviewItem, StatusPayload, Task, WorkspaceSnapshot } from '../types'
+import type { ActivityEvent, AttachmentResult, Course, ImportResult, ReviewItem, StatusPayload, Task, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
@@ -31,5 +31,32 @@ export const api = {
   reviewAction: (action: 'approve' | 'reject' | 'resolve', itemId: string) => command<ReviewItem>('review', [action, itemId]),
   activity: () => command<ActivityEvent[]>('activity'),
   workspace: () => command<WorkspaceSnapshot>('workspace'),
+  workspaceDiscover: () => command<WorkspaceCandidate[]>('workspace', ['discover']),
+  workspaceInspect: (path: string) => command<WorkspaceInspection>('workspace', ['inspect', path]),
+  workspaceAttach: (input: { path: string; name: string; institution: string; program: string; timezone: string; semester: string; apply: boolean }) => {
+    const args = [
+      'attach', input.path,
+      '--name', input.name,
+      '--institution', input.institution,
+      '--program', input.program,
+      '--timezone', input.timezone,
+      '--semester', input.semester,
+    ]
+    if (input.apply) args.push('--apply')
+    return command<AttachmentResult>('workspace', args)
+  },
+  workspaceCreate: (input: { path: string; name: string; institution: string; program: string; timezone: string; semester: string; apply: boolean }) => {
+    const args = [
+      'create', input.path,
+      '--name', input.name,
+      '--institution', input.institution,
+      '--program', input.program,
+      '--timezone', input.timezone,
+      '--semester', input.semester,
+    ]
+    if (input.apply) args.push('--apply')
+    return command<WorkspaceCreationResult>('workspace', args)
+  },
+  importFile: (source: string, destination: string, uncertain: boolean) => command<ImportResult>('import', [source, '--destination', destination, ...(uncertain ? ['--uncertain'] : [])]),
   settings: () => command<Record<string, unknown>>('settings', ['show']),
 }

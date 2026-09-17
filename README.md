@@ -32,13 +32,36 @@ python -m pip install -e .
 academia --help
 ```
 
-The first-use wizard remains available through the compatibility installer:
+The first-use experience is available in the modern Tauri frontend as well as through the compatibility installer. The desktop flow checks for an existing profile; if it is missing, stale, invalid, or points at a missing/unrecognized workspace, it opens onboarding instead of silently using test data.
+
+The compatibility installer remains available for scripted/bootstrap environments:
 
 ```bash
 python -m installer.bootstrap --manifest config/manifest.example.json
 ```
 
-A generated profile uses schema version 2, resolves an actual semester such as `Fall 2026`, keeps browser access off by default, and does not require Hermes. Existing schema-version-1 profiles are migrated non-destructively when read.
+The modern setup flow can:
+
+- create a fresh workspace through the existing installer/template service;
+- inspect an existing Academia-style folder without creating `.academia/` or changing academic files;
+- show semesters, courses, file counts, markers, and structure anomalies;
+- preview the profile attachment before confirmation; and
+- back up an existing local profile before replacing it.
+
+For a profile-free inspection or attachment preview:
+
+```bash
+academia workspace discover --json
+academia workspace inspect /path/to/University --json
+academia --profile ~/.academic-os/profile.json workspace attach /path/to/University \
+  --name "Your name" --institution "Your university" --program "Your program" \
+  --timezone America/Toronto --semester "Fall 2026" --json
+academia --profile ~/.academic-os/profile.json workspace attach /path/to/University \
+  --name "Your name" --institution "Your university" --program "Your program" \
+  --timezone America/Toronto --semester "Fall 2026" --apply --json
+```
+
+`workspace inspect` is read-only. `workspace attach` is preview-only unless `--apply` is supplied; attachment writes only the local profile and does not migrate, rename, move, rewrite, or index academic files. Generated profiles use schema version 2, resolve a real semester label, keep browser access off by default, and do not require Hermes. Existing schema-version-1 profiles migrate non-destructively when read.
 
 ## Universal local interface
 
@@ -47,6 +70,9 @@ Agents should request structured context through the CLI rather than parsing doz
 ```bash
 academia status --json
 academia workspace --json
+academia workspace discover --json
+academia workspace inspect /path/to/University --json
+academia workspace create /path/to/New\ University --name "Your name" --institution "Your university" --timezone America/Toronto --semester "Fall 2026" --apply --json
 academia courses --json
 academia course "POL 2103 - Politics" --json
 academia today --json
@@ -57,6 +83,7 @@ academia activity --json
 academia agents --json
 academia capabilities --json
 academia import /path/to/file.pdf --destination /path/to/workspace/Fall\ 2026/COURSE/00_INBOX --json
+academia import /path/to/unknown-file.pdf --destination /path/to/workspace/Fall\ 2026/00_INBOX --uncertain --json
 academia watch --json  # one-shot scan of configured folders
 ```
 
@@ -131,7 +158,7 @@ npm run build
 npm run dev
 ```
 
-It is a React + TypeScript application with a Tauri 2 shell and a typed bridge to the `academia` CLI. It includes Home, Courses, Tasks, Library, Review, and Settings views with local-data/error empty states. The Tauri bundle is currently a development foundation (`bundle.active` is false); macOS signing, notarization, and sidecar packaging remain release work. The old Tkinter app remains as a compatibility fallback while the new shell matures.
+It is a React + TypeScript application with a Tauri 2 shell and a typed bridge to the `academia` CLI. It now includes profile-free first-run onboarding, existing-workspace inspection/attachment, fresh-workspace setup, Home, Courses, Tasks, Library, Import, Review, and Settings views with local-data/error/empty states. Import uses the native Tauri file picker and drag/drop paths but delegates copying, processing, provenance, Activity, and uncertainty Review items to the existing CLI/core. The Tauri bundle is currently a development foundation (`bundle.active` is false); macOS signing, notarization, and sidecar packaging remain release work. The old Tkinter app remains as a compatibility fallback while the new shell matures.
 
 ## Optional agents
 
