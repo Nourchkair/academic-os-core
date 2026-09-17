@@ -67,3 +67,29 @@ def test_settings_preview_does_not_write_until_apply(tmp_path: Path) -> None:
     applied = subprocess.run([sys.executable, "-m", "academia_os", "--profile", str(profile), "settings", "update", "--set", "student.name=Updated", "--apply", "--json"], cwd=ROOT, env=env, text=True, capture_output=True)
     assert applied.returncode == 0, applied.stderr
     assert json.loads(profile.read_text(encoding="utf-8"))["student"]["name"] == "Updated"
+
+
+def test_import_command_copies_source_and_stages_processing_record(tmp_path: Path) -> None:
+    config = minimal_config(tmp_path)
+    root = Path(config["academic"]["root_directory"])
+    destination = root / "Fall 2026" / "POL 2103 - Politics" / "00_INBOX"
+    source = tmp_path / "downloaded-reading.pdf"
+    source.write_bytes(b"reading")
+    profile = Path(config["runtime"]["install_directory"]) / "profile.json"
+    save_config(profile, config)
+    env = os.environ.copy(); env["PYTHONPATH"] = str(ROOT)
+    result = subprocess.run(
+        [sys.executable, "-m", "academia_os", "--profile", str(profile), "import", str(source), "--destination", str(destination), "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    copied = Path(value["destination"])
+    assert copied.is_file()
+    assert copied.read_bytes() == b"reading"
+    assert source.is_file()
+    assert value["state_path"] == str(root / ".academia" / "processing.json")
+    assert len(json.loads((root / ".academia" / "processing.json").read_text(encoding="utf-8"))) == 1

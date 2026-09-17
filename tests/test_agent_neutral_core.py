@@ -15,6 +15,7 @@ from academia_os.provenance import ProvenanceLabel, SourceVerificationResult, ve
 from academia_os.review import ReviewQueue, ReviewStatus
 from academia_os.semester import resolve_current_semester
 from academia_os.settings import update_config
+from academia_os.state import JsonStateStore
 from academia_os.workspace import build_workspace_snapshot
 
 
@@ -59,8 +60,33 @@ def test_config_rejects_literal_current_semester_and_defaults_browser_off(tmp_pa
     with pytest.raises(ValueError, match="resolved semester"):
         validate_config(config)
     defaults = acquisition_defaults()
-    assert defaults["browser_access_enabled"] is False
-    assert defaults["advanced_browser_enabled"] is False
+    assert defaults["manual_import_enabled"] is True
+    assert defaults["browser"]["access_enabled"] is False
+
+
+def test_browser_policy_normalizes_legacy_aliases_to_one_canonical_section(tmp_path: Path) -> None:
+    config = minimal_config(tmp_path)
+    config["browser"] = {"name": "auto", "user_data_dir": "", "profile_directory": "", "access_enabled": True, "allowed_sites": ["canonical.example.edu"]}
+    config["acquisition"]["browser_access_enabled"] = False
+    config["acquisition"]["allowed_sites"] = ["legacy.example.edu"]
+    config["privacy"]["browser_access_enabled"] = False
+    config["privacy"]["allowed_sites"] = ["legacy-privacy.example.edu"]
+    normalized = validate_config(config)
+    assert normalized["browser"]["access_enabled"] is True
+    assert normalized["browser"]["allowed_sites"] == ["canonical.example.edu"]
+    assert "browser_access_enabled" not in normalized["acquisition"]
+    assert "allowed_sites" not in normalized["acquisition"]
+    assert "browser_access_enabled" not in normalized["privacy"]
+    assert "allowed_sites" not in normalized["privacy"]
+    assert browser_access_policy(normalized)["allowed_sites"] == ["canonical.example.edu"]
+
+    legacy_only = minimal_config(tmp_path)
+    legacy_only.pop("browser", None)
+    legacy_only["acquisition"]["browser_access_enabled"] = True
+    legacy_only["acquisition"]["allowed_sites"] = ["legacy-only.example.edu"]
+    legacy_normalized = validate_config(legacy_only)
+    assert legacy_normalized["browser"]["access_enabled"] is True
+    assert legacy_normalized["browser"]["allowed_sites"] == ["legacy-only.example.edu"]
 
 
 def test_semester_resolution_is_date_based_and_customizable() -> None:
@@ -82,6 +108,27 @@ def test_review_queue_and_activity_log_survive_restart(tmp_path: Path) -> None:
     restored = ActivityLog(activity_path).list()
     assert restored[0].id == event.id
     assert restored[0].details["new"] == "October 11"
+
+
+def test_approved_review_items_leave_the_attention_queue(tmp_path: Path) -> None:
+    queue = ReviewQueue(tmp_path / "review.json")
+    item = queue.add(kind="source_match", title="Check source")
+    queue.update(item.id, status=ReviewStatus.APPROVED)
+    assert queue.list() == []
+    assert queue.list(include_resolved=True)[0].status is ReviewStatus.APPROVED
+
+
+def test_independent_state_store_instances_share_atomic_updates(tmp_path: Path) -> None:
+    path = tmp_path / "state.json"
+    first = JsonStateStore(path)
+    second = JsonStateStore(path)
+    first.write([])
+
+    second.update([], lambda values: [*values, {"id": "one"}])
+    first.update([], lambda values: [*values, {"id": "two"}])
+
+    assert first.read([]) == [{"id": "one"}, {"id": "two"}]
+
 
 
 def test_processing_lifecycle_keeps_failures_retryable_until_acknowledged(tmp_path: Path) -> None:
@@ -117,9 +164,14 @@ def test_processing_stale_lease_returns_to_pending(tmp_path: Path) -> None:
 def test_provenance_and_source_verification_are_explicit() -> None:
     assert ProvenanceLabel.ORIGINAL.value == "ORIGINAL"
     assert SourceVerificationResult.EXACT_MATCH.value == "EXACT MATCH — HIGH CONFIDENCE"
-    exact = verify_source_metadata({"author": "Smith", "year": 2024}, {"author": "Smith", "year": 2024})
-    probable = verify_source_metadata({"author": "Smith", "year": 2024, "edition": 3}, {"author": "Smith", "year": 2024, "edition": 2})
+    exact = verify_source_metadata(
+        {"title": "Archives and Memory", "author": "Smith", "year": 2024},
+        {"title": "Archives and Memory", "author": "Smith", "year": 2024, "publisher": "Example Press"},
+    )
+    sparse = verify_source_metadata({"author": "Smith", "year": 2024}, {"author": "Smith", "year": 2024})
+    probable = verify_source_metadata({"title": "Archives and Memory", "author": "Smith", "edition": 3}, {"title": "Archives and Memory", "author": "Smith", "edition": 2})
     assert exact.result is SourceVerificationResult.EXACT_MATCH
+    assert sparse.result is SourceVerificationResult.PROBABLE_MATCH
     assert probable.result is SourceVerificationResult.PROBABLE_MATCH
 
 

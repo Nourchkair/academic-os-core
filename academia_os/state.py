@@ -3,24 +3,49 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterator, TypeVar
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback keeps atomic replacement available.
+    fcntl = None  # type: ignore[assignment]
+
+
+T = TypeVar("T")
 
 
 class JsonStateStore:
-    """Small atomic JSON store for rebuildable local state."""
+    """Human-readable JSON state with atomic replacement and process locking."""
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path).expanduser()
+        self.lock_path = self.path.with_name(f".{self.path.name}.lock")
 
-    def read(self, default: Any) -> Any:
+    @contextmanager
+    def locked(self) -> Iterator[None]:
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.lock_path.open("a+", encoding="utf-8") as lock_handle:
+            if fcntl is not None:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+
+    def _read_unlocked(self, default: Any) -> Any:
         try:
-            value = json.loads(self.path.read_text(encoding="utf-8"))
-            return value
+            return json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
             return default
 
-    def write(self, value: Any) -> None:
+    def read(self, default: Any) -> Any:
+        with self.locked():
+            return self._read_unlocked(default)
+
+    def _write_unlocked(self, value: Any) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(prefix=f".{self.path.name}.", dir=str(self.path.parent))
         try:
@@ -33,3 +58,23 @@ class JsonStateStore:
                 os.unlink(temporary)
             except FileNotFoundError:
                 pass
+
+    def write(self, value: Any) -> None:
+        with self.locked():
+            self._write_unlocked(value)
+
+    def update(self, default: T, transform: Callable[[T], T]) -> T:
+        """Apply a read-modify-write transition while holding one process lock."""
+        with self.locked():
+            current = self._read_unlocked(default)
+            if not isinstance(current, type(default)):
+                current = default
+            updated = transform(current)
+            self._write_unlocked(updated)
+            return updated
+
+    def append_json_line(self, value: Any) -> None:
+        with self.locked():
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n")

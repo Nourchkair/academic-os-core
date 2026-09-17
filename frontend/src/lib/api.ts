@@ -28,6 +28,7 @@ export const api = {
   courses: () => command<Course[]>('courses'),
   tasks: () => command<Task[]>('tasks'),
   review: () => command<ReviewItem[]>('review'),
+  reviewAction: (action: 'approve' | 'reject' | 'resolve', itemId: string) => command<ReviewItem>('review', [action, itemId]),
   activity: () => command<ActivityEvent[]>('activity'),
   workspace: () => command<WorkspaceSnapshot>('workspace'),
   settings: () => command<Record<string, unknown>>('settings', ['show']),

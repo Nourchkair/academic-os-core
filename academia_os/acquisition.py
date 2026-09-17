@@ -12,10 +12,12 @@ from .processing import ProcessingStore
 
 def browser_access_policy(config: dict[str, Any]) -> dict[str, Any]:
     normalized = validate_config(config)
-    acquisition = normalized["acquisition"]
-    privacy = normalized["privacy"]
-    enabled = bool(acquisition.get("browser_access_enabled", False) and privacy.get("browser_access_enabled", False))
-    return {"enabled": enabled, "allowed_sites": list(privacy.get("allowed_sites", [])), "dedicated_profile_recommended": bool(privacy.get("dedicated_profile_recommended", True))}
+    browser = normalized["browser"]
+    return {
+        "enabled": bool(browser.get("access_enabled", False)),
+        "allowed_sites": list(browser.get("allowed_sites", [])),
+        "dedicated_profile_recommended": bool(normalized["privacy"].get("dedicated_profile_recommended", True)),
+    }
 
 
 @dataclass(frozen=True)
@@ -33,18 +35,27 @@ def acquisition_defaults() -> dict[str, Any]:
         "manual_import_enabled": True,
         "watched_folders": [],
         "browser_companion_enabled": False,
-        "browser_access_enabled": False,
-        "advanced_browser_enabled": False,
-        "allowed_sites": [],
+        "browser": {
+            "access_enabled": False,
+            "allowed_sites": [],
+        },
     }
 
 
 def capability_report() -> dict[str, dict[str, Any]]:
     return {
-        "manual_import": {"status": "supported", "description": "User-selected local files are staged for review."},
-        "watched_folders": {"status": "supported", "description": "Configured local folders can be scanned without browser access."},
+        "manual_import": {
+            "status": "available",
+            "mode": "copy_to_selected_inbox",
+            "description": "academia import copies a user-selected local file into a selected workspace inbox and stages it for review.",
+        },
+        "watched_folders": {
+            "status": "available",
+            "mode": "one_shot_scan",
+            "description": "academia watch performs a one-shot scan of configured folders; persistent background watching is not claimed yet.",
+        },
         "browser_companion": {"status": "planned", "description": "A future explicit Send to Academia OS companion interface."},
-        "chromium": {"status": "supported", "mode": "visible_handoff_only", "description": "Optional Chromium-family visible handoff may be used when explicitly configured; no credential/session data is read."},
+        "chromium": {"status": "available", "mode": "visible_handoff_only", "description": "Optional Chromium-family visible handoff requires an explicit allowed-site and never reads credential/session data."},
         "firefox": {"status": "planned", "description": "No Firefox automation adapter is claimed yet."},
         "safari": {"status": "planned", "description": "No Safari automation adapter is claimed yet."},
     }

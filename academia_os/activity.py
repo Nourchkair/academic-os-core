@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from .state import JsonStateStore
+
 
 @dataclass(frozen=True)
 class ActivityEvent:
@@ -32,12 +34,11 @@ class ActivityEvent:
 class ActivityLog:
     def __init__(self, path: Path) -> None:
         self.path = Path(path).expanduser()
+        self.store = JsonStateStore(self.path)
 
     def append(self, *, event_type: str, title: str, course: str | None = None, details: dict[str, Any] | None = None, source: str | None = None, confidence: str | None = None, actor: str = "system") -> ActivityEvent:
         event = ActivityEvent(str(uuid4()), event_type, title, course, details or {}, source, confidence, actor, datetime.now(timezone.utc).isoformat())
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(asdict(event), ensure_ascii=False, sort_keys=True) + "\n")
+        self.store.append_json_line(asdict(event))
         return event
 
     def list(self, limit: int = 100) -> list[ActivityEvent]:

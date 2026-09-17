@@ -29,6 +29,9 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
+
+from academia_os.browser import allowed_url
 
 CDP_HOST = "127.0.0.1"
 CDP_PORT = 9222
@@ -259,39 +262,46 @@ def http_json(url: str, timeout: float = 1.5) -> dict[str, Any] | list[Any] | No
         return None
 
 
-def cdp_metadata() -> dict[str, Any] | None:
+def cdp_metadata(*, allowed_sites: list[str] | None = None, target_id: str | None = None) -> dict[str, Any] | None:
     version = http_json(f"{CDP_URL}/json/version")
     if not isinstance(version, dict):
         return None
     pages = http_json(f"{CDP_URL}/json")
-    safe_pages = []
-    if isinstance(pages, list):
+    safe_pages: list[dict[str, Any]] = []
+    sites = [site for site in (allowed_sites or []) if str(site).strip()]
+    if isinstance(pages, list) and sites:
         for page in pages[:40]:
-            if isinstance(page, dict):
-                raw_url = str(page.get("url") or "")
-                raw_title = str(page.get("title") or "")
-                # Do not persist query strings/fragments from arbitrary tabs;
-                # page titles can repeat them (for example SAML login pages).
-                from urllib.parse import urlsplit, urlunsplit
-                parts = urlsplit(raw_url)
-                safe_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", "")) if parts.scheme else raw_url.split("?", 1)[0].split("#", 1)[0]
-                safe_title = raw_title.split("?", 1)[0].split("#", 1)[0]
-                safe_pages.append({
-                    "type": page.get("type"),
-                    "title": safe_title,
-                    "url": safe_url,
-                })
+            if not isinstance(page, dict):
+                continue
+            page_identifier = str(page.get("id") or "")
+            if target_id and page_identifier != target_id:
+                continue
+            raw_url = str(page.get("url") or "")
+            if not allowed_url(raw_url, sites):
+                continue
+            raw_title = str(page.get("title") or "")
+            # Strip query strings/fragments only after the page has passed the
+            # explicit allow-list check. Unrelated tabs are never returned.
+            parts = urlsplit(raw_url)
+            safe_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+            safe_title = raw_title.split("?", 1)[0].split("#", 1)[0]
+            safe_pages.append({
+                "id": page_identifier,
+                "type": page.get("type"),
+                "title": safe_title,
+                "url": safe_url,
+            })
     return {
         "endpoint": CDP_URL,
         "browser": version.get("Browser"),
         "protocol_version": version.get("Protocol-Version"),
-        "page_count": len(pages) if isinstance(pages, list) else 0,
+        "page_count": len(safe_pages),
         "pages": safe_pages,
     }
 
 
-def verify_real_profile(spec: BrowserSpec, pin: dict[str, Any]) -> dict[str, Any]:
-    metadata = cdp_metadata()
+def verify_real_profile(spec: BrowserSpec, pin: dict[str, Any], *, allowed_sites: list[str], target_id: str | None = None) -> dict[str, Any]:
+    metadata = cdp_metadata(allowed_sites=allowed_sites, target_id=target_id)
     if metadata is None:
         return {"verified": False, "reason": f"No reachable CDP endpoint at {CDP_URL}."}
     processes = process_for_spec(spec, port=CDP_PORT)
@@ -324,7 +334,7 @@ def verify_real_profile(spec: BrowserSpec, pin: dict[str, Any]) -> dict[str, Any
     }
 
 
-def launch_real_browser(spec: BrowserSpec, pin: dict[str, Any]) -> dict[str, Any]:
+def launch_real_browser(spec: BrowserSpec, pin: dict[str, Any], *, allowed_sites: list[str], target_id: str | None = None) -> dict[str, Any]:
     args = [
         str(spec.executable),
         f"--remote-debugging-port={CDP_PORT}",
@@ -338,7 +348,7 @@ def launch_real_browser(spec: BrowserSpec, pin: dict[str, Any]) -> dict[str, Any
         return {"launched": False, "error": f"Could not launch {spec.name}: {exc}"}
     for _ in range(20):
         time.sleep(0.5)
-        if cdp_metadata() is not None:
+        if cdp_metadata(allowed_sites=allowed_sites, target_id=target_id) is not None:
             return {"launched": True, "args": args}
     return {
         "launched": True,
@@ -347,7 +357,12 @@ def launch_real_browser(spec: BrowserSpec, pin: dict[str, Any]) -> dict[str, Any
     }
 
 
-def command_inspect(_: argparse.Namespace) -> int:
+def _allowed_sites(args: argparse.Namespace) -> list[str]:
+    return list(dict.fromkeys(str(site).strip() for site in getattr(args, "allowed_site", []) if str(site).strip()))
+
+
+def command_inspect(args: argparse.Namespace) -> int:
+    allowed_sites = _allowed_sites(args)
     specs = []
     for spec in browser_specs():
         if not (spec.app.is_dir() or spec.user_data_dir.is_dir()):
@@ -363,22 +378,27 @@ def command_inspect(_: argparse.Namespace) -> int:
             "running": bool(process_for_spec(spec)),
             "profiles": profile_inventory(spec),
         })
-    print(json.dumps({"status": "inspection", "cdp": cdp_metadata(), "browsers": specs, "pin": read_json(pin_path()) if pin_path().is_file() else None}, indent=2, ensure_ascii=False))
+    print(json.dumps({"status": "inspection", "cdp": cdp_metadata(allowed_sites=allowed_sites, target_id=args.target_id), "browsers": specs, "pin": read_json(pin_path()) if pin_path().is_file() else None}, indent=2, ensure_ascii=False))
     return 0
 
 
-def command_ensure(_: argparse.Namespace) -> int:
+def command_ensure(args: argparse.Namespace) -> int:
+    allowed_sites = _allowed_sites(args)
+    if not allowed_sites:
+        print(json.dumps({"status": "error", "error": "At least one --allowed-site is required; browser page metadata is never inspected without an explicit allow-list."}, ensure_ascii=False))
+        return 2
+    target_id = args.target_id
     spec, pin, error = select_and_pin()
     if error or spec is None or pin is None:
         print(json.dumps({"status": "error", "error": error or "Unable to select a real browser profile."}, ensure_ascii=False))
         return 1
-    verified = verify_real_profile(spec, pin)
+    verified = verify_real_profile(spec, pin, allowed_sites=allowed_sites, target_id=target_id)
     if verified.get("verified"):
         print(json.dumps({"status": "real_profile_ready", **verified}, indent=2, ensure_ascii=False))
         return 0
-    if cdp_metadata() is None:
-        launch = launch_real_browser(spec, pin)
-        verified = verify_real_profile(spec, pin)
+    if cdp_metadata(allowed_sites=allowed_sites, target_id=target_id) is None:
+        launch = launch_real_browser(spec, pin, allowed_sites=allowed_sites, target_id=target_id)
+        verified = verify_real_profile(spec, pin, allowed_sites=allowed_sites, target_id=target_id)
         if verified.get("verified"):
             print(json.dumps({"status": "real_profile_ready", "launch": launch, **verified}, indent=2, ensure_ascii=False))
             return 0
@@ -389,10 +409,16 @@ def command_ensure(_: argparse.Namespace) -> int:
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(description="Pin and verify the real the configured school portal Chromium profile")
+    root = argparse.ArgumentParser(description="Pin and verify the real configured school portal Chromium profile")
     sub = root.add_subparsers(dest="command", required=True)
-    sub.add_parser("inspect", help="Inspect supported browsers/profiles without reading credentials").set_defaults(handler=command_inspect)
-    sub.add_parser("ensure", help="Pin, launch if safe, and verify real-profile CDP").set_defaults(handler=command_ensure)
+    inspect = sub.add_parser("inspect", help="Inspect supported browsers/profiles without reading credentials")
+    inspect.add_argument("--allowed-site", action="append", default=[], help="Explicit allowed domain; repeat for multiple domains")
+    inspect.add_argument("--target-id", help="Optional explicit CDP target/page id")
+    inspect.set_defaults(handler=command_inspect)
+    ensure = sub.add_parser("ensure", help="Pin, launch if safe, and verify real-profile CDP")
+    ensure.add_argument("--allowed-site", action="append", default=[], help="Explicit allowed domain; repeat for multiple domains")
+    ensure.add_argument("--target-id", help="Optional explicit CDP target/page id")
+    ensure.set_defaults(handler=command_ensure)
     return root
 
 

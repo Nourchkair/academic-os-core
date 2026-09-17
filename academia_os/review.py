@@ -28,6 +28,7 @@ class ReviewItem:
     priority: str
     created_at: str
     updated_at: str
+    action_proposal_id: str | None = None
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "ReviewItem":
@@ -35,6 +36,7 @@ class ReviewItem:
             id=str(value["id"]), kind=str(value["kind"]), title=str(value["title"]), course=value.get("course"),
             details=dict(value.get("details", {})), status=ReviewStatus(value.get("status", ReviewStatus.OPEN)),
             priority=str(value.get("priority", "normal")), created_at=str(value["created_at"]), updated_at=str(value["updated_at"]),
+            action_proposal_id=value.get("action_proposal_id"),
         )
 
 
@@ -51,16 +53,16 @@ class ReviewQueue:
     def _save(self, items: list[ReviewItem]) -> None:
         self.store.write([asdict(item) for item in items])
 
-    def add(self, *, kind: str, title: str, course: str | None = None, details: dict[str, Any] | None = None, priority: str = "normal") -> ReviewItem:
+    def add(self, *, kind: str, title: str, course: str | None = None, details: dict[str, Any] | None = None, priority: str = "normal", action_proposal_id: str | None = None) -> ReviewItem:
         now = datetime.now(timezone.utc).isoformat()
-        item = ReviewItem(str(uuid4()), kind, title, course, details or {}, ReviewStatus.OPEN, priority, now, now)
-        self._save(self._items() + [item])
+        item = ReviewItem(str(uuid4()), kind, title, course, details or {}, ReviewStatus.OPEN, priority, now, now, action_proposal_id)
+        self.store.update([], lambda raw: [*raw, asdict(item)])
         return item
 
     def list(self, *, include_resolved: bool = False) -> list[ReviewItem]:
         items = self._items()
         if not include_resolved:
-            items = [item for item in items if item.status not in {ReviewStatus.RESOLVED, ReviewStatus.REJECTED}]
+            items = [item for item in items if item.status not in {ReviewStatus.APPROVED, ReviewStatus.RESOLVED, ReviewStatus.REJECTED}]
         return sorted(items, key=lambda item: (item.status != ReviewStatus.OPEN, item.priority, item.created_at))
 
     def get(self, item_id: str) -> ReviewItem:
@@ -69,16 +71,25 @@ class ReviewQueue:
                 return item
         raise KeyError(f"review item not found: {item_id}")
 
+    def find_by_action_proposal_id(self, proposal_id: str) -> ReviewItem | None:
+        return next((item for item in self._items() if item.action_proposal_id == proposal_id), None)
+
     def update(self, item_id: str, *, status: ReviewStatus | str | None = None, details: dict[str, Any] | None = None) -> ReviewItem:
-        items = self._items()
-        for index, item in enumerate(items):
-            if item.id != item_id:
-                continue
-            item.status = ReviewStatus(status) if status is not None else item.status
-            if details is not None:
-                item.details = details
-            item.updated_at = datetime.now(timezone.utc).isoformat()
-            items[index] = item
-            self._save(items)
-            return item
-        raise KeyError(f"review item not found: {item_id}")
+        selected: list[ReviewItem] = []
+
+        def transition(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            items = [ReviewItem.from_dict(item) for item in raw if isinstance(item, dict) and "id" in item]
+            for index, item in enumerate(items):
+                if item.id != item_id:
+                    continue
+                item.status = ReviewStatus(status) if status is not None else item.status
+                if details is not None:
+                    item.details = details
+                item.updated_at = datetime.now(timezone.utc).isoformat()
+                items[index] = item
+                selected.append(item)
+                return [asdict(value) for value in items]
+            raise KeyError(f"review item not found: {item_id}")
+
+        self.store.update([], transition)
+        return selected[0]

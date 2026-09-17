@@ -58,7 +58,8 @@ def runtime_directory(profile: dict[str, Any]) -> Path:
 
 
 def state_path(profile: dict[str, Any]) -> Path:
-    return runtime_directory(profile) / ".academia" / "processing.json"
+    """Return the single authoritative workspace operational-state path."""
+    return academic_root(profile) / ".academia" / "processing.json"
 
 
 def find_inboxes(root: Path) -> list[Path]:

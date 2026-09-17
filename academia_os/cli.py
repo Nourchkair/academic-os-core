@@ -8,14 +8,16 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable
 
-from .acquisition import browser_access_policy, capability_report, configured_watched_folders, scan_watched_folder
+from .acquisition import browser_access_policy, capability_report, configured_watched_folders, import_file, scan_watched_folder
+from .actions import ActionStore
 from .activity import ActivityLog
 from .config import load_config, save_config, runtime_directory
 from .discovery import discover_academic_folders
 from .provenance import verify_source_metadata
-from .review import ReviewQueue, ReviewStatus
+from .review import ReviewQueue
 from .settings import update_config
 from .workspace import build_workspace_snapshot
+from .workflow import ApprovalWorkflow
 from .version import __version__
 
 
@@ -67,7 +69,22 @@ def _status(args: argparse.Namespace) -> dict[str, Any]:
         "review_count": len(reviews),
         "recent_activity": [asdict(event) for event in activities],
         "acquisition": {"watched_folders": [str(path) for path in configured_watched_folders(config)], "browser": browser_access_policy(config), "capabilities": capability_report()},
-        "agents": {"hermes": _hermes_status(config), "codex": {"status": "planned"}, "claude": {"status": "planned"}, "chatgpt": {"status": "planned"}},
+        "agents": {
+            "hermes": {"generic_agent_compatible": True, "dedicated_adapter": _hermes_status(config)},
+            "codex": _generic_agent_status("Codex"),
+            "claude": _generic_agent_status("Claude"),
+            "chatgpt": _generic_agent_status("ChatGPT/Work"),
+        },
+    }
+
+
+def _generic_agent_status(name: str) -> dict[str, Any]:
+    return {
+        "status": "available_without_dedicated_adapter",
+        "generic_agent_compatible": True,
+        "dedicated_adapter": "not required",
+        "interface": "AGENTS.md + local academia CLI/API contract",
+        "name": name,
     }
 
 
@@ -114,6 +131,10 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--json", action="store_true")
     watched = sub.add_parser("watch")
     watched.add_argument("--json", action="store_true")
+    imported = sub.add_parser("import", help="Copy one local file into a selected workspace inbox")
+    imported.add_argument("source", type=Path)
+    imported.add_argument("--destination", type=Path, required=True, help="Workspace inbox directory; source files are never moved")
+    imported.add_argument("--json", action="store_true")
     return parser
 
 
@@ -127,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"courses", "today", "tasks", "course", "workspace", "review", "inbox", "activity", "agents", "capabilities", "watch", "verify", "verify-source", "settings"}:
+        if args.command in {"courses", "today", "tasks", "course", "workspace", "review", "inbox", "activity", "agents", "capabilities", "watch", "import", "verify", "verify-source", "settings"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -165,12 +186,22 @@ def dispatch(args: argparse.Namespace) -> int:
         _emit(value, as_json=args.json); return 0
     if args.command == "review":
         _, snapshot, _ = _context(args)
-        queue = ReviewQueue(Path(snapshot["academic_root"]) / ".academia" / "review.json")
+        state_root = Path(snapshot["academic_root"]) / ".academia"
+        queue = ReviewQueue(state_root / "review.json")
+        workflow = ApprovalWorkflow(
+            actions=ActionStore(state_root / "actions.json"),
+            reviews=queue,
+            activity=ActivityLog(state_root / "activity.jsonl"),
+        )
         if args.action != "list":
             if not args.item_id:
                 raise ValueError(f"review {args.action} requires an item id")
-            status = {"approve": ReviewStatus.APPROVED, "reject": ReviewStatus.REJECTED, "resolve": ReviewStatus.RESOLVED}[args.action]
-            value = asdict(queue.update(args.item_id, status=status))
+            if args.action == "approve":
+                value = asdict(workflow.approve_review(args.item_id))
+            elif args.action == "reject":
+                value = asdict(workflow.reject_review(args.item_id))
+            else:
+                value = asdict(workflow.resolve_review(args.item_id))
         else:
             value = [asdict(item) for item in queue.list()]
         _emit(value, as_json=args.json); return 0
@@ -190,6 +221,29 @@ def dispatch(args: argparse.Namespace) -> int:
     if args.command == "watch":
         config, _, _ = _context(args)
         value = {str(folder): [str(path) for path in scan_watched_folder(folder)] for folder in configured_watched_folders(config)}
+        _emit(value, as_json=args.json); return 0
+    if args.command == "import":
+        config, snapshot, _ = _context(args)
+        workspace_root = Path(snapshot["academic_root"]).expanduser().resolve()
+        destination = args.destination.expanduser().resolve()
+        try:
+            relative_destination = destination.relative_to(workspace_root)
+        except ValueError as exc:
+            raise ValueError("import destination must be inside the configured academic workspace") from exc
+        if destination == workspace_root or ".academia" in relative_destination.parts:
+            raise ValueError("import destination must be a workspace inbox, not the workspace root or operational state")
+        from .processing import ProcessingStore
+        processing = ProcessingStore(workspace_root / ".academia" / "processing.json")
+        value = import_file(args.source, destination, processing)
+        ActivityLog(workspace_root / ".academia" / "activity.jsonl").append(
+            event_type="file.imported",
+            title=f"Imported {Path(value['destination']).name}",
+            details=value,
+            source=str(args.source.expanduser().resolve()),
+            confidence="unverified",
+            actor="user",
+        )
+        value["state_path"] = str(workspace_root / ".academia" / "processing.json")
         _emit(value, as_json=args.json); return 0
     if args.command == "verify-source":
         requested = json.loads(args.requested.read_text(encoding="utf-8")); retrieved = json.loads(args.retrieved.read_text(encoding="utf-8"))

@@ -16,6 +16,8 @@ academia_os/                       agent-neutral core and CLI
 ├── activity.py                    durable append-only activity
 ├── processing.py                  retryable inbox lifecycle
 ├── actions.py                     proposal/approval policy
+├── workflow.py                    Review ↔ Action ↔ Activity coordination
+├── state.py                       locked atomic JSON state primitives
 ├── acquisition.py                 manual/watched acquisition
 ├── browser.py                     browser-neutral metadata/policy
 ├── settings.py                    diff + safe update model

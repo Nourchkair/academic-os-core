@@ -92,16 +92,37 @@ def test_inbox_gate_persists_retryable_processing_state_outside_hermes(tmp_path:
     first = gate.scan(config)
     assert first["wakeAgent"] is True
     assert first["processing"][0]["status"] == "PENDING"
-    assert (tmp_path / ".academic-os" / ".academia" / "processing.json").is_file()
+    canonical_state = root / ".academia" / "processing.json"
+    assert canonical_state.is_file()
+    assert not (tmp_path / ".academic-os" / ".academia" / "processing.json").exists()
     assert not (tmp_path / ".hermes" / "state" / "academic_os_inbox_gate.json").exists()
     second = gate.scan(config)
     assert second == {"wakeAgent": False}
     from academia_os.processing import ProcessingStore
 
     record_id = first["processing"][0]["record_id"]
-    store = ProcessingStore(tmp_path / ".academic-os" / ".academia" / "processing.json")
+    store = ProcessingStore(canonical_state)
     store.begin(record_id)
     store.fail(record_id, "temporary parser failure")
     retry_signal = gate.scan(config)
     assert retry_signal["wakeAgent"] is True
     assert retry_signal["processing"][0]["status"] == "FAILED"
+
+
+def test_cdp_metadata_returns_only_selected_allowed_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    browser = load_module("adapters/hermes/scripts/academic_os_brightspace_browser.py", "academic_os_browser_privacy_test")
+
+    def fake_http_json(url: str):
+        if url.endswith("/json/version"):
+            return {"Browser": "Chrome/1", "Protocol-Version": "1.3"}
+        return [
+            {"id": "allowed", "type": "page", "title": "Course Home", "url": "https://brightspace.example.edu/course"},
+            {"id": "private", "type": "page", "title": "Private Mail", "url": "https://mail.example.com/inbox"},
+            {"id": "same-domain-other-page", "type": "page", "title": "Other Course", "url": "https://brightspace.example.edu/other"},
+        ]
+
+    monkeypatch.setattr(browser, "http_json", fake_http_json)
+    metadata = browser.cdp_metadata(allowed_sites=["brightspace.example.edu"], target_id="allowed")
+    assert metadata is not None
+    assert metadata["page_count"] == 1
+    assert metadata["pages"] == [{"id": "allowed", "type": "page", "title": "Course Home", "url": "https://brightspace.example.edu/course"}]

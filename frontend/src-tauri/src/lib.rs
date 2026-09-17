@@ -1,5 +1,22 @@
+use std::path::PathBuf;
+
+fn academia_binary() -> PathBuf {
+    if let Some(configured) = std::env::var_os("ACADEMIA_OS_CLI") {
+        return PathBuf::from(configured);
+    }
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(parent) = executable.parent() {
+            let sibling = parent.join("academia");
+            if sibling.is_file() {
+                return sibling;
+            }
+        }
+    }
+    PathBuf::from("academia")
+}
+
 fn run_academia(args: Vec<String>) -> Result<String, String> {
-    let output = std::process::Command::new("academia")
+    let output = std::process::Command::new(academia_binary())
         .args(args)
         .output()
         .map_err(|error| format!("Academia CLI is unavailable: {error}"))?;
@@ -12,7 +29,22 @@ fn run_academia(args: Vec<String>) -> Result<String, String> {
 
 #[tauri::command]
 fn academia_command(command: String, args: Vec<String>) -> Result<String, String> {
-    let allowed = ["status", "courses", "tasks", "review", "activity", "workspace", "settings"];
+    let allowed = [
+        "status",
+        "courses",
+        "course",
+        "today",
+        "tasks",
+        "review",
+        "activity",
+        "workspace",
+        "inbox",
+        "watch",
+        "agents",
+        "capabilities",
+        "settings",
+        "verify",
+    ];
     if !allowed.contains(&command.as_str()) {
         return Err(format!("Unsupported Academia command: {command}"));
     }

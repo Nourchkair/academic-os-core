@@ -56,6 +56,8 @@ academia inbox --json
 academia activity --json
 academia agents --json
 academia capabilities --json
+academia import /path/to/file.pdf --destination /path/to/workspace/Fall\ 2026/COURSE/00_INBOX --json
+academia watch --json  # one-shot scan of configured folders
 ```
 
 Use `--profile /path/to/profile.json` when the profile is not at `~/.academic-os/profile.json`.
@@ -72,7 +74,7 @@ Workspace root, runtime directory, and semester changes require `--approve-struc
 
 ## Workspace and readable files
 
-The configured academic root remains the source of truth for the user. It contains semesters, course folders, Markdown status files, readings, notes, and imported material. `.academia/` stores rebuildable `index.json`, processing records, review items, activity events, and action proposals. A user can inspect and use the workspace without Academia OS.
+The configured academic root remains the source of truth for the user. It contains semesters, course folders, Markdown status files, readings, notes, and imported material. `.academia/` stores rebuildable `index.json`, processing records, review items, activity events, and action proposals. Processing state is canonical under `<academic-root>/.academia/`; the runtime directory does not contain a second operational queue. A user can inspect and use the workspace without Academia OS.
 
 The processing lifecycle is explicit:
 
@@ -87,12 +89,12 @@ A scan never acknowledges work. Stale processing leases return to retryable stat
 
 Academia OS remains useful with no browser access:
 
-1. **Manual import** — the user downloads/selects PDF, DOCX, PPTX, text, HTML, or other normal academic files; originals are preserved and the imported copy enters review/intake.
-2. **Watched folders** — configured local directories such as `Downloads/School` are scanned for new files.
+1. **Manual import** — `academia import SOURCE --destination INBOX` copies a user-selected PDF, DOCX, PPTX, text, HTML, or other normal academic file into a workspace inbox; the original remains in place and the copy enters intake.
+2. **Watched folders** — `academia watch` performs a one-shot scan of configured local directories such as `Downloads/School`. A persistent background watcher is not claimed yet.
 3. **Browser companion** — architecture only for now. A future companion will support explicit actions such as “Send to Academia OS,” “Save reading,” and “Import this page.”
 4. **Advanced browser access** — optional and off by default.
 
-The current capability report is honest: manual imports and watched folders are supported; Chromium is limited to optional visible handoff; Firefox and Safari are planned, not claimed as connected. The user may choose Chrome, Firefox, Safari, or another profile. A dedicated school/research profile is recommended for privacy but not required. Domain allow-lists narrow intended access but are not a security guarantee.
+The current capability report is honest: manual import and one-shot watched-folder scanning are available; Chromium is limited to optional visible handoff with an explicit allow-list and target; Firefox and Safari are planned, not claimed as connected. The user may choose Chrome, Firefox, Safari, or another profile. A dedicated school/research profile is recommended for privacy but not required. Domain allow-lists narrow intended access but are not a security guarantee.
 
 For readings, prefer legitimate library, Omni/OpenAthens, publisher, DOI/open-access, institutional, or author-released access. Discovery-only sources do not authorize downloading an unclear copy. Never pay without explicit confirmation, and never silently substitute an edition.
 
@@ -115,7 +117,7 @@ An email address or local path can be normal in a private workspace; it should b
 
 ## Review and activity
 
-Uncertain source matches, deadline conflicts, and approval-required changes are durable structured Review items under `.academia/review.json`. Activity events are append-only JSON lines under `.academia/activity.jsonl`, with human-readable fields such as title, course, source, confidence, authority, and action. The desktop Home/Review views consume these models rather than hardcoded notice text.
+Uncertain source matches, deadline conflicts, and approval-required changes are durable structured Review items under `.academia/review.json`. Action-linked Review items contain the exact `action_proposal_id`; approving the Review item approves that proposal, and the item resolves only after the proposal is executed and verified. Activity events are append-only JSON lines under `.academia/activity.jsonl`, with human-readable fields such as title, course, source, confidence, authority, and action. The desktop Home/Review views consume these models rather than hardcoded notice text.
 
 ## Desktop application
 
@@ -134,7 +136,7 @@ It is a React + TypeScript application with a Tauri 2 shell and a typed bridge t
 ## Optional agents
 
 - `adapters/hermes/` contains optional Hermes detection and job translation.
-- Codex, Claude, and ChatGPT adapters are represented as planned/configurable states only; no deep integration is falsely claimed.
+- Codex, Claude, and ChatGPT/Work are generically compatible through `AGENTS.md` plus the local CLI; dedicated adapters are not required. Hermes remains the only dedicated adapter currently implemented.
 - Agents should read `AGENTS.md` and use `academia ... --json`.
 
 ## Development and tests

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Academia OS local profile",
   "type": "object",
-  "required": ["schema_version", "student", "academic", "runtime", "automation", "acquisition", "privacy", "agents"],
+  "required": ["schema_version", "student", "academic", "runtime", "automation", "acquisition", "privacy", "browser", "agents"],
   "properties": {
     "schema_version": {"const": 2},
     "student": {
@@ -47,19 +47,25 @@
       "properties": {
         "manual_import_enabled": {"type": "boolean"},
         "watched_folders": {"type": "array", "items": {"type": "string"}},
-        "browser_companion_enabled": {"type": "boolean"},
-        "browser_access_enabled": {"type": "boolean"},
-        "advanced_browser_enabled": {"type": "boolean"},
-        "allowed_sites": {"type": "array", "items": {"type": "string"}}
+        "browser_companion_enabled": {"type": "boolean"}
       },
       "additionalProperties": true
     },
     "privacy": {
       "type": "object",
       "properties": {
-        "browser_access_enabled": {"type": "boolean"},
-        "allowed_sites": {"type": "array", "items": {"type": "string"}},
         "dedicated_profile_recommended": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "browser": {
+      "type": "object",
+      "properties": {
+        "name": {"type": "string"},
+        "user_data_dir": {"type": "string"},
+        "profile_directory": {"type": "string"},
+        "access_enabled": {"type": "boolean"},
+        "allowed_sites": {"type": "array", "items": {"type": "string"}}
       },
       "additionalProperties": true
     },

@@ -38,6 +38,7 @@ export type ReviewItem = {
   priority: string
   created_at: string
   updated_at: string
+  action_proposal_id?: string
 }
 
 export type ActivityEvent = {

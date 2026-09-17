@@ -34,8 +34,8 @@ def _default_sections() -> dict[str, Any]:
         "preferences": {"explanation_style": "detailed", "preferred_format": "markdown", "use_visuals": True, "study_method": "active recall"},
         "integrations": {"gmail": False, "calendar": False, "drive": False, "school_portal": False},
         "automation": {"daily_brief_enabled": True, "daily_brief_time": "09:00", "inbox_processor_enabled": True, "inbox_interval_minutes": 5},
-        "acquisition": {"manual_import_enabled": True, "watched_folders": [], "browser_companion_enabled": False, "browser_access_enabled": False, "advanced_browser_enabled": False, "allowed_sites": []},
-        "privacy": {"browser_access_enabled": False, "allowed_sites": [], "dedicated_profile_recommended": True},
+        "acquisition": {"manual_import_enabled": True, "watched_folders": [], "browser_companion_enabled": False},
+        "privacy": {"dedicated_profile_recommended": True},
         "browser": {"name": "auto", "user_data_dir": "", "profile_directory": "", "access_enabled": False, "allowed_sites": []},
         "agents": {
             "hermes": {"enabled": False, "profile": "default", "home_directory": ""},
@@ -44,6 +44,24 @@ def _default_sections() -> dict[str, Any]:
             "chatgpt": {"enabled": False},
         },
     }
+
+
+def _normalize_browser_config(result: dict[str, Any]) -> dict[str, Any]:
+    """Collapse legacy browser aliases into the canonical browser section."""
+    acquisition = result.get("acquisition") if isinstance(result.get("acquisition"), dict) else {}
+    privacy = result.get("privacy") if isinstance(result.get("privacy"), dict) else {}
+    browser = copy.deepcopy(result.get("browser")) if isinstance(result.get("browser"), dict) else {}
+    if "access_enabled" not in browser:
+        browser["access_enabled"] = bool(acquisition.get("browser_access_enabled", False) or privacy.get("browser_access_enabled", False))
+    if "allowed_sites" not in browser:
+        browser["allowed_sites"] = list(acquisition.get("allowed_sites") or privacy.get("allowed_sites") or [])
+    browser.setdefault("name", "auto")
+    browser.setdefault("user_data_dir", "")
+    browser.setdefault("profile_directory", "")
+    result["browser"] = browser
+    result["acquisition"] = {key: value for key, value in acquisition.items() if key not in {"browser_access_enabled", "advanced_browser_enabled", "allowed_sites"}}
+    result["privacy"] = {key: value for key, value in privacy.items() if key not in {"browser_access_enabled", "allowed_sites"}}
+    return result
 
 
 def _path_string(value: Any, label: str) -> str:
@@ -86,8 +104,10 @@ def migrate_config(data: dict[str, Any], *, now: datetime | date | None = None) 
         }
         result["privacy"] = {"browser_access_enabled": False, "allowed_sites": [], "dedicated_profile_recommended": True}
         result["schema_version"] = CURRENT_CONFIG_VERSION
+    result = _normalize_browser_config(result)
     defaults = _default_sections()
     result = _deep_merge(result, defaults)
+    result = _normalize_browser_config(result)
     if not result["academic"].get("semester"):
         result["academic"]["semester"] = resolve_current_semester(now, str(result["academic"].get("timezone", "UTC")))
     return result
@@ -101,7 +121,9 @@ def validate_config(data: dict[str, Any]) -> dict[str, Any]:
         data = migrate_config(data)
     if version != CURRENT_CONFIG_VERSION and data.get("schema_version") != CURRENT_CONFIG_VERSION:
         raise ValueError(f"schema_version must be {CURRENT_CONFIG_VERSION}")
-    result = _deep_merge(data, _default_sections())
+    result = _normalize_browser_config(copy.deepcopy(data))
+    result = _deep_merge(result, _default_sections())
+    result = _normalize_browser_config(result)
     required = {
         "student.name": result["student"].get("name"),
         "student.institution": result["student"].get("institution"),

@@ -13,7 +13,7 @@ def test_checked_in_schema_conforms_to_canonical_config_contract() -> None:
     example_path = ROOT / "config" / "manifest.example.json"
     example = load_config(example_path)
     assert schema["properties"]["schema_version"]["const"] == CURRENT_CONFIG_VERSION
-    assert set(schema["required"]) >= {"schema_version", "student", "academic", "runtime", "automation", "acquisition", "privacy", "agents"}
+    assert set(schema["required"]) >= {"schema_version", "student", "academic", "runtime", "automation", "acquisition", "privacy", "browser", "agents"}
     assert schema["properties"]["academic"]["properties"]["semester"]["pattern"] == SEMESTER_PATTERN.pattern
     assert example["schema_version"] == CURRENT_CONFIG_VERSION
     assert example["academic"]["semester"] != "Current Semester"

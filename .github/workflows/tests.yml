@@ -23,7 +23,7 @@ jobs:
       - name: Run Python tests
         run: python -m pytest tests/ -q
       - name: Compile runtime and desktop modules
-        run: python -m compileall academia_os installer desktop adapters
+        run: python -m compileall academia_os installer desktop adapters runtime scripts
       - name: Check canonical version
         run: python scripts/check_versions.py
 
@@ -46,3 +46,25 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+
+  tauri:
+    name: Tauri Rust compile check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Build frontend assets for Tauri context
+        working-directory: frontend
+        run: npm run build
+      - name: Install Tauri Linux dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cargo check
+        run: cargo check --manifest-path frontend/src-tauri/Cargo.toml

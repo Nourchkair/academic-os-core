@@ -35,14 +35,9 @@
   "acquisition": {
     "manual_import_enabled": true,
     "watched_folders": [],
-    "browser_companion_enabled": false,
-    "browser_access_enabled": false,
-    "advanced_browser_enabled": false,
-    "allowed_sites": []
+    "browser_companion_enabled": false
   },
   "privacy": {
-    "browser_access_enabled": false,
-    "allowed_sites": [],
     "dedicated_profile_recommended": true
   },
   "browser": {

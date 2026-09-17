@@ -66,36 +66,66 @@ class ActionStore:
             raise PermissionError(f"Academia OS never performs {normalized.value} actions")
         now = datetime.now(timezone.utc).isoformat()
         proposal = ActionProposal(str(uuid4()), normalized.value, title, details or {}, ActionStatus.PROPOSED.value, requires_approval, now, now)
-        items = self._all(); items.append(proposal); self._write(items); return proposal
+        self.store.update([], lambda raw: [*raw, asdict(proposal)])
+        return proposal
 
     def list(self, *, status: str | None = None) -> list[ActionProposal]:
         items = self._all()
         return [item for item in items if status is None or item.status == status]
 
-    def _transition(self, proposal_id: str, status: ActionStatus, *, reason: str | None = None) -> ActionProposal:
-        items = self._all()
-        for item in items:
+    def get(self, proposal_id: str) -> ActionProposal:
+        for item in self._all():
             if item.id == proposal_id:
-                item.status = status.value; item.updated_at = datetime.now(timezone.utc).isoformat(); item.failure_reason = reason; self._write(items); return item
-        raise KeyError(proposal_id)
+                return item
+        raise KeyError(f"action proposal not found: {proposal_id}")
+
+    def delete(self, proposal_id: str) -> None:
+        def transition(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            items = [ActionProposal.from_dict(value) for value in raw]
+            proposal = next((item for item in items if item.id == proposal_id), None)
+            if proposal is None:
+                raise KeyError(f"action proposal not found: {proposal_id}")
+            if proposal.status != ActionStatus.PROPOSED.value:
+                raise ValueError("only unlinked proposed actions can be deleted")
+            return [asdict(item) for item in items if item.id != proposal_id]
+
+        self.store.update([], transition)
+
+    def reopen(self, proposal_id: str) -> ActionProposal:
+        return self._transition(proposal_id, ActionStatus.PROPOSED, expected=ActionStatus.APPROVED)
+
+    def _transition(self, proposal_id: str, status: ActionStatus, *, reason: str | None = None, expected: ActionStatus | None = None) -> ActionProposal:
+        selected: list[ActionProposal] = []
+
+        def transition(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            items = [ActionProposal.from_dict(value) for value in raw]
+            for index, item in enumerate(items):
+                if item.id != proposal_id:
+                    continue
+                if expected is not None and item.status != expected.value:
+                    raise ValueError(f"proposal is not {expected.value}: {item.status}")
+                item.status = status.value
+                item.updated_at = datetime.now(timezone.utc).isoformat()
+                item.failure_reason = reason
+                items[index] = item
+                selected.append(item)
+                return [asdict(value) for value in items]
+            raise KeyError(proposal_id)
+
+        self.store.update([], transition)
+        return selected[0]
 
     def approve(self, proposal_id: str) -> ActionProposal:
-        item = next(item for item in self._all() if item.id == proposal_id)
-        if item.status != ActionStatus.PROPOSED.value: raise ValueError(f"proposal is not awaiting approval: {item.status}")
-        return self._transition(proposal_id, ActionStatus.APPROVED)
+        return self._transition(proposal_id, ActionStatus.APPROVED, expected=ActionStatus.PROPOSED)
 
     def reject(self, proposal_id: str) -> ActionProposal:
-        return self._transition(proposal_id, ActionStatus.REJECTED)
+        return self._transition(proposal_id, ActionStatus.REJECTED, expected=ActionStatus.PROPOSED)
 
     def mark_executed(self, proposal_id: str) -> ActionProposal:
-        item = next(item for item in self._all() if item.id == proposal_id)
-        if item.status != ActionStatus.APPROVED.value: raise ValueError("only approved actions can be executed")
-        return self._transition(proposal_id, ActionStatus.EXECUTED)
+        return self._transition(proposal_id, ActionStatus.EXECUTED, expected=ActionStatus.APPROVED)
 
     def verify(self, proposal_id: str) -> ActionProposal:
-        item = next(item for item in self._all() if item.id == proposal_id)
-        if item.status != ActionStatus.EXECUTED.value: raise ValueError("only executed actions can be verified")
-        return self._transition(proposal_id, ActionStatus.VERIFIED)
+        return self._transition(proposal_id, ActionStatus.VERIFIED, expected=ActionStatus.EXECUTED)
 
     def fail(self, proposal_id: str, reason: str) -> ActionProposal:
         return self._transition(proposal_id, ActionStatus.FAILED, reason=reason)
