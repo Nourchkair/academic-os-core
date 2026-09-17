@@ -5,6 +5,8 @@
 **Status:** No courses configured yet.
 **Timezone:** {{TIMEZONE}}
 
+`00_INBOX/` is the semester-level general intake. Use it only when the course identity is unknown; once a course is confirmed, material belongs in that course's direct `00_INBOX/`.
+
 ## Active courses
 
 No confirmed courses yet. Add courses only from reliable course evidence.

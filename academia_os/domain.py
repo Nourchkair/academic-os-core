@@ -27,6 +27,9 @@ class Evidence:
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
     last_verified_at: str | None = None
+    source_hash: str | None = None
+    reference: dict[str, Any] | None = None
+    excerpt: str | None = None
 
 
 @dataclass(frozen=True)
@@ -46,7 +49,7 @@ class Deadline:
     id: str
     course_id: str
     title: str
-    date: str
+    date: str | None
     time: str | None
     type: str
     evidence: Evidence
@@ -186,3 +189,60 @@ class DomainProjection:
 
     def counts(self) -> dict[str, int]:
         return {kind: len(self.list(kind)) for kind in ENTITY_TYPES}
+
+    def get(self, entity_type: str, entity_id: str) -> dict[str, Any]:
+        for entity in self.list(entity_type):
+            if entity.get("id") == entity_id:
+                return dict(entity)
+        raise KeyError(f"domain entity not found: {entity_type}:{entity_id}")
+
+    def update_field(
+        self,
+        entity_type: str,
+        entity_id: str,
+        field_name: str,
+        value: Any,
+        *,
+        expected_before: Any = None,
+        evidence: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if entity_type not in ENTITY_TYPES:
+            raise ValueError(f"unsupported domain entity: {entity_type}")
+        selected: list[dict[str, Any]] = []
+
+        def transition(raw: dict[str, Any]) -> dict[str, Any]:
+            state = raw if isinstance(raw, dict) else {"schema_version": 1, "entities": {}}
+            entities = state.setdefault("entities", {})
+            values = entities.setdefault(entity_type, [])
+            for index, current in enumerate(values):
+                if not isinstance(current, dict) or current.get("id") != entity_id:
+                    continue
+                if expected_before is not None and current.get(field_name) != expected_before:
+                    raise ValueError(f"domain entity changed before update: {entity_type}:{entity_id}.{field_name}")
+                updated = dict(current)
+                updated[field_name] = value
+                if evidence is not None:
+                    updated["evidence"] = dict(evidence)
+                values[index] = updated
+                selected.append(updated)
+                return state
+            raise KeyError(f"domain entity not found: {entity_type}:{entity_id}")
+
+        self.store.update({"schema_version": 1, "entities": {}}, transition)
+        return selected[0]
+
+    def replace_raw(self, entity_type: str, entity_id: str, replacement: dict[str, Any]) -> dict[str, Any]:
+        if entity_type not in ENTITY_TYPES:
+            raise ValueError(f"unsupported domain entity: {entity_type}")
+
+        def transition(raw: dict[str, Any]) -> dict[str, Any]:
+            state = raw if isinstance(raw, dict) else {"schema_version": 1, "entities": {}}
+            values = state.setdefault("entities", {}).setdefault(entity_type, [])
+            for index, current in enumerate(values):
+                if isinstance(current, dict) and current.get("id") == entity_id:
+                    values[index] = dict(replacement)
+                    return state
+            raise KeyError(f"domain entity not found: {entity_type}:{entity_id}")
+
+        self.store.update({"schema_version": 1, "entities": {}}, transition)
+        return dict(replacement)

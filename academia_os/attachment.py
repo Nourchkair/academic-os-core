@@ -2,16 +2,15 @@ from __future__ import annotations
 
 import copy
 import json
-import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .config import CURRENT_CONFIG_VERSION, load_config, save_config, validate_config
+from .config import CURRENT_CONFIG_VERSION, load_config, save_config, validate_config, SEMESTER_PATTERN
 from .semester import resolve_current_semester
 
-SEMESTER_DIRECTORY = re.compile(r"^(Winter|Spring|Summer|Fall) [0-9]{4}$")
+SEMESTER_DIRECTORY = SEMESTER_PATTERN
 STANDARD_COURSE_DIRECTORIES = (
     "00_INBOX",
     "01_COURSE",

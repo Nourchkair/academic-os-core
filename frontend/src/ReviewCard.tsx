@@ -13,6 +13,7 @@ export function ReviewCard({ item, courses, busy, onDecision }: ReviewCardProps)
   const content = (() => {
     switch (item.kind) {
       case 'deadline_conflict': return <DeadlineConflict details={details} onDecision={onDecision} busy={busy} />
+      case 'domain_conflict': return <DomainConflict details={details} onDecision={onDecision} busy={busy} />
       case 'source_verification':
       case 'reading_verification':
       case 'source_match': return <SourceVerification details={details} onDecision={onDecision} busy={busy} />
@@ -38,6 +39,15 @@ function DeadlineConflict({ details, onDecision, busy }: DecisionProps) {
   return <div className="typed-review-content"><p className="review-question">Academia found two supported deadline values. Which one should remain saved?</p><div className="comparison-grid"><ComparisonCell label="Currently saved" value={current || 'Unknown'} /><ComparisonCell label="New evidence" value={next || 'Unknown'} emphasis /></div><EvidenceLine source={source} confidence={confidence} /><div className="decision-row"><button className="secondary-button" disabled={busy} onClick={() => void onDecision('keep_current')}>Keep {current || 'current date'}</button><button className="primary-button" disabled={busy} onClick={() => void onDecision('use_new')}>Use {next || 'new date'}</button></div><EffectNote text="Only the selected value will be proposed as the saved deadline. The original evidence remains preserved." /></div>
 }
 
+function DomainConflict({ details, onDecision, busy }: DecisionProps) {
+  const field = humanize(value(details, 'field') || 'domain field')
+  const current = value(details, 'current', 'before')
+  const next = value(details, 'new', 'after')
+  const source = value(details, 'source') || 'Recorded academic evidence'
+  const confidence = value(details, 'confidence') || 'unverified'
+  return <div className="typed-review-content"><p className="review-question">A new syllabus value conflicts with the saved {field.toLowerCase()}. Choose which value should remain in derived state.</p><div className="comparison-grid"><ComparisonCell label="Currently saved" value={current || 'Unknown'} /><ComparisonCell label="New evidence" value={next || 'Unknown'} emphasis /></div><EvidenceLine source={source} confidence={confidence} /><div className="decision-row"><button className="secondary-button" disabled={busy} onClick={() => void onDecision('keep_current')}>Keep {current || 'current value'}</button><button className="primary-button" disabled={busy} onClick={() => void onDecision('use_new')}>Use {next || 'new value'}</button></div><EffectNote text="The selected value is the only one proposed for the derived projection. Source files and both evidence records remain preserved." /></div>
+}
+
 function SourceVerification({ details, onDecision, busy }: DecisionProps) {
   const requested = record(details.requested) || record(details.expected) || {}
   const retrieved = record(details.retrieved) || record(details.actual) || {}
@@ -60,7 +70,9 @@ function ImportClassification({ details, courses, onDecision, busy }: DecisionPr
 function CourseUncertainty({ details, courses, onDecision, busy }: DecisionProps & { courses: Course[] }) {
   const candidates = Array.isArray(details.candidates) ? details.candidates : []
   const [selected, setSelected] = useState('')
-  return <div className="typed-review-content"><p className="review-question">Academia found more than one possible course. Choose one only if the evidence is clear.</p><div className="candidate-review-list">{candidates.map((candidate, index) => { const item = record(candidate) || {}; const id = value(item, 'id', 'course_id') || courses[index]?.id || ''; return <label key={id || index} className="candidate-review"><input type="radio" name={`candidate-${String(details.id || 'course')}`} value={id} checked={selected === id} onChange={() => setSelected(id)} /><span><strong>{value(item, 'name', 'label') || 'Candidate course'}</strong><small>{value(item, 'reason', 'evidence') || 'No reason recorded'}</small></span></label> })}</div><div className="decision-row"><button className="quiet-button" disabled={busy} onClick={() => void onDecision('keep_unassigned')}>Keep unassigned</button>{selected && <button className="primary-button" disabled={busy} onClick={() => void onDecision(`choose_course:${selected}`)}>Use selected course</button>}</div></div>
+  const detected = value(details, 'detected_course_code', 'detected_course_title')
+  const supplied = value(details, 'supplied_course')
+  return <div className="typed-review-content"><p className="review-question">{detected ? 'The syllabus identity does not match the supplied course. Choose the correct context before extracting facts.' : 'Academia found more than one possible course. Choose one only if the evidence is clear.'}</p>{detected && <div className="classification-grid"><InfoField label="Detected in syllabus" value={detected} /><InfoField label="Supplied context" value={supplied || 'Unknown'} /><InfoField label="Source" value={value(details, 'source') || 'Unknown'} /><InfoField label="Confidence" value={value(details, 'confidence') || 'unverified'} /></div>}{candidates.length > 0 && <div className="candidate-review-list">{candidates.map((candidate, index) => { const item = record(candidate) || {}; const id = value(item, 'id', 'course_id') || courses[index]?.id || ''; return <label key={id || index} className="candidate-review"><input type="radio" name={`candidate-${String(details.id || 'course')}`} value={id} checked={selected === id} onChange={() => setSelected(id)} /><span><strong>{value(item, 'name', 'label') || 'Candidate course'}</strong><small>{value(item, 'reason', 'evidence') || 'No reason recorded'}</small></span></label> })}</div>}{detected && <label className="setup-field"><span>Correct course context</span><select value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">Choose a course</option>{courses.map((course) => <option value={course.id} key={course.id}>{course.code} · {course.name}</option>)}</select></label>}<div className="decision-row"><button className="quiet-button" disabled={busy} onClick={() => void onDecision('keep_unassigned')}>Keep unassigned</button>{selected && <button className="primary-button" disabled={busy} onClick={() => void onDecision(`choose_course:${selected}`)}>{detected ? 'Record course correction' : 'Use selected course'}</button>}</div>{detected && <EffectNote text="Recording a course correction does not rerun extraction automatically. Re-run the syllabus preview with the corrected course context." />}</div>
 }
 
 function ActionApproval({ details, onDecision, busy }: DecisionProps) {

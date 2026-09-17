@@ -15,6 +15,8 @@ Compatible agents may include Hermes, Codex, ChatGPT/Work, Claude, or future too
 
 The workspace must remain readable without Academia OS. Indexes and caches must be rebuildable from the underlying files whenever possible.
 
+For each recognized semester, the reusable template includes a semester-level `00_INBOX/` for academic material whose course identity is not known yet. It is distinct from a course's direct `00_INBOX/`; imports must target exactly one of those two structures and may not use arbitrary dump folders or nested subfolders.
+
 ## Stable interface
 
 Use the installed CLI or its equivalent local API:
@@ -24,7 +26,8 @@ academia status --json
 academia workspace --json
 academia workspace discover --json
 academia workspace inspect /path/to/workspace --json
-academia workspace attach /path/to/workspace --name "Student" --institution "University" --timezone America/Toronto --semester "Fall 2026" --json
+academia semester --timezone America/Toronto --json
+academia workspace attach /path/to/workspace --name "Student" --institution "University" --timezone America/Toronto --json
 academia import /path/to/file.pdf --destination /path/to/workspace/SEMESTER/COURSE/00_INBOX --json
 academia courses --json
 academia course "COURSE ID" --json
@@ -32,6 +35,9 @@ academia today --json
 academia tasks --json
 academia review --json
 academia review decide REVIEW_ID use_new --json
+academia review execute REVIEW_ID --json
+academia extract syllabus /path/to/syllabus.pdf --course "COURSE ID" --json
+academia extract syllabus /path/to/syllabus.pdf --course "COURSE ID" --verified-current --apply --json
 academia domain --json
 academia settings show --json
 academia inbox --json

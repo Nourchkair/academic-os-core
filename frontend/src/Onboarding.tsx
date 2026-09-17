@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from './lib/api'
 import type { AttachmentResult, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection } from './types'
 
@@ -28,15 +28,19 @@ export function Onboarding({ candidates, onComplete }: SetupProps) {
     institution: '',
     program: '',
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-    semester: candidates.length ? '' : currentSemesterLabel(),
+    semester: '',
     workspacePath: candidates[0]?.path || '~/Desktop/University OS',
   })
   const [inspection, setInspection] = useState<WorkspaceInspection | null>(null)
   const [preview, setPreview] = useState<SetupPreview | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
   const update = (key: keyof SetupForm, value: string) => setForm((current) => ({ ...current, [key]: value }))
+
+  // Semester labels come from the core calendar policy; this browser shell never reimplements term rules.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void api.semester(form.timezone).then((result) => { if (!form.semester) update('semester', result.semester) }).catch(() => undefined) }, [form.timezone])
+
   const selectedCandidate = candidates.find((candidate) => candidate.path === form.workspacePath)
 
   const inspect = async () => {
@@ -107,7 +111,7 @@ export function Onboarding({ candidates, onComplete }: SetupProps) {
       }
     }
     if (step === 3 && !/^(Winter|Spring|Summer|Fall) \d{4}$/.test(form.semester)) {
-      setError('Choose a specific semester such as Fall 2026.')
+      setError('Choose a specific semester using a term name and four-digit year.')
       return
     }
     if (step === 5) {
@@ -134,7 +138,7 @@ export function Onboarding({ candidates, onComplete }: SetupProps) {
       <p className="eyebrow">{steps[step]}</p>
       {step === 0 && <Welcome />}
       {step === 1 && <Profile form={form} update={update} />}
-      {step === 2 && <Workspace form={form} update={update} mode={workspaceMode} setMode={(value) => { setWorkspaceMode(value); setInspection(null); setPreview(null); if (value === 'new' && !form.semester) update('semester', currentSemesterLabel()) }} candidates={candidates} selectedCandidate={selectedCandidate} inspection={inspection} onInspect={() => void inspect()} busy={busy} />}
+      {step === 2 && <Workspace form={form} update={update} mode={workspaceMode} setMode={(value) => { setWorkspaceMode(value); setInspection(null); setPreview(null) }} candidates={candidates} selectedCandidate={selectedCandidate} inspection={inspection} onInspect={() => void inspect()} busy={busy} />}
       {step === 3 && <Semester form={form} update={update} inspection={inspection} />}
       {step === 4 && <Sources />}
       {step === 5 && <Agents />}
@@ -164,7 +168,7 @@ function InspectionSummary({ inspection }: { inspection: WorkspaceInspection }) 
 }
 
 function Semester({ form, update, inspection }: { form: SetupForm; update: (key: keyof SetupForm, value: string) => void; inspection: WorkspaceInspection | null }) {
-  return <div className="setup-content"><h1>Which semester are you organizing?</h1><p>Academia OS chooses a real semester label instead of saving an ambiguous “Current Semester.” You can adjust it if your workspace is ahead or behind.</p><Field label="Semester" value={form.semester || inspection?.suggested_semester || ''} onChange={(value) => update('semester', value)} placeholder="Fall 2026" /><div className="setup-note">Current suggestion: <strong>{inspection?.suggested_semester || 'Fall 2026'}</strong></div></div>
+  return <div className="setup-content"><h1>Which semester are you organizing?</h1><p>Academia OS chooses a real semester label instead of saving an ambiguous “Current Semester.” You can adjust it if your workspace is ahead or behind.</p><Field label="Semester" value={form.semester || inspection?.suggested_semester || ''} onChange={(value) => update('semester', value)} placeholder="e.g. Fall 2027" /><div className="setup-note">Current suggestion: <strong>{inspection?.suggested_semester || form.semester || 'Resolve from the local calendar'}</strong></div></div>
 }
 
 function Sources() {
@@ -188,9 +192,3 @@ function Field({ label, value, onChange, placeholder }: { label: string; value: 
 }
 
 function SummaryRow({ label, value }: { label: string; value: string }) { return <div><span>{label}</span><strong>{value}</strong></div> }
-
-function currentSemesterLabel(date = new Date()) {
-  const month = date.getMonth() + 1
-  const label = month <= 2 ? 'Winter' : month <= 5 ? 'Spring' : month === 6 ? 'Spring' : month === 7 || month === 8 ? 'Summer' : 'Fall'
-  return `${label} ${date.getFullYear()}`
-}

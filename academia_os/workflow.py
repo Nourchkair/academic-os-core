@@ -31,11 +31,13 @@ class ApprovalWorkflow:
         details: dict[str, Any] | None = None,
         course: str | None = None,
         priority: str = "normal",
+        review_kind: str = "action_approval",
+        review_details: dict[str, Any] | None = None,
     ) -> tuple[ActionProposal, ReviewItem]:
         proposal = self.actions.propose(action_type=action_type, title=title, details=details)
         try:
             review = self.reviews.add(
-                kind="action_approval",
+                kind=review_kind,
                 title=title,
                 course=course,
                 priority=priority,
@@ -43,6 +45,7 @@ class ApprovalWorkflow:
                 details={
                     "action_type": proposal.action_type,
                     "proposal_details": dict(proposal.details),
+                    **(review_details or {}),
                 },
             )
         except Exception:

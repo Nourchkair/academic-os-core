@@ -15,6 +15,7 @@ class ActionType(StrEnum):
     FILE_MOVE = "file_move"
     CALENDAR_CHANGE = "calendar_change"
     CONFIGURATION_CHANGE = "configuration_change"
+    DOMAIN_CHANGE = "domain_change"
     SCHOOL_SUBMISSION = "school_submission"
     SCHOOL_MESSAGE = "school_message"
     PAYMENT = "payment"

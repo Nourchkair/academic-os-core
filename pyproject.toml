@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = {file = "LICENSE"}
 authors = [{name = "Academia OS contributors"}]
-dependencies = []
+dependencies = ["pypdf>=5,<7"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10"]

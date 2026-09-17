@@ -26,7 +26,8 @@ The original architecture/refactor slices are implemented and verified. The curr
 - **Typed Review:** deadline conflicts, source/reading verification, imported-file classification, course uncertainty, and action approval now render as decision-specific cards and persist choices through `review decide`.
 - **Functional Settings:** Profile, Workspace, Sources & Imports, AI & Agents, Privacy, Automation, and Advanced sections now use the backend preview/apply contract. Structural changes show before/after and require explicit approval.
 - **Domain foundation:** evidence-backed `AcademicSource`, `Deadline`, `Assignment`, `Reading`, `Announcement`, and `CourseMeeting` projections persist under `.academia/domain.json`; no real-workspace semantic extraction is performed.
-- **Still intentionally incomplete:** persistent background watchers, semantic extraction from arbitrary academic files, execution of every possible action type, bundled sidecar packaging, signing, and notarization.
+- **Controlled syllabus extraction:** local text/Markdown/text-PDF extraction produces page/line-referenced candidates for course identity, assignments, explicit deadlines, weights, readings, and recurring meetings. Preview is side-effect free; apply reconciles idempotently, creates typed deadline conflicts, and exposes verified `DOMAIN_CHANGE` execution through the existing Review → Action → Verification → Activity workflow.
+- **Still intentionally incomplete:** OCR, arbitrary-document semantic extraction, persistent background watchers, external source retrieval, execution of every possible action type, bundled sidecar packaging, signing, and notarization.
 
 The live user workspace is never a repository fixture. Product tests use temporary sanitized workspaces only.
 

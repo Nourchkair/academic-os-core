@@ -11,7 +11,8 @@ Update this queue from actual course evidence. Do not mark a task complete from 
 
 ## Ongoing workflow
 
-- [ ] Place new files in the correct course `00_INBOX/`.
+- [ ] Place new files in the correct course `00_INBOX/` when the course is known.
+- [ ] Place course-unknown academic material in this semester's `00_INBOX/` only.
 - [ ] Process inbox files after new material arrives.
 - [ ] Update source indexes when original readings or assignment sheets are added.
 - [ ] Update weak areas only from actual practice or assessment evidence.

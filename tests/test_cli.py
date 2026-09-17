@@ -95,6 +95,7 @@ def test_review_decide_command_records_specific_choice(tmp_path: Path) -> None:
 def test_import_command_copies_source_and_stages_processing_record(tmp_path: Path) -> None:
     config = minimal_config(tmp_path)
     root = Path(config["academic"]["root_directory"])
+    (root / "Fall 2026" / "POL 2103 - Politics" / "01_COURSE").mkdir(parents=True)
     destination = root / "Fall 2026" / "POL 2103 - Politics" / "00_INBOX"
     source = tmp_path / "downloaded-reading.pdf"
     source.write_bytes(b"reading")
@@ -163,6 +164,7 @@ def test_workspace_attach_requires_apply_and_writes_only_profile_after_confirmat
 def test_uncertain_import_creates_review_item_without_moving_original(tmp_path: Path) -> None:
     config = minimal_config(tmp_path)
     root = Path(config["academic"]["root_directory"])
+    (root / "Fall 2026").mkdir(parents=True)
     destination = root / "Fall 2026" / "00_INBOX"
     source = tmp_path / "unknown-reading.pdf"
     source.write_bytes(b"reading")
@@ -207,6 +209,7 @@ def test_import_rejects_workspace_root_and_non_inbox_destinations(tmp_path: Path
 def test_import_rejects_operational_state_as_a_source(tmp_path: Path) -> None:
     config = minimal_config(tmp_path)
     root = Path(config["academic"]["root_directory"])
+    (root / "Fall 2026").mkdir(parents=True)
     source = root / ".academia" / "processing.json"
     source.parent.mkdir(parents=True)
     source.write_text("[]", encoding="utf-8")
@@ -265,3 +268,70 @@ def test_workspace_create_preserves_stale_profile_before_initializing(tmp_path: 
     assert value["profile_state"] == "stale_test_data"
     assert "Alex Student" in Path(value["backup_profile"]).read_text(encoding="utf-8")
     assert json.loads(profile.read_text(encoding="utf-8"))["academic"]["root_directory"] == str(root)
+
+
+def test_extract_syllabus_previews_without_mutating_and_apply_records_domain_activity(tmp_path: Path) -> None:
+    config = minimal_config(tmp_path)
+    root = Path(config["academic"]["root_directory"])
+    course = root / "Fall 2026" / "POL 2103 - Politics"
+    (course / "01_COURSE").mkdir(parents=True)
+    syllabus = tmp_path / "POL2103_Syllabus.md"
+    syllabus.write_text(
+        """# POL 2103 - Politics
+Course: POL 2103 - Politics
+## Assessments
+- Research Essay — 25% — Due October 19, 2026
+""",
+        encoding="utf-8",
+    )
+    profile = Path(config["runtime"]["install_directory"]) / "profile.json"
+    save_config(profile, config)
+    env = os.environ.copy(); env["PYTHONPATH"] = str(ROOT)
+    command = [sys.executable, "-m", "academia_os", "--profile", str(profile), "extract", "syllabus", str(syllabus), "--course", "POL 2103 - Politics", "--verified-current", "--json"]
+
+    preview = subprocess.run(command, cwd=ROOT, env=env, text=True, capture_output=True)
+    assert preview.returncode == 0, preview.stderr
+    preview_value = json.loads(preview.stdout)
+    assert preview_value["applied"] is False
+    assert preview_value["reconciliation"]["applied"] is False
+    assert not (root / ".academia").exists()
+
+    applied = subprocess.run(command + ["--apply"], cwd=ROOT, env=env, text=True, capture_output=True)
+    assert applied.returncode == 0, applied.stderr
+    applied_value = json.loads(applied.stdout)
+    assert applied_value["applied"] is True
+    assert (root / ".academia" / "domain.json").is_file()
+    activity = json.loads((root / ".academia" / "activity.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert activity["event_type"] == "syllabus.reconciled"
+
+
+def test_cli_deadline_conflict_requires_review_decision_then_executes_domain_change(tmp_path: Path) -> None:
+    config = minimal_config(tmp_path)
+    root = Path(config["academic"]["root_directory"])
+    course = root / "Fall 2026" / "POL 2103 - Politics"
+    (course / "01_COURSE").mkdir(parents=True)
+    first = tmp_path / "first.md"
+    second = tmp_path / "second.md"
+    first.write_text("Course: POL 2103 - Politics\n## Assessments\n- Research Essay — 25% — Due October 19, 2026\n", encoding="utf-8")
+    second.write_text("Course: POL 2103 - Politics\n## Assessments\n- Research Essay — 25% — Due October 22, 2026\n", encoding="utf-8")
+    profile = Path(config["runtime"]["install_directory"]) / "profile.json"
+    save_config(profile, config)
+    env = os.environ.copy(); env["PYTHONPATH"] = str(ROOT)
+    base = [sys.executable, "-m", "academia_os", "--profile", str(profile), "extract", "syllabus"]
+
+    for source in (first,):
+        result = subprocess.run(base + [str(source), "--course", "POL 2103 - Politics", "--verified-current", "--apply", "--json"], cwd=ROOT, env=env, text=True, capture_output=True)
+        assert result.returncode == 0, result.stderr
+    conflict = subprocess.run(base + [str(second), "--course", "POL 2103 - Politics", "--verified-current", "--apply", "--json"], cwd=ROOT, env=env, text=True, capture_output=True)
+    assert conflict.returncode == 0, conflict.stderr
+    conflict_value = json.loads(conflict.stdout)
+    review_id = conflict_value["reconciliation"]["reviews"][0]["id"]
+
+    decide = subprocess.run([sys.executable, "-m", "academia_os", "--profile", str(profile), "review", "decide", review_id, "use_new", "--json"], cwd=ROOT, env=env, text=True, capture_output=True)
+    assert decide.returncode == 0, decide.stderr
+    execute = subprocess.run([sys.executable, "-m", "academia_os", "--profile", str(profile), "review", "execute", review_id, "--json"], cwd=ROOT, env=env, text=True, capture_output=True)
+    assert execute.returncode == 0, execute.stderr
+    domain = json.loads((root / ".academia" / "domain.json").read_text(encoding="utf-8"))
+    assignment = domain["entities"]["assignment"][0]
+    assert assignment["deadline"] == "2026-10-22"
+    assert "October 19, 2026" in first.read_text(encoding="utf-8")

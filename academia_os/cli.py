@@ -18,6 +18,7 @@ from .discovery import discover_academic_folders
 from .domain import ENTITY_TYPES, DomainProjection
 from .provenance import verify_source_metadata
 from .review import ReviewQueue
+from .semester import resolve_current_semester
 from .settings import preview_config, update_config
 from .workspace import build_workspace_snapshot
 from .workflow import ApprovalWorkflow
@@ -123,7 +124,7 @@ def _create_workspace(args: argparse.Namespace) -> dict[str, Any]:
             "student": {"name": args.name.strip(), "institution": args.institution.strip(), "program": args.program.strip()},
             "academic": {
                 "root_directory": str(root),
-                "semester": args.semester or "Fall 2026",
+                "semester": args.semester or resolve_current_semester(timezone_name=args.timezone),
                 "timezone": args.timezone,
                 "school_portal": "Not yet specified",
             },
@@ -172,8 +173,11 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("status", "courses", "today", "tasks", "inbox", "activity", "agents", "capabilities"):
         command = sub.add_parser(name)
         command.add_argument("--json", action="store_true")
+    semester = sub.add_parser("semester", help="Resolve the current semester using the shared calendar and timezone policy")
+    semester.add_argument("--timezone", default="UTC")
+    semester.add_argument("--json", action="store_true")
     review = sub.add_parser("review")
-    review.add_argument("action", choices=["list", "approve", "reject", "resolve", "decide"], nargs="?", default="list")
+    review.add_argument("action", choices=["list", "approve", "reject", "resolve", "decide", "execute"], nargs="?", default="list")
     review.add_argument("item_id", nargs="?")
     review.add_argument("decision", nargs="?", help="Typed decision such as use_new or choose_course:...")
     review.add_argument("--json", action="store_true")
@@ -183,6 +187,14 @@ def build_parser() -> argparse.ArgumentParser:
     domain = sub.add_parser("domain")
     domain.add_argument("entity_type", choices=ENTITY_TYPES, nargs="?")
     domain.add_argument("--json", action="store_true")
+    extract = sub.add_parser("extract", help="Extract supported facts from an authoritative local source")
+    extract_sub = extract.add_subparsers(dest="extract_type", required=True)
+    syllabus = extract_sub.add_parser("syllabus", help="Preview or reconcile a local syllabus")
+    syllabus.add_argument("source", type=Path)
+    syllabus.add_argument("--course", required=True, help="Explicit recognized course context; Academia will not guess it")
+    syllabus.add_argument("--verified-current", action="store_true", help="Treat direct facts as current-confirmed after the user verifies this is the current syllabus")
+    syllabus.add_argument("--apply", action="store_true", help="Apply safe new projections and create Review items for conflicts")
+    syllabus.add_argument("--json", action="store_true")
     workspace = sub.add_parser("workspace")
     workspace.add_argument("action", choices=["show", "discover", "inspect", "rebuild", "attach", "create"], nargs="?", default="show")
     workspace.add_argument("path", nargs="?", type=Path, help="Workspace path for inspect or attach")
@@ -190,7 +202,7 @@ def build_parser() -> argparse.ArgumentParser:
     workspace.add_argument("--institution", default="", help="Institution for an explicit workspace attachment")
     workspace.add_argument("--program", default="", help="Program or faculty for an explicit workspace attachment")
     workspace.add_argument("--timezone", default="UTC", help="IANA timezone for an explicit workspace attachment")
-    workspace.add_argument("--semester", default="", help="Resolved semester such as Fall 2026")
+    workspace.add_argument("--semester", default="", help="Explicit semester; omit to resolve it from the calendar and timezone")
     workspace.add_argument("--apply", action="store_true", help="Apply an explicit attachment after preview")
     workspace.add_argument("--json", action="store_true")
     verify = sub.add_parser("verify")
@@ -227,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"courses", "today", "tasks", "course", "domain", "workspace", "review", "inbox", "activity", "agents", "capabilities", "watch", "import", "verify", "verify-source", "settings"}:
+        if args.command in {"courses", "today", "tasks", "course", "domain", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "semester", "watch", "import", "verify", "verify-source", "settings"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -239,6 +251,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def dispatch(args: argparse.Namespace) -> int:
+    if args.command == "semester":
+        _emit({"semester": resolve_current_semester(timezone_name=args.timezone), "timezone": args.timezone}, as_json=args.json)
+        return 0
     if args.command == "courses":
         _, snapshot, _ = _context(args); _emit(snapshot["courses"], as_json=args.json); return 0
     if args.command == "today":
@@ -257,6 +272,34 @@ def dispatch(args: argparse.Namespace) -> int:
         _, snapshot, _ = _context(args)
         projection = DomainProjection(Path(snapshot["academic_root"]) / ".academia" / "domain.json")
         _emit(projection.list(args.entity_type), as_json=args.json); return 0
+    if args.command == "extract":
+        if args.extract_type != "syllabus":
+            raise ValueError(f"unsupported extraction source type: {args.extract_type}")
+        from .extraction import extract_syllabus
+        from .extraction.reconcile import reconcile_syllabus
+        config = load_config(_profile_path(args))
+        workspace_root = Path(config["academic"]["root_directory"]).expanduser().resolve()
+        state_root = workspace_root / ".academia"
+        extraction = extract_syllabus(args.source, course_id=args.course, verified_current=args.verified_current)
+        projection = DomainProjection(state_root / "domain.json")
+        workflow = ApprovalWorkflow(
+            actions=ActionStore(state_root / "actions.json"),
+            reviews=ReviewQueue(state_root / "review.json"),
+            activity=ActivityLog(state_root / "activity.jsonl"),
+        )
+        reconciliation = reconcile_syllabus(extraction, domain=projection, workflow=workflow, apply=args.apply)
+        if args.apply:
+            ActivityLog(state_root / "activity.jsonl").append(
+                event_type="syllabus.reconciled" if extraction.status.value == "supported" else "syllabus.unsupported",
+                title=f"Reconciled syllabus {Path(extraction.source.path).name}" if extraction.status.value == "supported" else f"Syllabus extraction unsupported: {Path(extraction.source.path).name}",
+                course=args.course,
+                source=extraction.source.path,
+                confidence="current-confirmed" if args.verified_current else "likely",
+                details={"source_type": "syllabus", "added_count": reconciliation.added_count, "duplicate_count": reconciliation.duplicate_count, "conflict_count": reconciliation.conflict_count},
+                actor="system",
+            )
+        _emit({"applied": bool(args.apply), "extraction": extraction.as_dict(), "reconciliation": reconciliation.as_dict()}, as_json=args.json)
+        return 0
     if args.command == "workspace":
         if args.action == "inspect":
             if not args.path:
@@ -303,6 +346,13 @@ def dispatch(args: argparse.Namespace) -> int:
                 if not args.decision:
                     raise ValueError("review decide requires a decision")
                 value = asdict(workflow.decide_review(args.item_id, args.decision))
+            elif args.action == "execute":
+                from .extraction.reconcile import execute_domain_change
+                review_item = queue.get(args.item_id)
+                if not review_item.action_proposal_id:
+                    raise ValueError("review execute requires an action-linked Review item")
+                projection = DomainProjection(state_root / "domain.json")
+                value = asdict(workflow.execute_approved(review_item.action_proposal_id, lambda proposal: execute_domain_change(proposal, projection)))
             elif args.action == "approve":
                 value = asdict(workflow.approve_review(args.item_id))
             elif args.action == "reject":

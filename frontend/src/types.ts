@@ -144,6 +144,18 @@ export type ImportResult = {
   review_item_id?: string
 }
 
+export type ExtractionPreview = {
+  applied: boolean
+  extraction: {
+    status: string
+    source: { path: string; media_type: string; content_hash: string; extraction_method: string; warnings: string[]; unsupported: string[] }
+    candidates: Array<{ kind: string; entity_type: string; entity: Record<string, unknown>; evidence: Record<string, unknown>; confidence: string; reason: string }>
+    warnings: string[]
+    unsupported: string[]
+  }
+  reconciliation: { applied: boolean; added_count: number; duplicate_count: number; conflict_count: number; warnings: string[]; reviews: Array<Record<string, unknown>>; actions: Array<Record<string, unknown>> }
+}
+
 export type AgentStatus = {
   name: string
   status: string

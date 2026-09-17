@@ -55,10 +55,10 @@ academia workspace discover --json
 academia workspace inspect /path/to/University --json
 academia --profile ~/.academic-os/profile.json workspace attach /path/to/University \
   --name "Your name" --institution "Your university" --program "Your program" \
-  --timezone America/Toronto --semester "Fall 2026" --json
+  --timezone America/Toronto --json
 academia --profile ~/.academic-os/profile.json workspace attach /path/to/University \
   --name "Your name" --institution "Your university" --program "Your program" \
-  --timezone America/Toronto --semester "Fall 2026" --apply --json
+  --timezone America/Toronto --apply --json
 ```
 
 `workspace inspect` is read-only. `workspace attach` is preview-only unless `--apply` is supplied; attachment writes only the local profile and does not migrate, rename, move, rewrite, or index academic files. Generated profiles use schema version 2, resolve a real semester label, keep browser access off by default, and do not require Hermes. Existing schema-version-1 profiles migrate non-destructively when read.
@@ -72,14 +72,18 @@ academia status --json
 academia workspace --json
 academia workspace discover --json
 academia workspace inspect /path/to/University --json
-academia workspace create /path/to/New\ University --name "Your name" --institution "Your university" --timezone America/Toronto --semester "Fall 2026" --apply --json
+academia semester --timezone America/Toronto --json
+academia workspace create /path/to/New\ University --name "Your name" --institution "Your university" --timezone America/Toronto --apply --json
 academia courses --json
 academia course "POL 2103 - Politics" --json
 academia today --json
 academia tasks --json
 academia review --json
 academia review decide REVIEW_ID use_new --json
+academia review execute REVIEW_ID --json
 academia domain --json
+academia extract syllabus /path/to/syllabus.pdf --course "POL 2103 - Politics" --json
+academia extract syllabus /path/to/syllabus.md --course "POL 2103 - Politics" --verified-current --apply --json
 academia settings show --json
 academia settings update --set student.name="Student" --json
 academia inbox --json
@@ -120,7 +124,10 @@ A scan never acknowledges work. Stale processing leases return to retryable stat
 
 Academia OS remains useful with no browser access:
 
-1. **Manual import** — `academia import SOURCE --destination WORKSPACE/SEMESTER/COURSE/00_INBOX` copies a user-selected PDF, DOCX, PPTX, text, HTML, or other normal academic file into a workspace inbox; the original remains in place and the copy enters intake. The workspace root, arbitrary dump folders, and `.academia/` are rejected.
+1. **Manual import** — `academia import SOURCE --destination DESTINATION` copies a user-selected local file; the original remains in place and the copy enters intake. The reusable core accepts only these destination shapes:
+   - `<workspace>/<recognized-semester>/00_INBOX/` when the course is unknown.
+   - `<workspace>/<recognized-semester>/<recognized-course>/00_INBOX/` when the course is known.
+   The semester must be an existing recognized semester directory. The course must be an existing direct course directory belonging to that semester. Nested paths such as `COURSE/03_ASSIGNMENTS/00_INBOX`, arbitrary folders, the workspace root, paths outside the workspace, and `.academia/` are rejected. Fresh workspaces create the semester-level `00_INBOX/`; older workspaces remain readable and receive it only when explicitly initialized/used.
 2. **Watched folders** — `academia watch` performs a one-shot scan of configured local directories such as `Downloads/School`. A persistent background watcher is not claimed yet.
 3. **Browser companion** — architecture only for now. A future companion will support explicit actions such as “Send to Academia OS,” “Save reading,” and “Import this page.”
 4. **Advanced browser access** — optional and off by default.
@@ -132,6 +139,31 @@ For readings, prefer legitimate library, Omni/OpenAthens, publisher, DOI/open-ac
 ## Derived academic domain projection
 
 `academia domain --json` reads the optional `.academia/domain.json` projection. The projection supports evidence-backed `AcademicSource`, `Deadline`, `Assignment`, `Reading`, `Announcement`, and `CourseMeeting` records. Every record retains source path, provenance, confidence, authority, and verification timestamps. Unknown values remain null. The projection is derived state; human-readable academic files remain authoritative, and this pass does not semantically parse the real University workspace.
+
+## Controlled syllabus extraction
+
+Syllabus extraction is a narrow, local, preview-first pipeline:
+
+```text
+local syllabus → SourceDocument/SourceSegment → candidate facts
+→ evidence/confidence validation → domain reconciliation → Review/Action
+→ approved DOMAIN_CHANGE → reread verification → Activity
+```
+
+Use:
+
+```bash
+academia extract syllabus /path/to/syllabus.pdf --course "COURSE ID" --json
+academia extract syllabus /path/to/syllabus.pdf --course "COURSE ID" --verified-current --apply --json
+academia review decide REVIEW_ID use_new --json
+academia review execute REVIEW_ID --json
+```
+
+Supported source formats are text-based PDF, plain text, and Markdown. Text-based PDFs retain page references; text and Markdown retain line/segment references. Extraction is deterministic and local using the lightweight `pypdf` dependency for PDF text. No syllabus is sent to a model or hosted service. Scanned/image-only PDFs return `unsupported_without_ocr`; OCR is intentionally not part of this pass. Other formats are unsupported by the syllabus extractor, although normal manual import can still preserve them in `00_INBOX/`.
+
+The first syllabus extractor only proposes course identity, assignments, explicit deadlines, assessment weights, required readings, and recurring course meetings. It does not interpret every date, policy, biography, URL, or arbitrary note. Missing dates, years, times, weights, pages, and course identity remain null or produce a warning. `current-confirmed` is used only when the user explicitly marks the supplied syllabus as current; otherwise directly stated facts are `likely` and ambiguous facts are `unverified`.
+
+Preview mode does not write the domain projection, source file, workspace files, Review, Action, calendar, or school account. Apply mode adds safe derived entities and creates typed Review items for conflicts. A changed deadline never silently replaces an existing value: the proposal contains before/after values plus both evidence records. `use_new` approves the exact `DOMAIN_CHANGE`; execution rereads `.academia/domain.json`, verifies every requested field, resolves Review, and records Activity. A failed reread rolls back the derived update where possible, marks the proposal failed, reopens Review, and records the failure.
 
 ## Safety and privacy
 

@@ -100,6 +100,7 @@ def test_initialize_installation_creates_safe_instance(tmp_path: Path) -> None:
     assert (academic_root / "README.md").is_file()
     assert (academic_root / "COURSE_TEMPLATE" / "00_INBOX" / ".gitkeep").is_file()
     assert (academic_root / "Fall 2026" / "SEMESTER_TASKS.md").is_file()
+    assert (academic_root / "Fall 2026" / "00_INBOX" / ".gitkeep").is_file()
     assert (install_root / "profile.json").is_file()
     assert (install_root / "scripts" / "academic_os_inbox_gate.py").is_file()
     assert "Alex Student" in (academic_root / "README.md").read_text(encoding="utf-8")

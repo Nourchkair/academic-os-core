@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .config import validate_config
+from .config import SEMESTER_PATTERN, validate_config
 from .processing import ProcessingStore
 
 
@@ -91,8 +91,18 @@ def validate_import_destination(workspace_root: Path, destination_inbox: Path) -
         raise ValueError("import destination must be inside the configured academic workspace") from exc
     if not relative.parts or ".academia" in relative.parts:
         raise ValueError("import destination must be a workspace inbox, not the workspace root or operational state")
-    if "00_INBOX" not in relative.parts:
-        raise ValueError("import destination must be a workspace inbox named 00_INBOX, not an unstructured workspace dump")
+    if relative.parts[-1] != "00_INBOX":
+        raise ValueError("import destination must end in a direct 00_INBOX workspace inbox")
+    if len(relative.parts) not in {2, 3}:
+        raise ValueError("import destination must be a direct semester inbox or direct course inbox")
+    semester_name = relative.parts[0]
+    semester_root = workspace_root / semester_name
+    if SEMESTER_PATTERN.fullmatch(semester_name) is None or not semester_root.is_dir():
+        raise ValueError("import destination must use a recognized semester directory")
+    if len(relative.parts) == 3:
+        course_root = semester_root / relative.parts[1]
+        if not course_root.is_dir() or not (course_root / "01_COURSE").is_dir():
+            raise ValueError("import destination must use a recognized course belonging to that semester")
     return destination_inbox
 
 
@@ -105,14 +115,9 @@ def validate_import_source(source: Path) -> Path:
 
 def import_file(source: Path, destination_inbox: Path, processing: ProcessingStore | None = None, *, workspace_root: Path | None = None) -> dict[str, Any]:
     source = validate_import_source(source)
-    if workspace_root is not None:
-        destination_inbox = validate_import_destination(workspace_root, destination_inbox)
-    else:
-        destination_inbox = Path(destination_inbox).expanduser().resolve()
-        if ".academia" in destination_inbox.parts:
-            raise ValueError("import destination cannot be inside .academia operational state")
-        if "00_INBOX" not in destination_inbox.parts:
-            raise ValueError("import destination must include a 00_INBOX segment")
+    if workspace_root is None:
+        raise ValueError("workspace root is required for structural import validation")
+    destination_inbox = validate_import_destination(workspace_root, destination_inbox)
     if not source.is_file():
         raise FileNotFoundError(source)
     destination_inbox.mkdir(parents=True, exist_ok=True)
