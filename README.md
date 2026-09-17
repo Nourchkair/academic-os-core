@@ -30,16 +30,24 @@ The bootstrapper creates two separated locations:
 
 Hermes integration files are copied into the configured Hermes home only when the user runs the bootstrapper. Existing differing files are never overwritten automatically.
 
+The wizard offers two workspace choices:
+
+- **Create a brand-new workspace** — starts in a new or empty location such as `~/Desktop/University OS`.
+- **Use an existing workspace** — attaches only to a recognized Academic OS folder and fills missing files without overwriting personal content.
+
+After a fresh setup, **Import older University material** opens a migration phase. The user can find or browse to a messy legacy folder, preview semester-aware destinations, select specific files, copy them safely by default, or explicitly move them after hash verification. Files with unclear semester/course evidence go to an intake/archive area for review. The old folder can always be left untouched.
+
 ## First-use workflow
 
 1. Install or verify Hermes on the user's computer.
-2. Run the bootstrapper.
+2. Run the bootstrapper or open the desktop app.
 3. Run the generated verification command.
 4. Review `HANDOFF.md` and `generated_cron_jobs.json`.
 5. Authorize Google services directly in the user's own browser/account.
 6. Log into the school portal manually in the user's visible browser.
 7. Add syllabi and initial course documents to confirmed course inboxes.
-8. Run the generated local cron installer only after reviewing it.
+8. If older material exists, use the migration phase and review its plan.
+9. Run the generated local cron installer only after reviewing it.
 
 ## Runtime boundaries
 
@@ -58,7 +66,7 @@ The repository also includes a native local desktop wrapper:
 python3 desktop/app.py
 ```
 
-It provides the friendly onboarding flow, folder discovery, automatic time-zone detection, local dashboard, course creation, verification, and quick links to the University folder and Hermes. On macOS, build a clickable app bundle with:
+It provides the friendly onboarding flow, folder discovery, automatic time-zone detection, local dashboard, course creation, migration phase, verification, and quick links to the University folder and Hermes. On macOS, build a clickable app bundle with:
 
 ```bash
 python3 desktop/build_macos_app.py

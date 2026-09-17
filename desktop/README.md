@@ -38,10 +38,17 @@ The bundle contains the reusable templates and installer but leaves personal dat
 - Show courses, inbox count, semester, and daily dashboard preview
 - Open the local University folder and dashboard
 - Add a course from the safe blank template
+- Import older University material in a reviewable migration phase
+- Find likely legacy folders without scanning the whole computer
+- Preview semester-aware destinations before importing
+- Select specific files, copy them safely, or explicitly move them after hash verification
+- Open a migration plan for AI/human review without allowing direct AI moves
 - Run installation verification
 - Open Hermes in Terminal
 - Show which integrations are prepared without claiming that authorization succeeded
 
-## Safety behavior
+## Migrating an older University folder
 
-The app never asks for passwords, OAuth tokens, browser cookies, or MFA codes. Existing non-Academic-OS folders are not modified automatically. Existing Academic OS folders can be attached in missing-file-only mode; differing personal files remain untouched and are never overwritten.
+After creating a fresh workspace, open **Import older University material** from the dashboard. Choose or find the old folder, scan it, and review the exact destination of each file. The default action is **Copy selected safely**; the old folder remains intact. **Move selected** is explicit and removes only files whose copied destination hash matches the source hash. Existing destinations are never overwritten.
+
+Semester names found in original folder paths are used only as routing evidence. Files with no clear semester are placed in the current semester's `00_INBOX/LEGACY_IMPORT` for review. The generated `migration/MIGRATION_REVIEW.md` can be opened for AI assistance, but AI must propose classifications rather than execute moves.

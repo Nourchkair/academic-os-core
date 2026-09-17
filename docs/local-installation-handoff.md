@@ -41,6 +41,21 @@ The app's setup screen can look for an existing University folder, detect the co
 5. Add authoritative course material only after confirming the course identity.
 6. Keep original syllabi, instructions, rubrics, and submissions preserved.
 
+## Migration phase
+
+If the recipient wants a fresh folder but has older University material, use **Import older University material** from the desktop dashboard. The migration phase:
+
+- Finds or browses to the old folder explicitly.
+- Produces a file-by-file preview and a saved JSON/Markdown plan.
+- Routes confirmed semester paths to that semester, current-semester material to `00_INBOX/LEGACY_IMPORT`, and unknown material to the current-semester intake area.
+- Lets the user select specific files.
+- Copies by default and leaves the legacy folder unchanged.
+- Offers an explicit move only after verifying the copied file hash.
+- Never overwrites an existing destination; collision copies receive a suffix.
+- Opens an AI-reviewable plan, but does not let an AI conversation execute file moves.
+
+To do nothing, close the migration window. The old folder remains available.
+
 ## Enabling local automation
 
 After review, run:

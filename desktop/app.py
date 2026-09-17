@@ -31,6 +31,7 @@ from desktop.model import (
     timezone_from_friendly_label,
 )
 from installer.core import initialize_installation, validate_manifest
+from installer.migration import build_migration_plan, execute_migration_plan, write_migration_plan
 from installer.verify import verify_installation
 
 DEFAULT_PROFILE = Path(os.environ.get("ACADEMIC_OS_CONFIG", str(Path.home() / ".academic-os" / "profile.json"))).expanduser()
@@ -144,11 +145,12 @@ class AcademicOSApp(tk.Tk):
         right.pack(side="left", fill="both", expand=True, padx=(10, 0))
 
         self.setup_vars: dict[str, Any] = {
+            "workspace_mode": tk.StringVar(value="new"),
             "name": tk.StringVar(),
             "institution": tk.StringVar(),
             "program": tk.StringVar(),
             "semester": tk.StringVar(value=semester_suggestions()[0]),
-            "root": tk.StringVar(value=str(Path.home() / "Desktop" / "University")),
+            "root": tk.StringVar(value=str(Path.home() / "Desktop" / "University OS")),
             "timezone": tk.StringVar(value=friendly_timezone_label(detect_local_timezone() or "UTC")),
             "school_portal": tk.StringVar(value="Brightspace"),
             "gmail": tk.BooleanVar(value=False),
@@ -171,8 +173,12 @@ class AcademicOSApp(tk.Tk):
         ttk.Button(zone_row, text="Use my computer", style="Secondary.TButton", command=self._detect_timezone).pack(side="left", padx=(8, 0))
         ttk.Label(left, text="If you are unsure, click “Use my computer.” You can also choose a familiar region from the list.", style="PanelMuted.TLabel", wraplength=390).pack(anchor="w", pady=(5, 8))
 
-        ttk.Label(right, text="Your University folder", style="PanelHeading.TLabel").pack(anchor="w", pady=(0, 7))
-        ttk.Label(right, text="Choose the folder where you want your academic files. We can look for one first.", style="PanelBody.TLabel", wraplength=390).pack(anchor="w")
+        ttk.Label(right, text="Your University workspace", style="PanelHeading.TLabel").pack(anchor="w", pady=(0, 7))
+        ttk.Label(right, text="Start fresh in a new folder, or attach to an existing Academic OS folder. We never overwrite a messy folder automatically.", style="PanelBody.TLabel", wraplength=390).pack(anchor="w")
+        mode_frame = ttk.Frame(right, style="Panel.TFrame")
+        mode_frame.pack(fill="x", pady=(10, 4))
+        ttk.Radiobutton(mode_frame, text="Create a brand-new workspace", variable=self.setup_vars["workspace_mode"], value="new", command=self._workspace_mode_changed).pack(anchor="w")
+        ttk.Radiobutton(mode_frame, text="Use an existing workspace", variable=self.setup_vars["workspace_mode"], value="existing", command=self._workspace_mode_changed).pack(anchor="w", pady=(4, 0))
         folder_row = ttk.Frame(right, style="Panel.TFrame")
         folder_row.pack(fill="x", pady=(12, 5))
         ttk.Entry(folder_row, textvariable=self.setup_vars["root"]).pack(side="left", fill="x", expand=True)
@@ -182,7 +188,7 @@ class AcademicOSApp(tk.Tk):
         self.folder_list.pack(fill="x", pady=(0, 5))
         self.folder_list.bind("<Double-Button-1>", self._choose_candidate)
         self.folder_results: list[Any] = []
-        ttk.Label(right, text="If we find a folder with Academic OS rules, we will attach to it without overwriting your files. Otherwise, a new folder is created only where you choose.", style="PanelMuted.TLabel", wraplength=390).pack(anchor="w", pady=(2, 14))
+        ttk.Label(right, text="For a fresh workspace, choose a new or empty location. For an existing workspace, double-click a detected Academic OS folder. Older messy material can be imported later through the migration screen.", style="PanelMuted.TLabel", wraplength=390).pack(anchor="w", pady=(2, 14))
 
         ttk.Label(right, text="Optional connections", style="PanelHeading.TLabel").pack(anchor="w", pady=(0, 8))
         for label, key in (("Gmail", "gmail"), ("Google Calendar", "calendar"), ("Google Drive", "drive"), ("School portal / browser handoff", "school_portal_enabled")):
@@ -196,6 +202,15 @@ class AcademicOSApp(tk.Tk):
         footer.pack(fill="x", pady=(14, 0))
         ttk.Button(footer, text="Back", style="Secondary.TButton", command=self.show_welcome).pack(side="left")
         ttk.Button(footer, text="Create my Academic OS", style="Accent.TButton", command=self._create_installation).pack(side="right")
+
+    def _workspace_mode_changed(self) -> None:
+        current = self.setup_vars["root"].get().strip()
+        fresh_default = str(Path.home() / "Desktop" / "University OS")
+        existing_default = str(Path.home() / "Desktop" / "University")
+        if self.setup_vars["workspace_mode"].get() == "existing" and current == fresh_default:
+            self.setup_vars["root"].set(existing_default)
+        elif self.setup_vars["workspace_mode"].get() == "new" and current == existing_default:
+            self.setup_vars["root"].set(fresh_default)
 
     def _field(self, parent: ttk.Frame, label: str, variable: tk.StringVar, values: list[str] | None = None) -> None:
         ttk.Label(parent, text=label, style="PanelBody.TLabel").pack(anchor="w", pady=(8, 4))
@@ -234,7 +249,8 @@ class AcademicOSApp(tk.Tk):
 
     def _manifest_from_setup(self) -> dict[str, Any]:
         values = self.setup_vars
-        root = str(Path(values["root"].get().strip() or str(Path.home() / "Desktop" / "University")).expanduser())
+        default_root = Path.home() / "Desktop" / ("University OS" if self.setup_vars["workspace_mode"].get() == "new" else "University")
+        root = str(Path(values["root"].get().strip() or str(default_root)).expanduser())
         return validate_manifest(
             {
                 "schema_version": 1,
@@ -283,9 +299,14 @@ class AcademicOSApp(tk.Tk):
             messagebox.showerror("A little more information is needed", str(exc))
             return
         root = Path(manifest["academic"]["root_directory"]).expanduser()
-        attach_existing = (root / "ACADEMIC_OS_RULES.md").is_file() and (root / "COURSE_TEMPLATE").is_dir()
-        if root.exists() and any(root.iterdir()) and not attach_existing:
-            messagebox.showwarning("I will not overwrite this folder", "That folder already contains files but does not look like an Academic OS folder. Please choose an empty folder, or select the actual University folder that contains the Academic OS rules.")
+        requested_mode = self.setup_vars["workspace_mode"].get()
+        attach_existing = requested_mode == "existing" and (root / "ACADEMIC_OS_RULES.md").is_file() and (root / "COURSE_TEMPLATE").is_dir()
+        legacy_candidates = [candidate for candidate in discover_academic_folders() if candidate.path != root.resolve()]
+        if requested_mode == "existing" and root.exists() and any(root.iterdir()) and not attach_existing:
+            messagebox.showwarning("I could not identify that workspace", "This folder contains files but does not look like an Academic OS folder. Choose the actual structured folder, or switch to Create a brand-new workspace and choose an empty location.")
+            return
+        if requested_mode == "new" and root.exists() and any(root.iterdir()):
+            messagebox.showwarning("I will not overwrite this folder", "The new workspace location already contains files. Choose an empty location, or switch to Use an existing workspace if it is already structured as an Academic OS folder.")
             return
         try:
             initialize_installation(
@@ -297,6 +318,8 @@ class AcademicOSApp(tk.Tk):
             self.profile_path = Path(manifest["hermes"]["install_directory"]).expanduser() / "profile.json"
             messagebox.showinfo("Your Academic OS is ready", "The local folder and dashboard were created. The next screen shows what is ready and what still needs your account authorization.")
             self.show_dashboard()
+            if requested_mode == "new" and legacy_candidates:
+                self.after(100, lambda: self._offer_migration(legacy_candidates))
         except Exception as exc:
             messagebox.showerror("Setup stopped safely", str(exc))
 
@@ -334,6 +357,7 @@ class AcademicOSApp(tk.Tk):
             ("Open University folder", lambda: open_local_path(Path(dashboard["academic_root"]))),
             ("Open today's dashboard", lambda: self._open_today(dashboard)),
             ("Add a course", lambda: self._add_course(dashboard)),
+            ("Import older University material", lambda: self._migration_dialog(dashboard)),
             ("Run verification", lambda: self._run_verification()),
             ("Open setup handoff guide", lambda: open_local_path(Path(dashboard["install_root"]) / "HANDOFF.md")),
         ):
@@ -405,6 +429,128 @@ class AcademicOSApp(tk.Tk):
         ttk.Button(frame, text="Create course folder", style="Accent.TButton", command=create).pack(anchor="e", pady=(16, 0))
         dialog.transient(self)
         dialog.grab_set()
+
+    def _offer_migration(self, candidates: list[Any]) -> None:
+        names = "\n".join(f"• {candidate.path}" for candidate in candidates[:3])
+        if messagebox.askyesno("I found older University material", f"I found likely older academic folder(s):\n\n{names}\n\nWould you like to review what can be brought into your new workspace? The old folders will remain untouched unless you explicitly choose Move."):
+            self._migration_dialog(load_dashboard(self.profile_path))
+
+    def _migration_dialog(self, dashboard: dict[str, Any]) -> None:
+        dialog = tk.Toplevel(self)
+        dialog.title("Bring over older University material")
+        dialog.configure(bg=self.BG)
+        dialog.geometry("940x720")
+        dialog.minsize(780, 560)
+        frame = ttk.Frame(dialog, style="Panel.TFrame", padding=20)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Migration phase", style="PanelHeading.TLabel").pack(anchor="w")
+        ttk.Label(frame, text="Your old folder stays untouched unless you explicitly choose Move. The app will show every proposed destination before importing anything.", style="PanelMuted.TLabel", wraplength=820).pack(anchor="w", pady=(4, 14))
+
+        source_var = tk.StringVar()
+        source_row = ttk.Frame(frame, style="Panel.TFrame")
+        source_row.pack(fill="x")
+        ttk.Label(source_row, text="Old University folder", style="PanelBody.TLabel").pack(side="left", padx=(0, 8))
+        ttk.Entry(source_row, textvariable=source_var).pack(side="left", fill="x", expand=True)
+        ttk.Button(source_row, text="Browse", style="Secondary.TButton", command=lambda: self._choose_migration_source(source_var)).pack(side="left", padx=(8, 0))
+
+        source_candidates_list = tk.Listbox(frame, height=3, background="#0b1321", foreground=self.TEXT, selectbackground="#2563eb", borderwidth=0, highlightthickness=0)
+        source_candidates_list.pack(fill="x", pady=(8, 4))
+        source_candidates: list[Any] = []
+
+        def find_sources() -> None:
+            source_candidates_list.delete(0, tk.END)
+            current = Path(dashboard["academic_root"]).expanduser().resolve()
+            source_candidates[:] = [candidate for candidate in discover_academic_folders() if candidate.path != current]
+            if not source_candidates:
+                source_candidates_list.insert(tk.END, "No likely older folder found — use Browse to choose one.")
+            else:
+                for candidate in source_candidates[:8]:
+                    source_candidates_list.insert(tk.END, candidate.label)
+
+        def choose_source(_event: tk.Event | None = None) -> None:
+            selected = source_candidates_list.curselection()
+            if selected and selected[0] < len(source_candidates):
+                source_var.set(str(source_candidates[selected[0]].path))
+
+        source_candidates_list.bind("<Double-Button-1>", choose_source)
+        ttk.Button(frame, text="Find likely older folders", style="Secondary.TButton", command=find_sources).pack(anchor="w", pady=(0, 10))
+
+        plan_status = tk.StringVar(value="Choose an old folder, then click Scan and preview.")
+        ttk.Label(frame, textvariable=plan_status, style="PanelMuted.TLabel", wraplength=820).pack(anchor="w", pady=(0, 8))
+        migration_list = tk.Listbox(frame, selectmode=tk.EXTENDED, height=15, background="#0b1321", foreground=self.TEXT, selectbackground="#2563eb", borderwidth=0, highlightthickness=0)
+        migration_list.pack(fill="both", expand=True, pady=(0, 8))
+        plan_ref: dict[str, Any] = {"plan": None, "paths": {}}
+
+        def scan() -> None:
+            try:
+                source = Path(source_var.get().strip()).expanduser().resolve()
+                plan = build_migration_plan(source, Path(dashboard["academic_root"]), dashboard["semester"])
+                paths = write_migration_plan(plan, Path(dashboard["install_root"]) / "migration")
+                plan_ref["plan"] = plan
+                plan_ref["paths"] = paths
+                migration_list.delete(0, tk.END)
+                for item in plan.items:
+                    migration_list.insert(tk.END, f"{item.relative_path}  →  {item.destination.relative_to(plan.academic_root)}")
+                if plan.items:
+                    migration_list.selection_set(0, tk.END)
+                plan_status.set(f"Found {len(plan.items)} file(s). Select only what you want, then copy or move. The review plan is saved in {paths['markdown']}.")
+            except Exception as exc:
+                messagebox.showerror("Migration scan stopped", str(exc), parent=dialog)
+
+        def select_all() -> None:
+            if migration_list.size():
+                migration_list.selection_set(0, tk.END)
+
+        def clear_selection() -> None:
+            migration_list.selection_clear(0, tk.END)
+
+        def open_plan() -> None:
+            path = plan_ref["paths"].get("markdown")
+            if path:
+                open_local_path(path)
+            else:
+                messagebox.showinfo("Scan first", "Run a scan before opening the AI-review plan.", parent=dialog)
+
+        def execute(mode: str) -> None:
+            plan = plan_ref.get("plan")
+            if plan is None:
+                messagebox.showinfo("Scan first", "Choose an old folder and scan it before importing.", parent=dialog)
+                return
+            selected_indexes = migration_list.curselection()
+            selected_items = [plan.items[index] for index in selected_indexes]
+            if not selected_items:
+                messagebox.showinfo("Nothing selected", "Select at least one file, or close this window to leave the old folder unchanged.", parent=dialog)
+                return
+            if mode == "move" and not messagebox.askyesno("Move selected originals?", "This will remove only the selected original files after hash verification. Copy is safer and recommended. Continue?", parent=dialog):
+                return
+            result = execute_migration_plan(plan, items=selected_items, mode=mode)
+            report_dir = Path(dashboard["install_root"]) / "migration"
+            report_dir.mkdir(parents=True, exist_ok=True)
+            (report_dir / "migration-report.json").write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            if result["failed"]:
+                messagebox.showwarning("Migration needs review", f"Completed with {result['failed']} failure(s). See migration-report.json.", parent=dialog)
+            else:
+                count = result["moved"] if mode == "move" else result["copied"]
+                messagebox.showinfo("Migration complete", f"{count} selected file(s) were {mode}d into the structured workspace. The original folder was {'changed only for verified files' if mode == 'move' else 'left intact'}.", parent=dialog)
+            dialog.destroy()
+            self.show_dashboard()
+
+        controls = ttk.Frame(frame, style="Panel.TFrame")
+        controls.pack(fill="x", pady=(2, 0))
+        ttk.Button(controls, text="Scan and preview", style="Accent.TButton", command=scan).pack(side="left")
+        ttk.Button(controls, text="Select all", style="Secondary.TButton", command=select_all).pack(side="left", padx=(8, 0))
+        ttk.Button(controls, text="Clear selection", style="Secondary.TButton", command=clear_selection).pack(side="left", padx=(8, 0))
+        ttk.Button(controls, text="Open plan for AI review", style="Secondary.TButton", command=open_plan).pack(side="left", padx=(8, 0))
+        ttk.Button(controls, text="Copy selected safely", style="Accent.TButton", command=lambda: execute("copy")).pack(side="right")
+        ttk.Button(controls, text="Move selected", style="Secondary.TButton", command=lambda: execute("move")).pack(side="right", padx=(0, 8))
+        ttk.Button(controls, text="Leave old folder unchanged", style="Secondary.TButton", command=dialog.destroy).pack(side="right", padx=(0, 8))
+        dialog.transient(self)
+        dialog.grab_set()
+
+    def _choose_migration_source(self, variable: tk.StringVar) -> None:
+        selected = filedialog.askdirectory(title="Choose the older University folder", mustexist=True)
+        if selected:
+            variable.set(selected)
 
     def _open_hermes(self) -> None:
         if platform.system() == "Darwin":
