@@ -79,15 +79,29 @@ def _lexical_absolute_path(path: Path) -> Path:
 
 
 def _reject_dot_components(path: Path, label: str) -> None:
-    if any(part in {".", ".."} for part in path.parts):
+    raw_path = os.fsdecode(os.fspath(path))
+    expanded_path = os.path.expanduser(raw_path)
+    components = expanded_path.split(os.sep)
+    if os.altsep:
+        components = [part for component in components for part in component.split(os.altsep)]
+    if any(part in {".", ".."} for part in components) or any(part in {".", ".."} for part in Path(path).parts):
         raise ValueError(f"migration {label} contains dot path component")
 
 
 def _validated_absolute_path(path: Path, label: str) -> Path:
+    _reject_dot_components(path, label)
     path = Path(path).expanduser()
     if not path.is_absolute():
         raise ValueError(f"migration {label} must be absolute")
+    return _lexical_absolute_path(path)
+
+
+def _validated_public_path(path: Path, label: str) -> Path:
+    """Make a public path absolute without silently normalizing traversal."""
     _reject_dot_components(path, label)
+    path = Path(path).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
     return _lexical_absolute_path(path)
 
 
@@ -118,11 +132,23 @@ def _same_physical_path(left: Path, right: Path) -> bool:
     return _samefile(left, right)
 
 
+def _is_physically_within(path: Path, root: Path, *, strict: bool = False) -> bool:
+    """Check lexical containment and, for existing paths, resolved containment."""
+    lexical_match = _is_strictly_within(path, root) if strict else _is_within(path, root)
+    if lexical_match:
+        return True
+    if not (os.path.exists(path) and os.path.exists(root)):
+        return False
+    physical_path = _lexical_absolute_path(Path(os.path.realpath(path)))
+    physical_root = _lexical_absolute_path(Path(os.path.realpath(root)))
+    return _is_strictly_within(physical_path, physical_root) if strict else _is_within(physical_path, physical_root)
+
+
 def is_runtime_migration_source(source_root: Path, runtime_root: Path) -> bool:
     """Return whether a selected source is the configured runtime or its child."""
     source_root = _lexical_absolute_path(source_root)
     runtime_root = _lexical_absolute_path(runtime_root)
-    return _is_within(source_root, runtime_root) or _same_physical_path(source_root, runtime_root)
+    return _is_physically_within(source_root, runtime_root)
 
 
 def validate_migration_source(source_root: Path, runtime_root: Path) -> Path:
@@ -136,6 +162,8 @@ def validate_migration_source(source_root: Path, runtime_root: Path) -> Path:
 
 def _physical_roots_overlap(left: Path, right: Path) -> bool:
     if _is_within(left, right) or _is_within(right, left):
+        return True
+    if _is_physically_within(left, right) or _is_physically_within(right, left):
         return True
     if _same_physical_path(left, right):
         return True
@@ -167,13 +195,14 @@ def _validate_relative_path(value: object) -> str:
 def _reject_symlink_components(path: Path, label: str) -> None:
     """Reject symlink path components without resolving the path first."""
     path = _lexical_absolute_path(path)
-    for component in reversed(path.parents):
-        if not os.path.lexists(component):
-            break
-        if os.path.islink(component):
-            raise ValueError(f"migration {label} contains symlink component: {component}")
-    if os.path.lexists(path) and os.path.islink(path):
-        raise ValueError(f"migration {label} contains symlink component: {path}")
+    for component in (*path.parents, path):
+        try:
+            if os.path.lexists(component) and os.path.islink(component):
+                raise ValueError(f"migration {label} contains symlink component: {component}")
+        except ValueError:
+            raise
+        except OSError as exc:
+            raise ValueError(f"cannot inspect migration {label}: {component}") from exc
 
 
 def _validate_plan_roots(source_root: Path, academic_root: Path, *, prefix: str) -> None:
@@ -203,14 +232,14 @@ def _validate_migration_item(item: MigrationItem, source_root: Path, academic_ro
     destination = _validated_absolute_path(item.destination, f"plan item {index} destination")
     _reject_symlink_components(source, f"item {index} source")
     _reject_symlink_components(destination, f"item {index} destination")
-    if not _is_strictly_within(source, source_root):
+    if not _is_physically_within(source, source_root, strict=True):
         raise ValueError(f"migration plan item {index} source must be a strict descendant of source_root")
     source_relative = source.relative_to(source_root)
     if _is_operational_path(source_relative):
         raise ValueError(f"migration plan item {index} source is operational state")
     if source != _lexical_absolute_path(source_root / relative_path):
         raise ValueError(f"migration plan item {index} source does not match relative path")
-    if not _is_strictly_within(destination, academic_root):
+    if not _is_physically_within(destination, academic_root, strict=True):
         raise ValueError(f"migration plan item {index} destination must be a strict descendant of academic_root")
     destination_relative = destination.relative_to(academic_root)
     if _is_operational_path(destination_relative):
@@ -255,7 +284,7 @@ def validate_migration_plan(plan: MigrationPlan) -> None:
 
 def ensure_safe_text_target(path: Path) -> None:
     """Reject an existing symlink or directory before a text file is written."""
-    path = Path(path)
+    path = _validated_public_path(path, "text target")
     _reject_symlink_components(path, "text target")
     if os.path.lexists(path) and path.is_symlink():
         raise ValueError(f"refusing to write through symlink target: {path}")
@@ -265,7 +294,7 @@ def ensure_safe_text_target(path: Path) -> None:
 
 def safe_atomic_write_text(path: Path, text: str) -> None:
     """Write text through a same-directory temporary file and atomic replace."""
-    path = Path(path)
+    path = _validated_public_path(path, "text target")
     _reject_symlink_components(path, "text target")
     ensure_safe_text_target(path)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
@@ -284,7 +313,8 @@ def safe_atomic_write_text(path: Path, text: str) -> None:
 
 def load_migration_plan(path: Path) -> MigrationPlan:
     """Load and validate a persisted migration plan before any file operation."""
-    plan_path = Path(path).expanduser()
+    plan_path = _validated_public_path(path, "plan path")
+    _reject_symlink_components(plan_path, "plan path")
     try:
         data = json.loads(plan_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -408,8 +438,8 @@ def _destination_for(source_root: Path, academic_root: Path, current_semester: s
 
 
 def build_migration_plan(source_root: Path, academic_root: Path, current_semester: str) -> MigrationPlan:
-    source_root = _lexical_absolute_path(source_root)
-    academic_root = _lexical_absolute_path(academic_root)
+    source_root = _validated_public_path(source_root, "source root")
+    academic_root = _validated_public_path(academic_root, "academic root")
     _validate_plan_roots(source_root, academic_root, prefix="migration")
     if not isinstance(current_semester, str):
         raise ValueError("current semester is required for migration")
@@ -520,7 +550,7 @@ def _preflight_migration_output_target(path: Path, label: str) -> None:
 
 def write_migration_plan(plan: MigrationPlan, directory: Path) -> dict[str, Path]:
     validate_migration_plan(plan)
-    directory = _lexical_absolute_path(Path(directory).expanduser())
+    directory = _validated_public_path(directory, "migration output directory")
     _preflight_migration_output_directory(directory)
     json_path = directory / "migration-plan.json"
     markdown_path = directory / "MIGRATION_REVIEW.md"

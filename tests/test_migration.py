@@ -140,6 +140,70 @@ def test_load_migration_plan_reconstructs_and_validates_persisted_paths(tmp_path
         migration.load_migration_plan(plan_path)
 
 
+def test_load_migration_plan_rejects_symlinked_persisted_plan_before_reading(tmp_path: Path) -> None:
+    source = tmp_path / "Old University"
+    source.mkdir()
+    plan = build_migration_plan(source, tmp_path / "New University", "Fall 2026")
+    real_plan = write_migration_plan(plan, tmp_path / "migration")["json"]
+    symlinked_plan = tmp_path / "plan-alias.json"
+    symlinked_plan.symlink_to(real_plan)
+
+    with pytest.raises(ValueError, match="symlink"):
+        migration.load_migration_plan(symlinked_plan)
+
+    assert real_plan.read_text(encoding="utf-8")
+
+
+def test_build_migration_plan_rejects_dot_components_in_public_roots(tmp_path: Path) -> None:
+    source = tmp_path / "Old University"
+    source.mkdir()
+    academic_root = tmp_path / "New University"
+
+    with pytest.raises(ValueError, match="dot"):
+        build_migration_plan(source / ".." / source.name, academic_root, "Fall 2026")
+    with pytest.raises(ValueError, match="dot"):
+        build_migration_plan(source, academic_root / ".." / academic_root.name, "Fall 2026")
+
+
+def test_write_migration_plan_rejects_dot_components_in_public_output_directory(tmp_path: Path) -> None:
+    source = tmp_path / "Old University"
+    source.mkdir()
+    plan = build_migration_plan(source, tmp_path / "New University", "Fall 2026")
+    unsafe_directory = tmp_path / "migration" / ".." / "migration-alias"
+
+    with pytest.raises(ValueError, match="dot"):
+        write_migration_plan(plan, unsafe_directory)
+
+    assert not (tmp_path / "migration-alias").exists()
+
+
+def test_safe_atomic_write_rejects_dot_target_before_creating_temp_file(tmp_path: Path) -> None:
+    target_directory = tmp_path / "target-directory"
+    target_directory.mkdir()
+    unsafe_target = target_directory / ".." / "target.txt"
+
+    with pytest.raises(ValueError, match="dot"):
+        migration.safe_atomic_write_text(unsafe_target, "must not be written")
+
+    assert not (tmp_path / "target.txt").exists()
+
+
+def test_validate_migration_source_rejects_runtime_symlink_alias_descendant(tmp_path: Path) -> None:
+    runtime_root = tmp_path / "custom-runtime"
+    runtime_source = runtime_root / "selected-source"
+    runtime_source.mkdir(parents=True)
+    document = runtime_source / "runtime-state.txt"
+    document.write_text("runtime state", encoding="utf-8")
+    runtime_alias = tmp_path / "runtime-alias"
+    runtime_alias.symlink_to(runtime_root, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="runtime"):
+        migration.validate_migration_source(runtime_alias / "selected-source", runtime_root)
+
+    assert document.read_text(encoding="utf-8") == "runtime state"
+    assert not (tmp_path / "New University").exists()
+
+
 def test_load_migration_plan_rejects_malformed_version_and_operational_source_root(tmp_path: Path) -> None:
     source = tmp_path / "Old University"
     source.mkdir()
