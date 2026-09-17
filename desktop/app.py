@@ -9,7 +9,6 @@ import platform
 import shlex
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -38,21 +37,25 @@ DEFAULT_PROFILE = Path(os.environ.get("ACADEMIC_OS_CONFIG", str(Path.home() / ".
 
 
 class AcademicOSApp(tk.Tk):
-    BG = "#101827"
-    PANEL = "#172235"
-    PANEL_ALT = "#1d2b42"
-    TEXT = "#f4f7fb"
-    MUTED = "#a9b7ca"
-    ACCENT = "#7dd3fc"
+    BG = "#0e1625"
+    SIDEBAR = "#0a111e"
+    PANEL = "#151f31"
+    PANEL_ALT = "#1c2a40"
+    BORDER = "#2b3b55"
+    TEXT = "#f5f7fb"
+    MUTED = "#9aaac0"
+    ACCENT = "#a7e3c8"
+    ACCENT_STRONG = "#7dd3fc"
     SUCCESS = "#86efac"
     WARNING = "#fcd34d"
+    DANGER = "#fca5a5"
 
     def __init__(self, profile_path: Path | None = None) -> None:
         super().__init__()
         self.profile_path = (profile_path or DEFAULT_PROFILE).expanduser().resolve()
-        self.title("Academic OS")
-        self.geometry("1100x760")
-        self.minsize(900, 620)
+        self.title("Academic OS — Your workspace")
+        self.geometry("1180x800")
+        self.minsize(980, 660)
         self.configure(bg=self.BG)
         self._configure_styles()
         self._body: ttk.Frame | None = None
@@ -68,29 +71,55 @@ class AcademicOSApp(tk.Tk):
         style = ttk.Style(self)
         style.theme_use("clam")
         style.configure("App.TFrame", background=self.BG)
+        style.configure("Sidebar.TFrame", background=self.SIDEBAR)
         style.configure("Panel.TFrame", background=self.PANEL)
         style.configure("AltPanel.TFrame", background=self.PANEL_ALT)
+        style.configure("Card.TFrame", background=self.PANEL)
+        style.configure("CardAlt.TFrame", background=self.PANEL_ALT)
         style.configure("Title.TLabel", background=self.BG, foreground=self.TEXT, font=("SF Pro Display", 28, "bold"))
+        style.configure("PageTitle.TLabel", background=self.BG, foreground=self.TEXT, font=("SF Pro Display", 24, "bold"))
         style.configure("Heading.TLabel", background=self.BG, foreground=self.TEXT, font=("SF Pro Display", 17, "bold"))
         style.configure("PanelHeading.TLabel", background=self.PANEL, foreground=self.TEXT, font=("SF Pro Display", 15, "bold"))
+        style.configure("CardHeading.TLabel", background=self.PANEL, foreground=self.TEXT, font=("SF Pro Display", 13, "bold"))
         style.configure("Body.TLabel", background=self.BG, foreground=self.TEXT, font=("SF Pro Text", 11))
         style.configure("Muted.TLabel", background=self.BG, foreground=self.MUTED, font=("SF Pro Text", 10))
+        style.configure("Tiny.TLabel", background=self.BG, foreground=self.MUTED, font=("SF Pro Text", 9, "bold"))
         style.configure("PanelBody.TLabel", background=self.PANEL, foreground=self.TEXT, font=("SF Pro Text", 10))
         style.configure("PanelMuted.TLabel", background=self.PANEL, foreground=self.MUTED, font=("SF Pro Text", 9))
-        style.configure("Accent.TButton", background=self.ACCENT, foreground="#062033", padding=(14, 9), font=("SF Pro Text", 10, "bold"))
-        style.map("Accent.TButton", background=[("active", "#bae6fd")])
-        style.configure("Secondary.TButton", background=self.PANEL_ALT, foreground=self.TEXT, padding=(12, 8))
-        style.configure("TEntry", fieldbackground="#0b1321", foreground=self.TEXT, insertcolor=self.TEXT, padding=7)
-        style.configure("TCombobox", fieldbackground="#0b1321", foreground=self.TEXT, padding=6)
+        style.configure("CardBody.TLabel", background=self.PANEL, foreground=self.TEXT, font=("SF Pro Text", 10))
+        style.configure("CardMuted.TLabel", background=self.PANEL, foreground=self.MUTED, font=("SF Pro Text", 9))
+        style.configure("SidebarTitle.TLabel", background=self.SIDEBAR, foreground=self.TEXT, font=("SF Pro Display", 15, "bold"))
+        style.configure("SidebarMuted.TLabel", background=self.SIDEBAR, foreground=self.MUTED, font=("SF Pro Text", 9))
+        style.configure("SidebarSection.TLabel", background=self.SIDEBAR, foreground="#6f819b", font=("SF Pro Text", 8, "bold"))
+        style.configure("BrandMark.TLabel", background=self.ACCENT, foreground="#0b1b1a", font=("SF Pro Display", 17, "bold"), anchor="center")
+        style.configure("MetricLabel.TLabel", background=self.PANEL, foreground=self.MUTED, font=("SF Pro Text", 9, "bold"))
+        style.configure("MetricValue.TLabel", background=self.PANEL, foreground=self.TEXT, font=("SF Pro Display", 23, "bold"))
+        style.configure("MetricCaption.TLabel", background=self.PANEL, foreground=self.MUTED, font=("SF Pro Text", 9))
+        style.configure("Accent.TButton", background=self.ACCENT, foreground="#0b1b1a", padding=(15, 10), font=("SF Pro Text", 10, "bold"), borderwidth=0)
+        style.map("Accent.TButton", background=[("active", "#c9f2df"), ("pressed", "#8bc9ad")], foreground=[("disabled", "#6c8178")])
+        style.configure("Primary.TButton", background=self.ACCENT, foreground="#0b1b1a", padding=(15, 10), font=("SF Pro Text", 10, "bold"), borderwidth=0)
+        style.map("Primary.TButton", background=[("active", "#c9f2df"), ("pressed", "#8bc9ad")])
+        style.configure("Secondary.TButton", background=self.PANEL_ALT, foreground=self.TEXT, padding=(12, 9), font=("SF Pro Text", 10), borderwidth=0)
+        style.map("Secondary.TButton", background=[("active", "#29405e"), ("pressed", "#243750")])
+        style.configure("Ghost.TButton", background=self.BG, foreground=self.MUTED, padding=(10, 8), font=("SF Pro Text", 10), borderwidth=0)
+        style.map("Ghost.TButton", background=[("active", self.PANEL_ALT)], foreground=[("active", self.TEXT)])
+        style.configure("Nav.TButton", background=self.SIDEBAR, foreground=self.MUTED, anchor="w", padding=(12, 10), font=("SF Pro Text", 10), borderwidth=0)
+        style.map("Nav.TButton", background=[("active", self.PANEL_ALT)], foreground=[("active", self.TEXT)])
+        style.configure("NavSelected.TButton", background=self.PANEL_ALT, foreground=self.TEXT, anchor="w", padding=(12, 10), font=("SF Pro Text", 10, "bold"), borderwidth=0)
+        style.map("NavSelected.TButton", background=[("active", "#29405e")])
+        style.configure("TEntry", fieldbackground="#0b1321", foreground=self.TEXT, insertcolor=self.TEXT, padding=8)
+        style.configure("TCombobox", fieldbackground="#0b1321", foreground=self.TEXT, padding=7)
         style.configure("TCheckbutton", background=self.PANEL, foreground=self.TEXT)
         style.map("TCheckbutton", background=[("active", self.PANEL)])
+        style.configure("TRadiobutton", background=self.PANEL, foreground=self.TEXT)
+        style.map("TRadiobutton", background=[("active", self.PANEL)])
         style.configure("TNotebook", background=self.BG, borderwidth=0)
         style.configure("TNotebook.Tab", background=self.PANEL_ALT, foreground=self.TEXT, padding=(12, 8))
 
-    def _clear_body(self) -> ttk.Frame:
+    def _clear_body(self, padding: int = 28) -> ttk.Frame:
         if self._body is not None:
             self._body.destroy()
-        self._body = ttk.Frame(self, style="App.TFrame", padding=28)
+        self._body = ttk.Frame(self, style="App.TFrame", padding=padding)
         self._body.pack(fill="both", expand=True)
         return self._body
 
@@ -323,62 +352,177 @@ class AcademicOSApp(tk.Tk):
         except Exception as exc:
             messagebox.showerror("Setup stopped safely", str(exc))
 
+    def _card(self, parent: tk.Misc, *, padding: int = 18, accent: bool = False) -> tuple[tk.Frame, ttk.Frame]:
+        border = self.ACCENT_STRONG if accent else self.BORDER
+        outer = tk.Frame(parent, background=border, borderwidth=0, highlightthickness=0)
+        inner = ttk.Frame(outer, style="Card.TFrame", padding=padding)
+        inner.pack(fill="both", expand=True, padx=1, pady=1)
+        return outer, inner
+
+    def _pill(self, parent: tk.Misc, text: str, *, background: str, foreground: str) -> tk.Frame:
+        pill = tk.Frame(parent, background=background, borderwidth=0, highlightthickness=0)
+        tk.Label(pill, text=text, background=background, foreground=foreground, font=("SF Pro Text", 9, "bold"), padx=9, pady=4).pack()
+        return pill
+
+    def _nav_button(self, parent: ttk.Frame, text: str, command: Any, *, selected: bool = False) -> None:
+        style = "NavSelected.TButton" if selected else "Nav.TButton"
+        ttk.Button(parent, text=text, style=style, command=command).pack(fill="x", pady=2)
+
+    def _build_sidebar(self, sidebar: ttk.Frame, dashboard: dict[str, Any]) -> None:
+        sidebar.configure(width=226)
+        sidebar.grid_propagate(False)
+        brand = ttk.Frame(sidebar, style="Sidebar.TFrame")
+        brand.pack(fill="x")
+        ttk.Label(brand, text="A", style="BrandMark.TLabel", width=2).pack(side="left", padx=(0, 10), ipady=3)
+        brand_copy = ttk.Frame(brand, style="Sidebar.TFrame")
+        brand_copy.pack(side="left", fill="x", expand=True)
+        ttk.Label(brand_copy, text="Academic OS", style="SidebarTitle.TLabel").pack(anchor="w")
+        ttk.Label(brand_copy, text="PRIVATE STUDY SPACE", style="SidebarMuted.TLabel").pack(anchor="w", pady=(2, 0))
+
+        tk.Frame(sidebar, background=self.BORDER, height=1, borderwidth=0).pack(fill="x", pady=(24, 22))
+        ttk.Label(sidebar, text="WORKSPACE", style="SidebarSection.TLabel").pack(anchor="w", pady=(0, 8))
+        self._nav_button(sidebar, "Overview", self.show_dashboard, selected=True)
+        self._nav_button(sidebar, "Add a course", lambda: self._add_course(dashboard))
+        self._nav_button(sidebar, "Import material", lambda: self._migration_dialog(dashboard))
+        self._nav_button(sidebar, "Verify installation", self._run_verification)
+
+        spacer = ttk.Frame(sidebar, style="Sidebar.TFrame")
+        spacer.pack(fill="both", expand=True)
+        ttk.Label(sidebar, text="QUICK ACCESS", style="SidebarSection.TLabel").pack(anchor="w", pady=(0, 8))
+        self._nav_button(sidebar, "Open University folder", lambda: open_local_path(Path(dashboard["academic_root"])))
+        self._nav_button(sidebar, "Today's dashboard", lambda: self._open_today(dashboard))
+        self._nav_button(sidebar, "Open Hermes", self._open_hermes)
+        tk.Frame(sidebar, background=self.BORDER, height=1, borderwidth=0).pack(fill="x", pady=(22, 14))
+        ttk.Label(sidebar, text=dashboard["institution"], style="SidebarMuted.TLabel", wraplength=185).pack(anchor="w")
+        ttk.Label(sidebar, text=dashboard["student_name"], style="SidebarTitle.TLabel", wraplength=185).pack(anchor="w", pady=(4, 0))
+        ttk.Button(sidebar, text="Settings", style="Ghost.TButton", command=self.show_setup).pack(fill="x", pady=(12, 0))
+
+    def _metric_card(self, parent: ttk.Frame, title: str, value: str, caption: str, column: int) -> None:
+        outer, card = self._card(parent, padding=15)
+        outer.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 6, 6 if column < 2 else 0))
+        parent.columnconfigure(column, weight=1)
+        ttk.Label(card, text=title.upper(), style="MetricLabel.TLabel").pack(anchor="w")
+        ttk.Label(card, text=value, style="MetricValue.TLabel").pack(anchor="w", pady=(5, 1))
+        ttk.Label(card, text=caption, style="MetricCaption.TLabel").pack(anchor="w")
+
     def show_dashboard(self) -> None:
         try:
             dashboard = load_dashboard(self.profile_path)
         except Exception as exc:
             self.show_setup(error=str(exc))
             return
-        body = self._clear_body()
-        top = ttk.Frame(body, style="App.TFrame")
-        top.pack(fill="x")
-        self._header(top, "Your local workspace", f"Welcome, {dashboard['student_name']}", f"{dashboard['institution']} · {dashboard['semester']} · {dashboard['timezone']}")
-        actions = ttk.Frame(top, style="App.TFrame")
-        actions.pack(anchor="e", pady=(10, 0))
-        ttk.Button(actions, text="Refresh", style="Secondary.TButton", command=self.show_dashboard).pack(side="left", padx=4)
-        ttk.Button(actions, text="Settings", style="Secondary.TButton", command=self.show_setup).pack(side="left", padx=4)
-        ttk.Button(actions, text="Open Hermes", style="Secondary.TButton", command=self._open_hermes).pack(side="left", padx=4)
+        body = self._clear_body(padding=0)
+        body.columnconfigure(1, weight=1)
+        body.rowconfigure(0, weight=1)
 
-        stats = ttk.Frame(body, style="App.TFrame")
-        stats.pack(fill="x", pady=(24, 14))
-        self._stat_card(stats, "Courses", str(dashboard["course_count"]), "confirmed course folders", 0)
-        self._stat_card(stats, "Inbox", str(dashboard["inbox_count"]), "files awaiting review", 1)
-        root_state = "Ready" if dashboard["root_exists"] else "Needs setup"
-        self._stat_card(stats, "Workspace", root_state, "local files stay on this computer", 2)
+        sidebar = ttk.Frame(body, style="Sidebar.TFrame", padding=(18, 22, 18, 18))
+        sidebar.grid(row=0, column=0, sticky="nsew")
+        self._build_sidebar(sidebar, dashboard)
 
-        lower = ttk.Frame(body, style="App.TFrame")
-        lower.pack(fill="both", expand=True)
-        left = ttk.Frame(lower, style="Panel.TFrame", padding=18)
-        left.pack(side="left", fill="both", expand=True, padx=(0, 9))
-        right = ttk.Frame(lower, style="Panel.TFrame", padding=18)
-        right.pack(side="left", fill="both", expand=True, padx=(9, 0))
-        ttk.Label(left, text="Quick actions", style="PanelHeading.TLabel").pack(anchor="w")
-        for label, command in (
-            ("Open University folder", lambda: open_local_path(Path(dashboard["academic_root"]))),
-            ("Open today's dashboard", lambda: self._open_today(dashboard)),
-            ("Add a course", lambda: self._add_course(dashboard)),
-            ("Import older University material", lambda: self._migration_dialog(dashboard)),
-            ("Run verification", lambda: self._run_verification()),
-            ("Open setup handoff guide", lambda: open_local_path(Path(dashboard["install_root"]) / "HANDOFF.md")),
-        ):
-            ttk.Button(left, text=label, style="Secondary.TButton", command=command).pack(fill="x", pady=(10, 0))
-        ttk.Label(left, text=f"Files: {dashboard['academic_root']}", style="PanelMuted.TLabel", wraplength=420).pack(anchor="w", pady=(18, 0))
+        main = ttk.Frame(body, style="App.TFrame", padding=(30, 24, 30, 24))
+        main.grid(row=0, column=1, sticky="nsew")
+        main.columnconfigure(0, weight=1)
+        main.rowconfigure(3, weight=1)
 
-        ttk.Label(right, text="Current picture", style="PanelHeading.TLabel").pack(anchor="w")
-        courses_text = "\n".join(f"• {course}" for course in dashboard["courses"]) or "No courses yet — add a syllabus when you are ready."
-        ttk.Label(right, text=courses_text, style="PanelBody.TLabel", justify="left", wraplength=420).pack(anchor="w", pady=(12, 12))
-        ttk.Label(right, text="Today's dashboard preview", style="PanelHeading.TLabel").pack(anchor="w", pady=(8, 0))
-        preview = dashboard["today_preview"] or "No daily brief has been generated yet."
-        text = tk.Text(right, height=8, background="#0b1321", foreground=self.TEXT, insertbackground=self.TEXT, borderwidth=0, wrap="word", padx=10, pady=10)
-        text.insert("1.0", preview)
-        text.configure(state="disabled")
-        text.pack(fill="both", expand=True, pady=(8, 0))
+        header = ttk.Frame(main, style="App.TFrame")
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(0, weight=1)
+        header_left = ttk.Frame(header, style="App.TFrame")
+        header_left.grid(row=0, column=0, sticky="w")
+        ttk.Label(header_left, text="OVERVIEW  /  LOCAL WORKSPACE", style="Tiny.TLabel").pack(anchor="w")
+        ttk.Label(header_left, text=f"Welcome back, {dashboard['student_name']}", style="PageTitle.TLabel").pack(anchor="w", pady=(5, 2))
+        context = f"{dashboard['institution']}  ·  {dashboard['semester']}"
+        if dashboard.get("program") and dashboard["program"] != "Not yet specified":
+            context += f"  ·  {dashboard['program']}"
+        ttk.Label(header_left, text=context, style="Muted.TLabel").pack(anchor="w")
+        header_right = ttk.Frame(header, style="App.TFrame")
+        header_right.grid(row=0, column=1, sticky="e", padx=(20, 0))
+        self._pill(header_right, "●  Workspace ready" if dashboard["root_exists"] else "●  Setup needed", background="#173529" if dashboard["root_exists"] else "#3b2d19", foreground=self.SUCCESS if dashboard["root_exists"] else self.WARNING).pack(side="left", padx=(0, 10))
+        ttk.Button(header_right, text="Refresh", style="Ghost.TButton", command=self.show_dashboard).pack(side="left")
 
-        integrations = ttk.Frame(body, style="App.TFrame")
-        integrations.pack(fill="x", pady=(14, 0))
+        hero_outer, hero = self._card(main, padding=21, accent=True)
+        hero_outer.grid(row=1, column=0, sticky="ew", pady=(22, 16))
+        hero.columnconfigure(0, weight=1)
+        hero_copy = ttk.Frame(hero, style="Card.TFrame")
+        hero_copy.grid(row=0, column=0, sticky="w")
+        ttk.Label(hero_copy, text="Your workspace is ready", style="CardHeading.TLabel").pack(anchor="w")
+        ttk.Label(hero_copy, text="Keep today light: open your files, check what needs review, or bring older material into the new structure.", style="CardBody.TLabel", wraplength=520).pack(anchor="w", pady=(6, 8))
+        ttk.Label(hero_copy, text=f"Local files stay on this computer  ·  {dashboard['timezone']}", style="CardMuted.TLabel").pack(anchor="w")
+        hero_actions = ttk.Frame(hero, style="Card.TFrame")
+        hero_actions.grid(row=0, column=1, sticky="e", padx=(20, 0))
+        ttk.Button(hero_actions, text="Open University folder", style="Primary.TButton", command=lambda: open_local_path(Path(dashboard["academic_root"]))).pack(anchor="e")
+        ttk.Button(hero_actions, text="Import older material", style="Secondary.TButton", command=lambda: self._migration_dialog(dashboard)).pack(anchor="e", pady=(8, 0))
+
+        metrics = ttk.Frame(main, style="App.TFrame")
+        metrics.grid(row=2, column=0, sticky="ew")
+        self._metric_card(metrics, "Courses", str(dashboard["course_count"]), f"active in {dashboard['semester']}", 0)
+        self._metric_card(metrics, "Inbox", str(dashboard["inbox_count"]), "items waiting for review", 1)
+        self._metric_card(metrics, "Workspace", "Ready" if dashboard["root_exists"] else "Needs setup", "local structure status", 2)
+
+        content = ttk.Frame(main, style="App.TFrame")
+        content.grid(row=3, column=0, sticky="nsew", pady=(16, 0))
+        content.columnconfigure(0, weight=3)
+        content.columnconfigure(1, weight=2)
+        content.rowconfigure(0, weight=1)
+
+        today_outer, today = self._card(content, padding=18)
+        today_outer.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        today.rowconfigure(2, weight=1)
+        today.columnconfigure(0, weight=1)
+        today_header = ttk.Frame(today, style="Card.TFrame")
+        today_header.grid(row=0, column=0, sticky="ew")
+        today_header.columnconfigure(0, weight=1)
+        ttk.Label(today_header, text="Today", style="CardHeading.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Button(today_header, text="Open dashboard", style="Ghost.TButton", command=lambda: self._open_today(dashboard)).grid(row=0, column=1, sticky="e")
+        ttk.Label(today, text="Your latest local brief and next focus area.", style="CardMuted.TLabel").grid(row=1, column=0, sticky="nw", pady=(4, 10))
+        preview = dashboard["today_preview"] or "No daily brief has been generated yet. Your priorities will appear here after the first brief run."
+        preview_box = tk.Text(today, height=8, background="#0d1727", foreground=self.TEXT, insertbackground=self.TEXT, borderwidth=0, highlightthickness=0, wrap="word", padx=13, pady=12, font=("SF Pro Text", 10), relief="flat")
+        preview_box.insert("1.0", preview)
+        preview_box.configure(state="disabled")
+        preview_box.grid(row=2, column=0, sticky="nsew", pady=(0, 12))
+        ttk.Label(today, text="Generated locally · not a source of truth", style="CardMuted.TLabel").grid(row=3, column=0, sticky="w")
+
+        courses_outer, courses_card = self._card(content, padding=18)
+        courses_outer.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        courses_card.rowconfigure(1, weight=1)
+        courses_card.columnconfigure(0, weight=1)
+        courses_header = ttk.Frame(courses_card, style="Card.TFrame")
+        courses_header.grid(row=0, column=0, sticky="ew")
+        courses_header.columnconfigure(0, weight=1)
+        ttk.Label(courses_header, text="Courses", style="CardHeading.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Button(courses_header, text="Add", style="Ghost.TButton", command=lambda: self._add_course(dashboard)).grid(row=0, column=1, sticky="e")
+        course_list = ttk.Frame(courses_card, style="Card.TFrame")
+        course_list.grid(row=1, column=0, sticky="nsew", pady=(12, 0))
+        if dashboard["courses"]:
+            for course in dashboard["courses"][:6]:
+                row = tk.Frame(course_list, background=self.PANEL, borderwidth=0, highlightthickness=0)
+                row.pack(fill="x", pady=(0, 10))
+                tk.Label(row, text="•", background=self.PANEL, foreground=self.ACCENT_STRONG, font=("SF Pro Display", 16, "bold"), width=2).pack(side="left", anchor="n")
+                tk.Label(row, text=course, background=self.PANEL, foreground=self.TEXT, font=("SF Pro Text", 10), anchor="w", justify="left", wraplength=260).pack(side="left", fill="x", expand=True)
+            if len(dashboard["courses"]) > 6:
+                ttk.Label(course_list, text=f"+ {len(dashboard['courses']) - 6} more course folders", style="CardMuted.TLabel").pack(anchor="w", pady=(2, 0))
+        else:
+            ttk.Label(course_list, text="No courses yet", style="CardBody.TLabel").pack(anchor="w", pady=(6, 3))
+            ttk.Label(course_list, text="Add a confirmed course to start organizing this semester.", style="CardMuted.TLabel", wraplength=240).pack(anchor="w")
+        ttk.Label(courses_card, text="Only confirmed course folders appear here.", style="CardMuted.TLabel").grid(row=2, column=0, sticky="w", pady=(12, 0))
+
+        footer = ttk.Frame(main, style="App.TFrame")
+        footer.grid(row=4, column=0, sticky="ew", pady=(16, 0))
+        footer.columnconfigure(0, weight=1)
+        footer.columnconfigure(1, weight=1)
+        health_outer, health = self._card(footer, padding=14)
+        health_outer.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        health.columnconfigure(0, weight=1)
+        ttk.Label(health, text="Workspace health", style="CardHeading.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(health, text="Your local structure is available and ready for review.", style="CardMuted.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Button(health, text="Run verification", style="Ghost.TButton", command=self._run_verification).grid(row=0, column=1, rowspan=2, sticky="e", padx=(12, 0))
+        connections_outer, connections = self._card(footer, padding=14)
+        connections_outer.grid(row=0, column=1, sticky="ew", padx=(8, 0))
         configured = [label for label, key in (("Gmail", "gmail"), ("Calendar", "calendar"), ("Drive", "drive"), ("School portal", "school_portal")) if dashboard["integrations"].get(key)]
-        state = "Prepared: " + ", ".join(configured) if configured else "No external accounts selected yet"
-        ttk.Label(integrations, text=state + " · Authorization happens in the user's own browser.", style="Muted.TLabel", wraplength=850).pack(anchor="w")
+        connection_state = "Prepared: " + ", ".join(configured) if configured else "No external accounts selected yet"
+        ttk.Label(connections, text="Connections", style="CardHeading.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(connections, text=connection_state, style="CardMuted.TLabel", wraplength=270).grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Button(connections, text="Settings", style="Ghost.TButton", command=self.show_setup).grid(row=0, column=1, rowspan=2, sticky="e", padx=(12, 0))
 
     def _stat_card(self, parent: ttk.Frame, title: str, value: str, caption: str, column: int) -> None:
         card = ttk.Frame(parent, style="Panel.TFrame", padding=16)
