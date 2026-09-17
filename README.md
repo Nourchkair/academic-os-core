@@ -23,7 +23,31 @@ The core owns configuration, workspace discovery, semesters, courses, sources, p
 
 ## Install the core locally
 
-Requirements: Python 3.11+.
+Requirements: Python 3.11+ and Node.js/npm for the browser dashboard.
+
+### Easiest macOS setup
+
+After downloading or cloning the repository, run the included installer once:
+
+```bash
+cd academic-os-core
+sh install-mac.sh
+```
+
+The installer creates a repository-local Python environment, installs Academia OS and its dependencies, installs the locked frontend dependencies, builds the dashboard, creates a per-user `academia` launcher in `~/.local/bin`, and adds that directory to zsh’s path when needed. It is safe to run again; it will not overwrite an unrelated existing `academia` command.
+
+Open a new Terminal after installation, or reload the current shell:
+
+```bash
+source ~/.zshrc
+academia
+```
+
+After the one-time setup, `academia` works from any folder and opens the local dashboard. This setup does not require Hermes, an Apple-signed application, or a cloud service. Dependency installation requires the normal Python package and npm registries; the dashboard and academic data remain local after installation.
+
+### Manual/development setup
+
+For a development environment without the launcher setup:
 
 ```bash
 python3 -m venv .venv

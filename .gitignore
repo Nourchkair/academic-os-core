@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 
 # Generated local instances and personal academic data
+*.egg-info/
 dist/
 local/
 instance/
