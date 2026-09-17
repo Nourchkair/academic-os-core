@@ -146,7 +146,7 @@ def test_workspace_attach_requires_apply_and_writes_only_profile_after_confirmat
     env = os.environ.copy(); env["PYTHONPATH"] = str(ROOT)
     common = [
         sys.executable, "-m", "academia_os", "--profile", str(profile), "workspace", "attach", str(root),
-        "--name", "Nour Student", "--institution", "Example University", "--program", "History",
+        "--name", "Alex Student", "--institution", "Example University", "--program", "History",
         "--timezone", "America/Toronto", "--semester", "Fall 2026",
     ]
     preview = subprocess.run(common + ["--json"], cwd=ROOT, env=env, text=True, capture_output=True)
@@ -231,7 +231,7 @@ def test_workspace_create_is_previewed_then_uses_existing_installer(tmp_path: Pa
     env = os.environ.copy(); env["PYTHONPATH"] = str(ROOT)
     common = [
         sys.executable, "-m", "academia_os", "--profile", str(profile), "workspace", "create", str(root),
-        "--name", "Nour Student", "--institution", "Example University", "--program", "History",
+        "--name", "Alex Student", "--institution", "Example University", "--program", "History",
         "--timezone", "America/Toronto", "--semester", "Fall 2026",
     ]
     preview = subprocess.run(common + ["--json"], cwd=ROOT, env=env, text=True, capture_output=True)
@@ -255,7 +255,7 @@ def test_workspace_create_preserves_stale_profile_before_initializing(tmp_path: 
     result = subprocess.run(
         [
             sys.executable, "-m", "academia_os", "--profile", str(profile), "workspace", "create", str(root),
-            "--name", "Nour Student", "--institution", "Example University", "--program", "History",
+            "--name", "Alex Student", "--institution", "Example University", "--program", "History",
             "--timezone", "America/Toronto", "--semester", "Fall 2026", "--apply", "--json",
         ],
         cwd=ROOT,

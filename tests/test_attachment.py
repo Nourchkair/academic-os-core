@@ -85,7 +85,7 @@ def test_attach_preview_does_not_write_profile_or_academic_state(tmp_path: Path)
     result = attach_workspace(
         root,
         profile,
-        name="Nour Student",
+        name="Alex Student",
         institution="Example University",
         program="History",
         timezone="America/Toronto",
@@ -109,7 +109,7 @@ def test_attach_apply_backs_up_stale_profile_and_preserves_workspace(tmp_path: P
     stale = {
         "schema_version": 2,
         "student": {"name": "Alex Student", "institution": "Example University", "program": "History"},
-        "academic": {"root_directory": str(tmp_path / "pytest-of-nourchkair"), "semester": "Fall 2026", "timezone": "UTC"},
+        "academic": {"root_directory": str(tmp_path / "pytest-of-student"), "semester": "Fall 2026", "timezone": "UTC"},
     }
     profile.write_text(json.dumps(stale), encoding="utf-8")
     before = _hash_tree(root)
@@ -117,7 +117,7 @@ def test_attach_apply_backs_up_stale_profile_and_preserves_workspace(tmp_path: P
     result = attach_workspace(
         root,
         profile,
-        name="Nour Student",
+        name="Alex Student",
         institution="Example University",
         program="History",
         timezone="America/Toronto",
@@ -132,7 +132,7 @@ def test_attach_apply_backs_up_stale_profile_and_preserves_workspace(tmp_path: P
     assert json.loads(backup.read_text(encoding="utf-8"))["student"]["name"] == "Alex Student"
     saved = json.loads(profile.read_text(encoding="utf-8"))
     assert saved["academic"]["root_directory"] == str(root)
-    assert saved["student"]["name"] == "Nour Student"
+    assert saved["student"]["name"] == "Alex Student"
     assert not (root / ".academia").exists()
     assert _hash_tree(root) == before
 
@@ -146,7 +146,7 @@ def test_attach_rejects_unrecognized_nonempty_folder(tmp_path: Path) -> None:
         attach_workspace(
             root,
             tmp_path / ".academic-os" / "profile.json",
-            name="Nour Student",
+            name="Alex Student",
             institution="Example University",
             timezone="America/Toronto",
             semester="Fall 2026",
