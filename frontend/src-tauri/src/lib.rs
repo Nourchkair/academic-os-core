@@ -45,6 +45,7 @@ fn academia_command(command: String, args: Vec<String>) -> Result<String, String
         "settings",
         "verify",
         "import",
+        "domain",
     ];
     if !allowed.contains(&command.as_str()) {
         return Err(format!("Unsupported Academia command: {command}"));

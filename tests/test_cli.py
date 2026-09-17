@@ -70,6 +70,28 @@ def test_settings_preview_does_not_write_until_apply(tmp_path: Path) -> None:
     assert json.loads(profile.read_text(encoding="utf-8"))["student"]["name"] == "Updated"
 
 
+def test_review_decide_command_records_specific_choice(tmp_path: Path) -> None:
+    config = minimal_config(tmp_path)
+    root = Path(config["academic"]["root_directory"])
+    item = ReviewQueue(root / ".academia" / "review.json").add(
+        kind="deadline_conflict",
+        title="Assignment 2 deadline",
+        course="HIS 101 - History",
+        details={"current": "October 8", "new": "October 11"},
+    )
+    profile = Path(config["runtime"]["install_directory"]) / "profile.json"
+    save_config(profile, config)
+    env = os.environ.copy(); env["PYTHONPATH"] = str(ROOT)
+    result = subprocess.run(
+        [sys.executable, "-m", "academia_os", "--profile", str(profile), "review", "decide", item.id, "use_new", "--json"],
+        cwd=ROOT, env=env, text=True, capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["status"] == "approved"
+    assert value["details"]["decision"] == "use_new"
+
+
 def test_import_command_copies_source_and_stages_processing_record(tmp_path: Path) -> None:
     config = minimal_config(tmp_path)
     root = Path(config["academic"]["root_directory"])
@@ -162,6 +184,42 @@ def test_uncertain_import_creates_review_item_without_moving_original(tmp_path: 
     reviews = json.loads((root / ".academia" / "review.json").read_text(encoding="utf-8"))
     assert reviews[0]["kind"] == "import_classification"
     assert reviews[0]["status"] == "open"
+
+
+def test_import_rejects_workspace_root_and_non_inbox_destinations(tmp_path: Path) -> None:
+    config = minimal_config(tmp_path)
+    root = Path(config["academic"]["root_directory"])
+    source = tmp_path / "reading.pdf"
+    source.write_bytes(b"reading")
+    profile = Path(config["runtime"]["install_directory"]) / "profile.json"
+    save_config(profile, config)
+    env = os.environ.copy(); env["PYTHONPATH"] = str(ROOT)
+    for destination in (root, root / "LooseDump", root / ".academia" / "inbox"):
+        result = subprocess.run(
+            [sys.executable, "-m", "academia_os", "--profile", str(profile), "import", str(source), "--destination", str(destination), "--json"],
+            cwd=ROOT, env=env, text=True, capture_output=True,
+        )
+        assert result.returncode == 2
+        assert "workspace inbox" in result.stdout
+    assert source.is_file()
+
+
+def test_import_rejects_operational_state_as_a_source(tmp_path: Path) -> None:
+    config = minimal_config(tmp_path)
+    root = Path(config["academic"]["root_directory"])
+    source = root / ".academia" / "processing.json"
+    source.parent.mkdir(parents=True)
+    source.write_text("[]", encoding="utf-8")
+    destination = root / "Fall 2026" / "00_INBOX"
+    profile = Path(config["runtime"]["install_directory"]) / "profile.json"
+    save_config(profile, config)
+    env = os.environ.copy(); env["PYTHONPATH"] = str(ROOT)
+    result = subprocess.run(
+        [sys.executable, "-m", "academia_os", "--profile", str(profile), "import", str(source), "--destination", str(destination), "--json"],
+        cwd=ROOT, env=env, text=True, capture_output=True,
+    )
+    assert result.returncode == 2
+    assert "operational state" in result.stdout
 
 
 def test_workspace_create_is_previewed_then_uses_existing_installer(tmp_path: Path) -> None:

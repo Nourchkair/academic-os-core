@@ -53,6 +53,30 @@ export type ActivityEvent = {
   created_at: string
 }
 
+export type SettingsPreview = {
+  applied: boolean
+  requires_approval: boolean
+  changes: Array<{ key: string; before: unknown; after: unknown; structural: boolean }>
+}
+
+export type DomainEntity = {
+  entity_type: string
+  id: string
+  course_id: string
+  title: string
+  evidence: {
+    source: string
+    source_path: string
+    source_location?: string | null
+    provenance: string
+    confidence: string
+    authority: string
+    verification_result?: string | null
+    last_verified_at?: string | null
+  }
+  [key: string]: unknown
+}
+
 export type WorkspaceCandidate = {
   path: string
   score: number

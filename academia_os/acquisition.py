@@ -82,11 +82,39 @@ def scan_watched_folder(path: Path, *, since: datetime | None = None) -> list[Pa
     return candidates
 
 
-def import_file(source: Path, destination_inbox: Path, processing: ProcessingStore | None = None) -> dict[str, Any]:
+def validate_import_destination(workspace_root: Path, destination_inbox: Path) -> Path:
+    workspace_root = Path(workspace_root).expanduser().resolve()
+    destination_inbox = Path(destination_inbox).expanduser().resolve()
+    try:
+        relative = destination_inbox.relative_to(workspace_root)
+    except ValueError as exc:
+        raise ValueError("import destination must be inside the configured academic workspace") from exc
+    if not relative.parts or ".academia" in relative.parts:
+        raise ValueError("import destination must be a workspace inbox, not the workspace root or operational state")
+    if "00_INBOX" not in relative.parts:
+        raise ValueError("import destination must be a workspace inbox named 00_INBOX, not an unstructured workspace dump")
+    return destination_inbox
+
+
+def validate_import_source(source: Path) -> Path:
     source = Path(source).expanduser().resolve()
+    if ".academia" in source.parts:
+        raise ValueError("academic operational state cannot be imported as source material")
+    return source
+
+
+def import_file(source: Path, destination_inbox: Path, processing: ProcessingStore | None = None, *, workspace_root: Path | None = None) -> dict[str, Any]:
+    source = validate_import_source(source)
+    if workspace_root is not None:
+        destination_inbox = validate_import_destination(workspace_root, destination_inbox)
+    else:
+        destination_inbox = Path(destination_inbox).expanduser().resolve()
+        if ".academia" in destination_inbox.parts:
+            raise ValueError("import destination cannot be inside .academia operational state")
+        if "00_INBOX" not in destination_inbox.parts:
+            raise ValueError("import destination must include a 00_INBOX segment")
     if not source.is_file():
         raise FileNotFoundError(source)
-    destination_inbox = Path(destination_inbox).expanduser().resolve()
     destination_inbox.mkdir(parents=True, exist_ok=True)
     destination = destination_inbox / source.name
     counter = 1
@@ -94,7 +122,7 @@ def import_file(source: Path, destination_inbox: Path, processing: ProcessingSto
         destination = destination_inbox / f"{source.stem} (import {counter}){source.suffix}"
         counter += 1
     shutil.copy2(source, destination)
-    metadata = {"source_type": "manual_file", "original_file": str(source), "acquired_at": datetime.now(timezone.utc).isoformat(), "destination": str(destination)}
+    metadata = {"source_type": "manual_file", "original_file": str(source), "acquired_at": datetime.now(timezone.utc).isoformat(), "destination": str(destination), "provenance": "EXTERNAL", "confidence": "unverified"}
     if processing is not None:
         processing.detect(destination, signature=f"{destination.stat().st_size}:{destination.stat().st_mtime_ns}")
     return metadata

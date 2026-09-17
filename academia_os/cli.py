@@ -9,15 +9,16 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable
 
-from .acquisition import browser_access_policy, capability_report, configured_watched_folders, import_file, scan_watched_folder
+from .acquisition import browser_access_policy, capability_report, configured_watched_folders, import_file, scan_watched_folder, validate_import_destination
 from .actions import ActionStore
 from .activity import ActivityLog
 from .attachment import assess_profile, attach_workspace, backup_profile, inspect_workspace
 from .config import load_config, save_config, runtime_directory, validate_config
 from .discovery import discover_academic_folders
+from .domain import ENTITY_TYPES, DomainProjection
 from .provenance import verify_source_metadata
 from .review import ReviewQueue
-from .settings import update_config
+from .settings import preview_config, update_config
 from .workspace import build_workspace_snapshot
 from .workflow import ApprovalWorkflow
 from installer.core import initialize_installation
@@ -172,12 +173,16 @@ def build_parser() -> argparse.ArgumentParser:
         command = sub.add_parser(name)
         command.add_argument("--json", action="store_true")
     review = sub.add_parser("review")
-    review.add_argument("action", choices=["list", "approve", "reject", "resolve"], nargs="?", default="list")
+    review.add_argument("action", choices=["list", "approve", "reject", "resolve", "decide"], nargs="?", default="list")
     review.add_argument("item_id", nargs="?")
+    review.add_argument("decision", nargs="?", help="Typed decision such as use_new or choose_course:...")
     review.add_argument("--json", action="store_true")
     course = sub.add_parser("course")
     course.add_argument("course_id", nargs="?")
     course.add_argument("--json", action="store_true")
+    domain = sub.add_parser("domain")
+    domain.add_argument("entity_type", choices=ENTITY_TYPES, nargs="?")
+    domain.add_argument("--json", action="store_true")
     workspace = sub.add_parser("workspace")
     workspace.add_argument("action", choices=["show", "discover", "inspect", "rebuild", "attach", "create"], nargs="?", default="show")
     workspace.add_argument("path", nargs="?", type=Path, help="Workspace path for inspect or attach")
@@ -222,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"courses", "today", "tasks", "course", "workspace", "review", "inbox", "activity", "agents", "capabilities", "watch", "import", "verify", "verify-source", "settings"}:
+        if args.command in {"courses", "today", "tasks", "course", "domain", "workspace", "review", "inbox", "activity", "agents", "capabilities", "watch", "import", "verify", "verify-source", "settings"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -248,6 +253,10 @@ def dispatch(args: argparse.Namespace) -> int:
         if not matches:
             raise KeyError(f"course not found: {args.course_id}")
         _emit(matches[0], as_json=args.json); return 0
+    if args.command == "domain":
+        _, snapshot, _ = _context(args)
+        projection = DomainProjection(Path(snapshot["academic_root"]) / ".academia" / "domain.json")
+        _emit(projection.list(args.entity_type), as_json=args.json); return 0
     if args.command == "workspace":
         if args.action == "inspect":
             if not args.path:
@@ -290,7 +299,11 @@ def dispatch(args: argparse.Namespace) -> int:
         if args.action != "list":
             if not args.item_id:
                 raise ValueError(f"review {args.action} requires an item id")
-            if args.action == "approve":
+            if args.action == "decide":
+                if not args.decision:
+                    raise ValueError("review decide requires a decision")
+                value = asdict(workflow.decide_review(args.item_id, args.decision))
+            elif args.action == "approve":
                 value = asdict(workflow.approve_review(args.item_id))
             elif args.action == "reject":
                 value = asdict(workflow.reject_review(args.item_id))
@@ -319,16 +332,10 @@ def dispatch(args: argparse.Namespace) -> int:
     if args.command == "import":
         config, snapshot, _ = _context(args)
         workspace_root = Path(snapshot["academic_root"]).expanduser().resolve()
-        destination = args.destination.expanduser().resolve()
-        try:
-            relative_destination = destination.relative_to(workspace_root)
-        except ValueError as exc:
-            raise ValueError("import destination must be inside the configured academic workspace") from exc
-        if destination == workspace_root or ".academia" in relative_destination.parts:
-            raise ValueError("import destination must be a workspace inbox, not the workspace root or operational state")
+        destination = validate_import_destination(workspace_root, args.destination)
         from .processing import ProcessingStore
         processing = ProcessingStore(workspace_root / ".academia" / "processing.json")
-        value = import_file(args.source, destination, processing)
+        value = import_file(args.source, destination, processing, workspace_root=workspace_root)
         ActivityLog(workspace_root / ".academia" / "activity.jsonl").append(
             event_type="file.imported",
             title=f"Imported {Path(value['destination']).name}",
@@ -342,9 +349,13 @@ def dispatch(args: argparse.Namespace) -> int:
                 kind="import_classification",
                 title=f"Choose a destination for {Path(value['destination']).name}",
                 details={
-                    "destination": value["destination"],
+                    "filename": Path(value["destination"]).name,
+                    "proposed_course": None,
+                    "proposed_category": None,
+                    "proposed_destination": value["destination"],
+                    "evidence": "The user marked this import as not yet classified.",
+                    "confidence": "unverified",
                     "original_file": value["original_file"],
-                    "reason": "The user marked this import as not yet classified.",
                     "preserve_original": True,
                 },
                 priority="normal",
@@ -366,7 +377,7 @@ def dispatch(args: argparse.Namespace) -> int:
         for expression in args.set:
             if "=" not in expression: raise ValueError(f"settings update expects KEY=VALUE: {expression}")
             key, value = expression.split("=", 1); updates[key] = _json_value(value)
-        candidate, changes = update_config(config, updates, approve_structural=args.approve_structural)
+        candidate, changes = update_config(config, updates, approve_structural=args.approve_structural) if args.apply else preview_config(config, updates)
         value = {"applied": False, "changes": changes, "requires_approval": any(change["structural"] for change in changes)}
         if args.apply:
             save_config(_profile_path(args), candidate); value["applied"] = True

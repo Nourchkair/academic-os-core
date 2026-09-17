@@ -43,12 +43,17 @@ def config_diff(before: dict[str, Any], after: dict[str, Any], prefix: str = "")
     return changes
 
 
-def update_config(config: dict[str, Any], updates: dict[str, Any], *, approve_structural: bool = False) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def preview_config(config: dict[str, Any], updates: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     candidate = copy.deepcopy(config)
     for key, value in updates.items():
         set_config_value(candidate, key, value)
     candidate = validate_config(candidate)
     changes = config_diff(validate_config(copy.deepcopy(config)), candidate)
+    return candidate, changes
+
+
+def update_config(config: dict[str, Any], updates: dict[str, Any], *, approve_structural: bool = False) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    candidate, changes = preview_config(config, updates)
     structural = [change for change in changes if change["structural"]]
     if structural and not approve_structural:
         raise PermissionError("structural configuration changes require explicit approval")

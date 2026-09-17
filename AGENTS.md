@@ -31,6 +31,9 @@ academia course "COURSE ID" --json
 academia today --json
 academia tasks --json
 academia review --json
+academia review decide REVIEW_ID use_new --json
+academia domain --json
+academia settings show --json
 academia inbox --json
 academia activity --json
 academia capabilities --json

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActivityEvent, AttachmentResult, Course, ImportResult, ReviewItem, StatusPayload, Task, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
+import type { ActivityEvent, AttachmentResult, Course, DomainEntity, ImportResult, ReviewItem, SettingsPreview, StatusPayload, Task, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
@@ -29,7 +29,9 @@ export const api = {
   tasks: () => command<Task[]>('tasks'),
   review: () => command<ReviewItem[]>('review'),
   reviewAction: (action: 'approve' | 'reject' | 'resolve', itemId: string) => command<ReviewItem>('review', [action, itemId]),
+  reviewDecision: (itemId: string, decision: string) => command<ReviewItem>('review', ['decide', itemId, decision]),
   activity: () => command<ActivityEvent[]>('activity'),
+  domain: (entityType?: string) => command<DomainEntity[]>('domain', entityType ? [entityType] : []),
   workspace: () => command<WorkspaceSnapshot>('workspace'),
   workspaceDiscover: () => command<WorkspaceCandidate[]>('workspace', ['discover']),
   workspaceInspect: (path: string) => command<WorkspaceInspection>('workspace', ['inspect', path]),
@@ -59,4 +61,12 @@ export const api = {
   },
   importFile: (source: string, destination: string, uncertain: boolean) => command<ImportResult>('import', [source, '--destination', destination, ...(uncertain ? ['--uncertain'] : [])]),
   settings: () => command<Record<string, unknown>>('settings', ['show']),
+  settingsUpdate: (updates: Record<string, unknown>, apply: boolean, approveStructural: boolean) => {
+    const args = ['update']
+    for (const [key, value] of Object.entries(updates)) args.push('--set', `${key}=${JSON.stringify(value)}`)
+    if (apply) args.push('--apply')
+    if (approveStructural) args.push('--approve-structural')
+    return command<SettingsPreview>('settings', args)
+  },
+  capabilities: () => command<Record<string, unknown>>('capabilities'),
 }

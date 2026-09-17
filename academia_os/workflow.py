@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import Any
 
 from .actions import ActionProposal, ActionStatus, ActionStore, ActionType
@@ -97,6 +98,30 @@ class ApprovalWorkflow:
             )
             return updated
         return self.reviews.update(review_id, status=ReviewStatus.REJECTED)
+
+    def decide_review(self, review_id: str, decision: str) -> ReviewItem:
+        decision = decision.strip()
+        if not decision:
+            raise ValueError("review decision is required")
+        review = self.reviews.get(review_id)
+        rejection = decision in {"reject", "dismiss", "keep_current", "keep_existing", "keep_unassigned", "keep_general_intake"} or decision.startswith("reject_") or decision.startswith("dismiss_")
+        status = ReviewStatus.REJECTED if rejection else ReviewStatus.APPROVED
+        action_status: str | None = None
+        if review.action_proposal_id:
+            proposal = self.actions.reject(review.action_proposal_id) if rejection else self.actions.approve(review.action_proposal_id)
+            action_status = proposal.status
+        details = self._with_details(review, {"decision": decision, "decision_at": datetime.now(timezone.utc).isoformat()})
+        if action_status is not None:
+            details["action_status"] = action_status
+        updated = self.reviews.update(review_id, status=status, details=details)
+        self.activity.append(
+            event_type="review.decided",
+            title=review.title,
+            course=review.course,
+            details={"review_id": review_id, "decision": decision, "status": status.value, "action_status": action_status},
+            actor="user",
+        )
+        return updated
 
     def resolve_review(self, review_id: str) -> ReviewItem:
         review = self.reviews.get(review_id)

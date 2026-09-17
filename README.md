@@ -78,6 +78,10 @@ academia course "POL 2103 - Politics" --json
 academia today --json
 academia tasks --json
 academia review --json
+academia review decide REVIEW_ID use_new --json
+academia domain --json
+academia settings show --json
+academia settings update --set student.name="Student" --json
 academia inbox --json
 academia activity --json
 academia agents --json
@@ -116,7 +120,7 @@ A scan never acknowledges work. Stale processing leases return to retryable stat
 
 Academia OS remains useful with no browser access:
 
-1. **Manual import** — `academia import SOURCE --destination INBOX` copies a user-selected PDF, DOCX, PPTX, text, HTML, or other normal academic file into a workspace inbox; the original remains in place and the copy enters intake.
+1. **Manual import** — `academia import SOURCE --destination WORKSPACE/SEMESTER/COURSE/00_INBOX` copies a user-selected PDF, DOCX, PPTX, text, HTML, or other normal academic file into a workspace inbox; the original remains in place and the copy enters intake. The workspace root, arbitrary dump folders, and `.academia/` are rejected.
 2. **Watched folders** — `academia watch` performs a one-shot scan of configured local directories such as `Downloads/School`. A persistent background watcher is not claimed yet.
 3. **Browser companion** — architecture only for now. A future companion will support explicit actions such as “Send to Academia OS,” “Save reading,” and “Import this page.”
 4. **Advanced browser access** — optional and off by default.
@@ -124,6 +128,10 @@ Academia OS remains useful with no browser access:
 The current capability report is honest: manual import and one-shot watched-folder scanning are available; Chromium is limited to optional visible handoff with an explicit allow-list and target; Firefox and Safari are planned, not claimed as connected. The user may choose Chrome, Firefox, Safari, or another profile. A dedicated school/research profile is recommended for privacy but not required. Domain allow-lists narrow intended access but are not a security guarantee.
 
 For readings, prefer legitimate library, Omni/OpenAthens, publisher, DOI/open-access, institutional, or author-released access. Discovery-only sources do not authorize downloading an unclear copy. Never pay without explicit confirmation, and never silently substitute an edition.
+
+## Derived academic domain projection
+
+`academia domain --json` reads the optional `.academia/domain.json` projection. The projection supports evidence-backed `AcademicSource`, `Deadline`, `Assignment`, `Reading`, `Announcement`, and `CourseMeeting` records. Every record retains source path, provenance, confidence, authority, and verification timestamps. Unknown values remain null. The projection is derived state; human-readable academic files remain authoritative, and this pass does not semantically parse the real University workspace.
 
 ## Safety and privacy
 

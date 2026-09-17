@@ -9,13 +9,15 @@ import pytest
 from academia_os.acquisition import acquisition_defaults, browser_access_policy, capability_report
 from academia_os.browser import allowed_url
 from academia_os.activity import ActivityLog
+from academia_os.actions import ActionStore, ActionType
 from academia_os.config import CURRENT_CONFIG_VERSION, migrate_config, save_config, validate_config
 from academia_os.processing import ProcessingStatus, ProcessingStore
 from academia_os.provenance import ProvenanceLabel, SourceVerificationResult, verify_source_metadata
 from academia_os.review import ReviewQueue, ReviewStatus
 from academia_os.semester import resolve_current_semester
-from academia_os.settings import update_config
+from academia_os.settings import preview_config, update_config
 from academia_os.state import JsonStateStore
+from academia_os.workflow import ApprovalWorkflow
 from academia_os.workspace import build_workspace_snapshot
 
 
@@ -108,6 +110,29 @@ def test_review_queue_and_activity_log_survive_restart(tmp_path: Path) -> None:
     restored = ActivityLog(activity_path).list()
     assert restored[0].id == event.id
     assert restored[0].details["new"] == "October 11"
+
+
+def test_typed_review_decision_records_choice_and_action_state(tmp_path: Path) -> None:
+    queue = ReviewQueue(tmp_path / "review.json")
+    activity = ActivityLog(tmp_path / "activity.jsonl")
+    actions = ActionStore(tmp_path / "actions.json")
+    workflow = ApprovalWorkflow(actions=actions, reviews=queue, activity=activity)
+    item = queue.add(kind="deadline_conflict", title="Assignment 2 deadline", details={"current": "October 8", "new": "October 11"})
+
+    decided = workflow.decide_review(item.id, "use_new")
+
+    assert decided.status is ReviewStatus.APPROVED
+    assert decided.details["decision"] == "use_new"
+    assert activity.list()[0].event_type == "review.decided"
+
+    proposal, linked = workflow.propose(
+        action_type=ActionType.CONFIGURATION_CHANGE,
+        title="Update saved deadline",
+        details={"before": "October 8", "after": "October 11"},
+    )
+    approved = workflow.decide_review(linked.id, "approve_deadline_change")
+    assert approved.status is ReviewStatus.APPROVED
+    assert actions.get(proposal.id).status == "approved"
 
 
 def test_approved_review_items_leave_the_attention_queue(tmp_path: Path) -> None:
@@ -214,5 +239,12 @@ def test_settings_update_requires_approval_for_structural_changes(tmp_path: Path
     with pytest.raises(PermissionError, match="structural"):
         update_config(config, {"academic.root_directory": str(tmp_path / "Other")})
     candidate, changes = update_config(config, {"academic.root_directory": str(tmp_path / "Other")}, approve_structural=True)
+    assert candidate["academic"]["root_directory"].endswith("Other")
+    assert changes[0]["structural"] is True
+
+
+def test_settings_preview_returns_structural_impact_without_writing(tmp_path: Path) -> None:
+    config = minimal_config(tmp_path)
+    candidate, changes = preview_config(config, {"academic.root_directory": str(tmp_path / "Other")})
     assert candidate["academic"]["root_directory"].endswith("Other")
     assert changes[0]["structural"] is True

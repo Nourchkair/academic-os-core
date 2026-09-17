@@ -23,7 +23,10 @@ The original architecture/refactor slices are implemented and verified. The curr
 - **Fresh-workspace setup:** `workspace create PATH` previews the existing installer/template plan and invokes `installer.core.initialize_installation` only after `--apply`.
 - **Modern onboarding:** the React/Tauri shell now detects missing/stale/unrecognized setup and guides Welcome → Profile → Workspace → Semester → Sources → Agents → Review → Ready.
 - **Modern import:** the frontend uses the native Tauri dialog and Tauri drag/drop paths, while every copy still goes through the existing `academia import` command. “Not sure where this belongs” stages general intake and creates a durable `import_classification` Review item.
-- **Still intentionally incomplete:** typed Review decision cards, fully editable modern Settings, persistent background watchers, structured Assignment/Deadline/Reading entities, bundled sidecar packaging, signing, and notarization.
+- **Typed Review:** deadline conflicts, source/reading verification, imported-file classification, course uncertainty, and action approval now render as decision-specific cards and persist choices through `review decide`.
+- **Functional Settings:** Profile, Workspace, Sources & Imports, AI & Agents, Privacy, Automation, and Advanced sections now use the backend preview/apply contract. Structural changes show before/after and require explicit approval.
+- **Domain foundation:** evidence-backed `AcademicSource`, `Deadline`, `Assignment`, `Reading`, `Announcement`, and `CourseMeeting` projections persist under `.academia/domain.json`; no real-workspace semantic extraction is performed.
+- **Still intentionally incomplete:** persistent background watchers, semantic extraction from arbitrary academic files, execution of every possible action type, bundled sidecar packaging, signing, and notarization.
 
 The live user workspace is never a repository fixture. Product tests use temporary sanitized workspaces only.
 
