@@ -4,7 +4,7 @@ import { MigrationView } from './MigrationView'
 import { Onboarding } from './Onboarding'
 import { ReviewCard } from './ReviewCard'
 import { SettingsView } from './SettingsView'
-import { api, BridgeUnavailableError } from './lib/api'
+import { api, BridgeUnavailableError, isTauriEnvironment } from './lib/api'
 import type { ActivityEvent, Course, DomainEntity, ReviewItem, StatusPayload, Task } from './types'
 
 const nav = [
@@ -106,8 +106,9 @@ function App() {
 }
 
 function ConnectionNotice({ message, onRetry }: { message: string; onRetry: () => void }) {
-  const technical = message.includes('desktop bridge') || message.includes('invoke')
-  return <section className="connection-screen"><div className="connection-art">⌘</div><p className="eyebrow">Get started</p><h2>Connect your local workspace</h2><p>{technical ? 'Open the Academia OS desktop app to load your courses, tasks, readings, and review queue. Your academic files stay on this computer.' : message}</p><button className="primary-button" onClick={onRetry}>Retry connection</button>{technical ? <details className="connection-help"><summary>Advanced connection details</summary><code>academia status --json</code><span>Browser preview is intentionally data-free. The packaged desktop app connects to the local Academia OS interface.</span></details> : null}</section>
+  const technical = message.includes('desktop bridge') || message.includes('invoke') || message.includes('local dashboard') || message.includes('academia dashboard')
+  const localDashboard = !isTauriEnvironment() && technical
+  return <section className="connection-screen"><div className="connection-art">⌘</div><p className="eyebrow">Get started</p><h2>Connect your local workspace</h2><p>{localDashboard ? <>Start <code>academia dashboard --open</code> in a terminal, then retry. Your academic files stay on this computer and the browser connects only to that local dashboard.</> : technical ? 'Open the Academia OS desktop app to load your courses, tasks, readings, and review queue. Your academic files stay on this computer.' : message}</p><button className="primary-button" onClick={onRetry}>Retry connection</button>{technical ? <details className="connection-help"><summary>Advanced connection details</summary><code>{localDashboard ? 'academia dashboard --open' : 'academia status --json'}</code><span>{localDashboard ? 'The browser dashboard is local-only. No academic files are sent to an external service.' : 'Browser preview is intentionally data-free. The packaged desktop app connects to the local Academia OS interface.'}</span></details> : null}</section>
 }
 
 function Home({ status, tasks, reviews, activity, domain, onNavigate }: { status: StatusPayload | null; tasks: Task[]; reviews: ReviewItem[]; activity: ActivityEvent[]; domain: DomainEntity[]; onNavigate: (view: View) => void }) {

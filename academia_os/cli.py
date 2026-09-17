@@ -22,6 +22,7 @@ from .semester import resolve_current_semester
 from .settings import preview_config, update_config
 from .workspace import build_workspace_snapshot
 from .workflow import ApprovalWorkflow
+from .web import serve_dashboard, validate_loopback_host
 from installer.core import initialize_installation
 from installer.migration import MigrationPlan, build_migration_plan, ensure_safe_text_target, execute_migration_plan, load_migration_plan, safe_atomic_write_text, validate_migration_source, write_migration_plan
 from .version import __version__
@@ -363,9 +364,14 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--json", action="store_true")
     watched = sub.add_parser("watch")
     watched.add_argument("--json", action="store_true")
+    dashboard = sub.add_parser("dashboard", help="Serve the browser dashboard on the local machine")
+    dashboard.add_argument("--host", default="127.0.0.1", help="Loopback bind host (127.0.0.1, ::1, or localhost)")
+    dashboard.add_argument("--port", type=int, default=8765, help="TCP port; use 0 to select an available test port")
+    dashboard.add_argument("--open", action="store_true", dest="open", help="Open the dashboard URL after the server is ready")
     imported = sub.add_parser("import", help="Copy one local file into a selected workspace inbox")
     imported.add_argument("source", type=Path)
     imported.add_argument("--destination", type=Path, required=True, help="Workspace inbox directory; source files are never moved")
+    imported.add_argument("--source-label", help="Truthful provenance label for a staged source, instead of recording its temporary path")
     imported.add_argument("--uncertain", action="store_true", help="Keep the file in general intake and create a Review item")
     imported.add_argument("--json", action="store_true")
     migration = sub.add_parser("migration", help="Plan and execute safe legacy material migration")
@@ -396,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"courses", "today", "tasks", "course", "domain", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "semester", "watch", "import", "verify", "verify-source", "settings", "migration"}:
+        if args.command in {"courses", "today", "tasks", "course", "domain", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -408,6 +414,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def dispatch(args: argparse.Namespace) -> int:
+    if args.command == "dashboard":
+        validate_loopback_host(args.host)
+        serve_dashboard(host=args.host, port=args.port, open_browser=args.open, profile=args.profile)
+        return 0
     if args.command == "migration":
         _emit(_migration(args), as_json=args.json)
         return 0
@@ -545,29 +555,39 @@ def dispatch(args: argparse.Namespace) -> int:
         destination = validate_import_destination(workspace_root, args.destination)
         from .processing import ProcessingStore
         processing = ProcessingStore(workspace_root / ".academia" / "processing.json")
-        value = import_file(args.source, destination, processing, workspace_root=workspace_root)
+        value = import_file(
+            args.source,
+            destination,
+            processing,
+            workspace_root=workspace_root,
+            source_label=getattr(args, "source_label", None),
+        )
         ActivityLog(workspace_root / ".academia" / "activity.jsonl").append(
             event_type="file.imported",
             title=f"Imported {Path(value['destination']).name}",
             details=value,
-            source=str(args.source.expanduser().resolve()),
+            source=value.get("source_label", str(args.source.expanduser().resolve())),
             confidence="unverified",
             actor="user",
         )
         if args.uncertain:
+            review_details = {
+                "filename": Path(value["destination"]).name,
+                "proposed_course": None,
+                "proposed_category": None,
+                "proposed_destination": value["destination"],
+                "evidence": "The user marked this import as not yet classified.",
+                "confidence": "unverified",
+                "original_file": value["original_file"],
+                "preserve_original": True,
+            }
+            if "source_label" in value:
+                review_details["source_type"] = value["source_type"]
+                review_details["source_label"] = value["source_label"]
             review_item = ReviewQueue(workspace_root / ".academia" / "review.json").add(
                 kind="import_classification",
                 title=f"Choose a destination for {Path(value['destination']).name}",
-                details={
-                    "filename": Path(value["destination"]).name,
-                    "proposed_course": None,
-                    "proposed_category": None,
-                    "proposed_destination": value["destination"],
-                    "evidence": "The user marked this import as not yet classified.",
-                    "confidence": "unverified",
-                    "original_file": value["original_file"],
-                    "preserve_original": True,
-                },
+                details=review_details,
                 priority="normal",
             )
             value["review_item_id"] = review_item.id

@@ -3,15 +3,67 @@ import type { ActivityEvent, AttachmentResult, Course, DomainEntity, ExtractionP
 
 export class BridgeUnavailableError extends Error {
   constructor() {
-    super('The Academia OS desktop bridge is unavailable. Launch the packaged app or configure a local interface bridge.')
+    super('The Academia OS local dashboard is unavailable. Start `academia dashboard --open` in a terminal, or launch the packaged app.')
     this.name = 'BridgeUnavailableError'
   }
 }
 
-async function command<T>(name: string, args: string[] = []): Promise<T> {
-  if (typeof window === 'undefined' || !(window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) {
+export class DashboardApiError extends Error {
+  readonly status: number
+  readonly type: string
+
+  constructor(status: number, type: string, message: string) {
+    super(message)
+    this.name = 'DashboardApiError'
+    this.status = status
+    this.type = type
+  }
+}
+
+export function isTauriEnvironment() {
+  return typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
+}
+
+type StructuredApiError = {
+  error?: unknown
+  type?: unknown
+}
+
+async function readJsonResponse<T>(response: Response): Promise<T> {
+  const text = await response.text()
+  let value: unknown
+  try {
+    value = text ? JSON.parse(text) : null
+  } catch {
+    throw new Error(`The local dashboard returned an invalid response (HTTP ${response.status}).`)
+  }
+
+  if (!response.ok) {
+    const structured = value && typeof value === 'object' ? value as StructuredApiError : undefined
+    const message = typeof structured?.error === 'string' ? structured.error : `Local dashboard request failed (HTTP ${response.status}).`
+    const type = typeof structured?.type === 'string' ? structured.type : 'DashboardRequestError'
+    throw new DashboardApiError(response.status, type, message)
+  }
+  return value as T
+}
+
+async function browserCommand<T>(name: string, args: string[]): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch('/api/v1/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: name, args }),
+    })
+  } catch {
     throw new BridgeUnavailableError()
   }
+  return readJsonResponse<T>(response)
+}
+
+async function command<T>(name: string, args: string[] = []): Promise<T> {
+  if (!isTauriEnvironment()) return browserCommand<T>(name, args)
+
   try {
     const result = await invoke<string>('academia_command', { command: name, args: [...args, '--json'] })
     return JSON.parse(result) as T
@@ -21,6 +73,23 @@ async function command<T>(name: string, args: string[] = []): Promise<T> {
     }
     throw error
   }
+}
+
+async function uploadFile(file: File, destination: string, uncertain: boolean): Promise<ImportResult> {
+  const query = new URLSearchParams({ filename: file.name, destination })
+  if (uncertain) query.set('uncertain', '1')
+
+  let response: Response
+  try {
+    response = await fetch(`/api/v1/upload?${query.toString()}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: file,
+    })
+  } catch {
+    throw new BridgeUnavailableError()
+  }
+  return readJsonResponse<ImportResult>(response)
 }
 
 export const api = {
@@ -61,6 +130,7 @@ export const api = {
     return command<WorkspaceCreationResult>('workspace', args)
   },
   importFile: (source: string, destination: string, uncertain: boolean) => command<ImportResult>('import', [source, '--destination', destination, ...(uncertain ? ['--uncertain'] : [])]),
+  uploadFile,
   migrationPlan: (source: string) => command<MigrationPlanResult>('migration', ['plan', source]),
   migrationStatus: (planPath: string) => command<MigrationStatusResult>('migration', ['status', '--plan', planPath]),
   migrationExecute: (planPath: string, indexes: number[], mode: 'copy' | 'move', apply: boolean, confirmMove: boolean) => {

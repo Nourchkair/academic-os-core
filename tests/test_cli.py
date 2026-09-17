@@ -120,6 +120,53 @@ def test_import_command_copies_source_and_stages_processing_record(tmp_path: Pat
     assert len(json.loads((root / ".academia" / "processing.json").read_text(encoding="utf-8"))) == 1
 
 
+def test_import_source_label_preserves_browser_provenance_in_metadata_review_and_activity(tmp_path: Path) -> None:
+    config = minimal_config(tmp_path)
+    root = Path(config["academic"]["root_directory"])
+    (root / "Fall 2026").mkdir(parents=True)
+    destination = root / "Fall 2026" / "00_INBOX"
+    source = tmp_path / "temporary-upload-name.pdf"
+    source.write_bytes(b"browser bytes")
+    profile = Path(config["runtime"]["install_directory"]) / "profile.json"
+    save_config(profile, config)
+    env = os.environ.copy(); env["PYTHONPATH"] = str(ROOT)
+    label = "browser-upload:week-4.pdf"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "academia_os",
+            "--profile",
+            str(profile),
+            "import",
+            str(source),
+            "--destination",
+            str(destination),
+            "--source-label",
+            label,
+            "--uncertain",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["source_type"] == "browser_upload"
+    assert value["source_label"] == label
+    assert value["original_file"] == label
+    assert str(source) not in result.stdout
+    activity = json.loads((root / ".academia" / "activity.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert activity["source"] == label
+    review = json.loads((root / ".academia" / "review.json").read_text(encoding="utf-8"))[0]
+    assert review["details"]["original_file"] == label
+    assert review["details"]["source_type"] == "browser_upload"
+
+
 def test_workspace_inspect_is_available_without_a_profile_and_is_read_only(tmp_path: Path) -> None:
     root = _populated_workspace(tmp_path)
     before = {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}

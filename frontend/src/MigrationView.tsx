@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
-import { api } from './lib/api'
+import { api, isTauriEnvironment } from './lib/api'
 import type { MigrationExecuteResult, MigrationItem, MigrationPlanResult, MigrationStatusResult, StatusPayload } from './types'
 
 type MigrationViewProps = {
@@ -30,6 +30,7 @@ export function MigrationView({ status, onApplied, onReview, onBusyChange }: Mig
   const pickerOpenRef = useRef(false)
   const sourcePathRef = useRef(sourcePath)
   const scanRequestRef = useRef(0)
+  const tauriEnvironment = isTauriEnvironment()
 
   const setMigrationBusy = (next: boolean) => {
     busyRef.current = next
@@ -53,6 +54,10 @@ export function MigrationView({ status, onApplied, onReview, onBusyChange }: Mig
   }
 
   const chooseSource = async () => {
+    if (!tauriEnvironment) {
+      setError('Browser mode requires a local folder path. Enter it above; native folder selection is available in the Tauri app.')
+      return
+    }
     if (busyRef.current || pickerOpenRef.current) return
     pickerOpenRef.current = true
     setMigrationBusy(true)
@@ -203,17 +208,17 @@ export function MigrationView({ status, onApplied, onReview, onBusyChange }: Mig
     <section className="migration-source-card">
       <div className="migration-card-heading"><div><p className="eyebrow">Step 1 · Choose a source</p><h3>Where are the older files?</h3></div><span className="migration-step-badge">{sourcePath ? 'Ready to scan' : 'Not selected'}</span></div>
       <p className="migration-muted">Choose a folder, not an individual file. The scan stays local and ignores operational folders and unsafe links.</p>
-      <div className="migration-source-controls">
-        <label className="migration-path-field"><span>Older academic folder</span><input value={sourcePath} onChange={(event) => updateSourcePath(event.target.value)} disabled={busy} placeholder="Choose a folder on this computer" aria-describedby="migration-source-help" /></label>
-        <button className="secondary-button" onClick={() => void chooseSource()} disabled={busy}>Choose folder</button>
+      <div className={`migration-source-controls ${tauriEnvironment ? '' : 'browser'}`}>
+        <label className="migration-path-field"><span>Older academic folder</span><input value={sourcePath} onChange={(event) => updateSourcePath(event.target.value)} disabled={busy} placeholder={tauriEnvironment ? 'Choose a folder on this computer' : 'Enter a local folder path'} aria-describedby="migration-source-help" /></label>
+        {tauriEnvironment && <button className="secondary-button" onClick={() => void chooseSource()} disabled={busy}>Choose folder</button>}
         <button className="primary-button" onClick={() => void scanSource()} disabled={busy || !sourcePath.trim()}>{stage === 'scanning' ? 'Scanning…' : 'Scan and preview'}</button>
       </div>
-      <p className="migration-field-help" id="migration-source-help">The old folder is only read during this step. No files are copied or moved yet.</p>
+      <p className="migration-field-help" id="migration-source-help">{tauriEnvironment ? 'Native folder selection is available in the Tauri app.' : 'Browser mode requires you to enter a local path; it cannot open a native folder picker.'} The old folder is only read during this step. No files are copied or moved yet.</p>
       <p className="migration-target-hint">Destination workspace: <code>{status.workspace.academic_root}</code> · current semester: <strong>{status.workspace.semester}</strong></p>
     </section>
 
     {!sourcePath && stage === 'choose' && <section className="migration-empty-state">
-      <div className="migration-empty-mark" aria-hidden="true">↓</div><h3>Start with an older folder</h3><p>After you choose one, the CLI will discover eligible files and propose a semester-aware destination for each one.</p><button className="primary-button" onClick={() => void chooseSource()} disabled={busy}>Choose an older folder</button>
+      <div className="migration-empty-mark" aria-hidden="true">↓</div><h3>Start with an older folder</h3><p>After you choose one, the CLI will discover eligible files and propose a semester-aware destination for each one.</p>{tauriEnvironment ? <button className="primary-button" onClick={() => void chooseSource()} disabled={busy}>Choose an older folder</button> : <p className="migration-browser-empty-note">Enter a local folder path above to begin. Native folder selection is available in the Tauri app.</p>}
     </section>}
 
     {stage === 'scanning' && <section className="migration-loading-card" role="status" aria-live="polite"><span className="migration-spinner" aria-hidden="true" /><div><strong>Scanning and creating a review plan…</strong><p>Hashing eligible files and checking proposed destinations. Your old folder remains untouched.</p></div></section>}

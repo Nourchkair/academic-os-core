@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ChangeEvent, DragEvent } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
-import { api } from './lib/api'
+import { api, isTauriEnvironment } from './lib/api'
 import type { Course, ExtractionPreview, ImportResult, StatusPayload } from './types'
 
 type ImportViewProps = {
@@ -13,6 +14,7 @@ type ImportViewProps = {
 
 export function ImportView({ status, courses, onImported, onReview }: ImportViewProps) {
   const [paths, setPaths] = useState<string[]>([])
+  const [browserFiles, setBrowserFiles] = useState<File[]>([])
   const [destination, setDestination] = useState('general')
   const [uncertain, setUncertain] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -21,9 +23,37 @@ export function ImportView({ status, courses, onImported, onReview }: ImportView
   const [results, setResults] = useState<ImportResult[]>([])
   const [syllabusPreview, setSyllabusPreview] = useState<ExtractionPreview | null>(null)
   const [verifiedCurrent, setVerifiedCurrent] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const tauriEnvironment = isTauriEnvironment()
+
+  const addBrowserFiles = (selected: File[]) => {
+    if (!selected.length) {
+      setError('No files were found in that selection.')
+      return
+    }
+    setBrowserFiles((current) => {
+      const known = new Set(current.map(fileKey))
+      return [...current, ...selected.filter((file) => {
+        const key = fileKey(file)
+        if (known.has(key)) return false
+        known.add(key)
+        return true
+      })]
+    })
+    setSyllabusPreview(null)
+    setError(null)
+  }
+
+  const clearSelected = () => {
+    setPaths([])
+    setBrowserFiles([])
+    setSyllabusPreview(null)
+    setVerifiedCurrent(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
 
   useEffect(() => {
-    if (!(window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) return
+    if (!tauriEnvironment) return
     let unlisten: (() => void) | undefined
     void getCurrentWebview().onDragDropEvent((event) => {
       const payload = event.payload
@@ -36,16 +66,23 @@ export function ImportView({ status, courses, onImported, onReview }: ImportView
       }
     }).then((stop) => { unlisten = stop })
     return () => unlisten?.()
-  }, [])
+  }, [tauriEnvironment])
 
   const selectedCourse = courses.find((course) => course.id === destination)
   const destinationPath = selectedCourse ? `${selectedCourse.path}/00_INBOX` : `${status.workspace.academic_root}/${status.workspace.semester}/00_INBOX`
   const requiresReview = uncertain || !selectedCourse
   const suggestions = useMemo(() => paths.map((path) => ({ path, course: suggestCourse(path, courses) })), [paths, courses])
-  const syllabusPath = paths.length === 1 && isSyllabusPath(paths[0]) ? paths[0] : null
+  const selectedCount = paths.length + browserFiles.length
+  // Browser File objects do not expose a safe local path. Only native Tauri paths
+  // may be sent to the syllabus extraction command.
+  const syllabusPath = tauriEnvironment && paths.length === 1 && isSyllabusPath(paths[0]) ? paths[0] : null
   const canPreviewSyllabus = Boolean(syllabusPath && selectedCourse)
 
   const chooseFiles = async () => {
+    if (!tauriEnvironment) {
+      fileInputRef.current?.click()
+      return
+    }
     try {
       const chosen = await open({ multiple: true, directory: false, title: 'Choose academic material' })
       if (!chosen) return
@@ -56,6 +93,36 @@ export function ImportView({ status, courses, onImported, onReview }: ImportView
     } catch (reason) {
       setError(`The file picker could not open: ${String(reason)}`)
     }
+  }
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (tauriEnvironment) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    if (tauriEnvironment) return
+    event.preventDefault()
+    setDragging(true)
+  }
+
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    if (tauriEnvironment) return
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false)
+  }
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (tauriEnvironment) return
+    event.preventDefault()
+    setDragging(false)
+    addBrowserFiles(Array.from(event.dataTransfer.files))
+  }
+
+  const handleBrowserFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    addBrowserFiles(Array.from(event.currentTarget.files ?? []))
+    // Allow the same file to be selected again after clearing or importing.
+    event.currentTarget.value = ''
   }
 
   const previewSyllabus = async () => {
@@ -89,7 +156,7 @@ export function ImportView({ status, courses, onImported, onReview }: ImportView
   }
 
   const importSelected = async () => {
-    if (!paths.length) {
+    if (!selectedCount) {
       setError('Choose or drop at least one file first.')
       return
     }
@@ -97,10 +164,13 @@ export function ImportView({ status, courses, onImported, onReview }: ImportView
       setBusy(true)
       setError(null)
       const imported: ImportResult[] = []
-      for (const path of paths) imported.push(await api.importFile(path, destinationPath, requiresReview))
+      if (tauriEnvironment) {
+        for (const path of paths) imported.push(await api.importFile(path, destinationPath, requiresReview))
+      } else {
+        for (const file of browserFiles) imported.push(await api.uploadFile(file, destinationPath, requiresReview))
+      }
       setResults(imported)
-      setPaths([])
-      setSyllabusPreview(null)
+      clearSelected()
       await onImported()
     } catch (reason) {
       setError(`Nothing was moved. The import could not be completed: ${String(reason)}`)
@@ -111,13 +181,25 @@ export function ImportView({ status, courses, onImported, onReview }: ImportView
 
   return <div className="page-stack">
     <section className="page-intro"><p className="eyebrow">Safe intake</p><h2>Import material</h2><p>Bring in school files without moving the originals. Choose a course when you know it; otherwise send the copy to general intake and let Review help you decide.</p></section>
-    <section className={`drop-zone ${dragging ? 'dragging' : ''}`}><div className="drop-icon">↓</div><h3>Drop files here</h3><p>PDFs, documents, slides, notes, or other local academic material.</p><button className="primary-button" onClick={() => void chooseFiles()}>Choose files</button><small>Files are copied into the workspace. The original stays where it is.</small></section>
-    {paths.length > 0 && <section className="import-panel">
-      <div className="section-heading"><div><p className="eyebrow">Selected material</p><h3>{paths.length} file{paths.length === 1 ? '' : 's'} ready</h3></div><button className="quiet-button" onClick={() => { setPaths([]); setSyllabusPreview(null) }}>Clear</button></div>
-      <div className="selected-files">{suggestions.map(({ path, course }) => <article className="selected-file" key={path}><div><strong>{basename(path)}</strong><small>{course ? `Likely match: ${course.code} · based on the filename` : 'Course not identified from the filename'}</small></div>{course && <button className="quiet-button" onClick={() => { setDestination(course.id); setUncertain(false) }}>Use suggestion</button>}</article>)}</div>
+    <section className={`drop-zone ${dragging ? 'dragging' : ''}`} onDragOver={tauriEnvironment ? undefined : handleDragOver} onDragEnter={tauriEnvironment ? undefined : handleDragEnter} onDragLeave={tauriEnvironment ? undefined : handleDragLeave} onDrop={tauriEnvironment ? undefined : handleDrop}><div className="drop-icon">↓</div><h3>Drop files here</h3><p>PDFs, documents, slides, notes, or other local academic material.</p><button className="primary-button" onClick={() => void chooseFiles()}>Choose files</button>{!tauriEnvironment && <input ref={fileInputRef} className="browser-file-input" type="file" multiple onChange={handleBrowserFileChange} aria-label="Choose academic material from this computer" />}{!tauriEnvironment ? <small>Files remain on this computer and are passed to the local dashboard only.</small> : <small>Files are copied into the workspace. The original stays where it is.</small>}</section>
+    {selectedCount > 0 && <section className="import-panel">
+      <div className="section-heading"><div><p className="eyebrow">Selected material</p><h3>{selectedCount} file{selectedCount === 1 ? '' : 's'} ready</h3></div><button className="quiet-button" onClick={clearSelected}>Clear</button></div>
+      <div className="selected-files">
+        {suggestions.map(({ path, course }) => (
+          <article className="selected-file" key={path}>
+            <div><strong>{basename(path)}</strong><small>{course ? `Likely match: ${course.code} · based on the filename` : 'Course not identified from the filename'}</small></div>
+            {course ? <button className="quiet-button" onClick={() => { setDestination(course.id); setUncertain(false) }}>Use suggestion</button> : null}
+          </article>
+        ))}
+        {browserFiles.map((file) => (
+          <article className="selected-file" key={fileKey(file)}>
+            <div><strong>{file.name}</strong><small>Browser file · remains on this computer and is passed to the local dashboard</small></div>
+          </article>
+        ))}
+      </div>
       <div className="import-options"><label className="setup-field"><span>Destination</span><select value={destination} onChange={(event) => { setDestination(event.target.value); setUncertain(event.target.value === 'general'); setSyllabusPreview(null) }}><option value="general">General intake — I’m not sure where this belongs</option>{courses.map((course) => <option value={course.id} key={course.id}>{course.code} · {course.name.split(' - ').slice(1).join(' - ') || course.name}</option>)}</select></label><label className="check-row"><input type="checkbox" checked={uncertain} onChange={(event) => setUncertain(event.target.checked)} /><span>Keep classification uncertain and send a Review item</span></label></div>
       {canPreviewSyllabus && <section className="extraction-preview"><p className="eyebrow">Controlled extraction</p><h3>Syllabus preview</h3>{!syllabusPreview ? <><p>Analyze this syllabus locally before adding anything. The original file will not be changed.</p><label className="check-row"><input type="checkbox" checked={verifiedCurrent} onChange={(event) => setVerifiedCurrent(event.target.checked)} /><span>I verified this is the current syllabus</span></label><button className="secondary-button" onClick={() => void previewSyllabus()} disabled={busy}>{busy ? 'Analyzing…' : 'Preview syllabus'}</button></> : <SyllabusSummary preview={syllabusPreview} onApply={() => void applySyllabus()} onReview={onReview} busy={busy} />}</section>}
-      <div className="import-actions"><button className="quiet-button" onClick={() => { setPaths([]); setSyllabusPreview(null) }}>Cancel</button><button className="primary-button" onClick={() => void importSelected()} disabled={busy}>{busy ? 'Copying…' : 'Copy into workspace'}</button></div>
+      <div className="import-actions"><button className="quiet-button" onClick={clearSelected}>Cancel</button><button className="primary-button" onClick={() => void importSelected()} disabled={busy}>{busy ? 'Copying…' : 'Copy into workspace'}</button></div>
     </section>}
     {results.length > 0 && <section className="success-panel"><strong>{results.length} file{results.length === 1 ? '' : 's'} copied safely.</strong><span>Originals remain in their original locations. {results.some((result) => result.review_item_id) ? 'Uncertain items are waiting in Review.' : 'The copies are now in local intake.'}</span></section>}
     {error && <p className="setup-error" role="alert">{error}</p>}
@@ -133,6 +215,7 @@ function SyllabusSummary({ preview, onApply, onReview, busy }: { preview: Extrac
 
 function isSyllabusPath(path: string) { return /\.(pdf|md|markdown|txt)$/i.test(path) }
 function basename(path: string) { return path.split(/[\\/]/).pop() || path }
+function fileKey(file: File) { return `${file.name}\u0000${file.size}\u0000${file.lastModified}` }
 function suggestCourse(path: string, courses: Course[]) {
   const name = basename(path).toLowerCase().replace(/[^a-z0-9]+/g, ' ')
   return courses.find((course) => {

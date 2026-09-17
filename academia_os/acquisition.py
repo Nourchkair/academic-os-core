@@ -113,8 +113,18 @@ def validate_import_source(source: Path) -> Path:
     return source
 
 
-def import_file(source: Path, destination_inbox: Path, processing: ProcessingStore | None = None, *, workspace_root: Path | None = None) -> dict[str, Any]:
+def import_file(
+    source: Path,
+    destination_inbox: Path,
+    processing: ProcessingStore | None = None,
+    *,
+    workspace_root: Path | None = None,
+    source_label: str | None = None,
+) -> dict[str, Any]:
     source = validate_import_source(source)
+    if source_label is not None:
+        if not isinstance(source_label, str) or not source_label.strip() or "\x00" in source_label:
+            raise ValueError("source label must be a non-empty string without NUL bytes")
     if workspace_root is None:
         raise ValueError("workspace root is required for structural import validation")
     destination_inbox = validate_import_destination(workspace_root, destination_inbox)
@@ -127,7 +137,16 @@ def import_file(source: Path, destination_inbox: Path, processing: ProcessingSto
         destination = destination_inbox / f"{source.stem} (import {counter}){source.suffix}"
         counter += 1
     shutil.copy2(source, destination)
-    metadata = {"source_type": "manual_file", "original_file": str(source), "acquired_at": datetime.now(timezone.utc).isoformat(), "destination": str(destination), "provenance": "EXTERNAL", "confidence": "unverified"}
+    metadata = {
+        "source_type": "browser_upload" if source_label is not None else "manual_file",
+        "original_file": source_label if source_label is not None else str(source),
+        "acquired_at": datetime.now(timezone.utc).isoformat(),
+        "destination": str(destination),
+        "provenance": "EXTERNAL",
+        "confidence": "unverified",
+    }
+    if source_label is not None:
+        metadata["source_label"] = source_label
     if processing is not None:
         processing.detect(destination, signature=f"{destination.stat().st_size}:{destination.stat().st_mtime_ns}")
     return metadata
