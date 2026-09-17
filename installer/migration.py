@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -12,9 +13,12 @@ from typing import Iterable
 
 from academia_os.semester import resolve_current_semester
 
-SKIP_DIRECTORIES = {".git", ".hermes", ".academic-os", "node_modules", "__pycache__", ".venv", "venv"}
+SKIP_DIRECTORIES = {".academia", ".git", ".hermes", ".academic-os", "node_modules", "__pycache__", ".venv", "venv"}
+OPERATIONAL_DIRECTORIES = {".academia", ".academic-os", ".hermes"}
 SKIP_SUFFIXES = {".crdownload", ".part", ".tmp", ".temp"}
 SEMESTER_PATTERN = re.compile(r"^(fall|winter|spring|summer)[ _-]*(\d{4})$", re.IGNORECASE)
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+PLAN_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -47,7 +51,7 @@ class MigrationPlan:
 
     def as_json(self) -> dict[str, object]:
         return {
-            "version": 1,
+            "version": PLAN_VERSION,
             "source_root": str(self.source_root),
             "academic_root": str(self.academic_root),
             "current_semester": self.current_semester,
@@ -56,6 +60,150 @@ class MigrationPlan:
             "total_size": self.total_size,
             "items": [item.as_json() for item in self.items],
         }
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
+
+
+def _is_operational_path(path: Path) -> bool:
+    return any(part.casefold() in OPERATIONAL_DIRECTORIES for part in path.parts)
+
+
+def _absolute_plan_path(value: object, label: str) -> Path:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"migration plan {label} must be a non-empty path")
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        raise ValueError(f"migration plan {label} must be absolute")
+    return path.resolve()
+
+
+def _validate_relative_path(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError("migration plan relative path must be a non-empty string")
+    if "\\" in value:
+        raise ValueError("migration plan relative path must use safe POSIX separators")
+    parts = value.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ValueError(f"migration plan relative path contains traversal: {value}")
+    relative = Path(value)
+    if relative.is_absolute() or not relative.parts:
+        raise ValueError(f"migration plan relative path must be relative: {value}")
+    return value
+
+
+def ensure_safe_text_target(path: Path) -> None:
+    """Reject an existing symlink before a text file is written."""
+    path = Path(path)
+    if os.path.lexists(path) and path.is_symlink():
+        raise ValueError(f"refusing to write through symlink target: {path}")
+
+
+def safe_atomic_write_text(path: Path, text: str) -> None:
+    """Write text through a same-directory temporary file and atomic replace."""
+    path = Path(path)
+    ensure_safe_text_target(path)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        ensure_safe_text_target(path)
+        os.replace(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
+def load_migration_plan(path: Path) -> MigrationPlan:
+    """Load and validate a persisted migration plan before any file operation."""
+    plan_path = Path(path).expanduser()
+    try:
+        data = json.loads(plan_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read migration plan {plan_path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("migration plan must be a JSON object")
+
+    expected_fields = {"version", "source_root", "academic_root", "current_semester", "created_at", "item_count", "total_size", "items"}
+    if "version" not in data or type(data["version"]) is not int or data["version"] != PLAN_VERSION:
+        raise ValueError(f"unsupported migration plan version: {data.get('version')!r}")
+    if set(data) != expected_fields:
+        raise ValueError("migration plan has malformed fields")
+
+    source_root = _absolute_plan_path(data["source_root"], "source_root")
+    academic_root = _absolute_plan_path(data["academic_root"], "academic_root")
+    if source_root == academic_root:
+        raise ValueError("migration plan source and academic roots must be different")
+    if _is_operational_path(source_root):
+        raise ValueError("migration plan source root is operational state")
+    if _is_operational_path(academic_root):
+        raise ValueError("migration plan academic root is operational state")
+    if not source_root.is_dir():
+        raise ValueError(f"migration plan source root is not a folder: {source_root}")
+
+    current_semester = data["current_semester"]
+    if not isinstance(current_semester, str) or not SEMESTER_PATTERN.fullmatch(current_semester.strip()):
+        raise ValueError("migration plan current_semester is malformed")
+    created_at = data["created_at"]
+    if not isinstance(created_at, str) or not created_at.strip():
+        raise ValueError("migration plan created_at is malformed")
+    try:
+        datetime.fromisoformat(created_at)
+    except ValueError as exc:
+        raise ValueError("migration plan created_at is malformed") from exc
+
+    items_data = data["items"]
+    if not isinstance(items_data, list):
+        raise ValueError("migration plan items must be a list")
+    item_count = data["item_count"]
+    total_size = data["total_size"]
+    if type(item_count) is not int or item_count != len(items_data) or item_count < 0:
+        raise ValueError("migration plan item_count is malformed")
+    if type(total_size) is not int or total_size < 0:
+        raise ValueError("migration plan total_size is malformed")
+
+    items: list[MigrationItem] = []
+    for index, item_data in enumerate(items_data):
+        if not isinstance(item_data, dict):
+            raise ValueError(f"migration plan item {index} is malformed")
+        item_fields = {"source", "destination", "relative_path", "semester", "size", "sha256"}
+        if set(item_data) != item_fields:
+            raise ValueError(f"migration plan item {index} has malformed fields")
+        relative_path = _validate_relative_path(item_data["relative_path"])
+        source = _absolute_plan_path(item_data["source"], f"item {index} source")
+        destination = _absolute_plan_path(item_data["destination"], f"item {index} destination")
+        if not _is_within(source, source_root):
+            raise ValueError(f"migration plan item {index} source is outside source_root")
+        source_relative = source.relative_to(source_root)
+        if _is_operational_path(source_relative):
+            raise ValueError(f"migration plan item {index} source is operational state")
+        if source != (source_root / relative_path).resolve():
+            raise ValueError(f"migration plan item {index} source does not match relative path")
+        if not _is_within(destination, academic_root):
+            raise ValueError(f"migration plan item {index} destination is outside academic_root")
+        try:
+            destination_relative = destination.relative_to(academic_root)
+        except ValueError as exc:
+            raise ValueError(f"migration plan item {index} destination is outside academic_root") from exc
+        if _is_operational_path(destination_relative):
+            raise ValueError(f"migration plan item {index} destination is operational state")
+        semester = item_data["semester"]
+        if not isinstance(semester, str) or not SEMESTER_PATTERN.fullmatch(semester.strip()):
+            raise ValueError(f"migration plan item {index} semester is malformed")
+        size = item_data["size"]
+        if type(size) is not int or size < 0:
+            raise ValueError(f"migration plan item {index} size is malformed")
+        sha256 = item_data["sha256"]
+        if not isinstance(sha256, str) or not SHA256_PATTERN.fullmatch(sha256):
+            raise ValueError(f"migration plan item {index} sha256 is malformed")
+        items.append(MigrationItem(source, destination, relative_path, semester, size, sha256))
+
+    if total_size != sum(item.size for item in items):
+        raise ValueError("migration plan total_size is malformed")
+    return MigrationPlan(source_root, academic_root, current_semester, tuple(items), created_at)
 
 
 def sha256_file(path: Path) -> str:
@@ -105,6 +253,8 @@ def _destination_for(source_root: Path, academic_root: Path, current_semester: s
 def build_migration_plan(source_root: Path, academic_root: Path, current_semester: str) -> MigrationPlan:
     source_root = source_root.expanduser().resolve()
     academic_root = academic_root.expanduser().resolve()
+    if _is_operational_path(source_root):
+        raise ValueError("migration source root is operational state")
     if not source_root.is_dir():
         raise ValueError(f"migration source is not a folder: {source_root}")
     if source_root == academic_root:
@@ -179,7 +329,9 @@ def write_migration_plan(plan: MigrationPlan, directory: Path) -> dict[str, Path
     directory.mkdir(parents=True, exist_ok=True)
     json_path = directory / "migration-plan.json"
     markdown_path = directory / "MIGRATION_REVIEW.md"
-    json_path.write_text(json.dumps(plan.as_json(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    ensure_safe_text_target(json_path)
+    ensure_safe_text_target(markdown_path)
+    safe_atomic_write_text(json_path, json.dumps(plan.as_json(), indent=2, ensure_ascii=False) + "\n")
     lines = [
         "# Legacy material migration review",
         "",
@@ -215,5 +367,5 @@ def write_migration_plan(plan: MigrationPlan, directory: Path) -> dict[str, Path
             "Review this migration plan and identify likely semester/course groupings using only evidence in file names and contents. Do not invent course identities. Mark uncertain items and propose a destination; do not execute moves. The user must confirm every import.",
         ]
     )
-    markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    safe_atomic_write_text(markdown_path, "\n".join(lines) + "\n")
     return {"json": json_path, "markdown": markdown_path}

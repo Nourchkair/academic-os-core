@@ -11,6 +11,7 @@ from tests.test_attachment import _populated_workspace
 from academia_os.config import save_config
 from academia_os.review import ReviewQueue
 from academia_os.activity import ActivityLog
+from installer.migration import build_migration_plan, write_migration_plan
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -335,3 +336,245 @@ def test_cli_deadline_conflict_requires_review_decision_then_executes_domain_cha
     assignment = domain["entities"]["assignment"][0]
     assert assignment["deadline"] == "2026-10-22"
     assert "October 19, 2026" in first.read_text(encoding="utf-8")
+
+
+def test_migration_plan_command_writes_plan_and_review_under_runtime_directory(tmp_path: Path) -> None:
+    source = tmp_path / "Legacy University"
+    source.mkdir()
+    (source / "Fall 2025" / "HIS 101").mkdir(parents=True)
+    (source / "Fall 2025" / "HIS 101" / "essay.pdf").write_bytes(b"essay")
+
+    result = run_cli(tmp_path, "migration", "plan", str(source), "--json")
+
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["action"] == "plan"
+    assert value["status"] == "planned"
+    assert value["item_count"] == 1
+    assert Path(value["plan_path"]).is_file()
+    assert Path(value["review_path"]).is_file()
+    assert value["plan_path"] == str(tmp_path / ".academic-os" / "migration" / "migration-plan.json")
+
+
+def test_migration_status_is_read_only_and_returns_existing_report(tmp_path: Path) -> None:
+    source = tmp_path / "Legacy University"
+    source.mkdir()
+    (source / "notes.txt").write_text("notes", encoding="utf-8")
+    planned = run_cli(tmp_path, "migration", "plan", str(source), "--json")
+    assert planned.returncode == 0, planned.stderr
+    plan_value = json.loads(planned.stdout)
+    plan_path = Path(plan_value["plan_path"])
+    root = Path(minimal_config(tmp_path)["academic"]["root_directory"])
+    before = {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    report = {"mode": "copy", "selected": 0, "copied": 0, "failed": 0}
+    report_path = plan_path.parent / "migration-report.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    result = run_cli(tmp_path, "migration", "status", "--plan", str(plan_path), "--json")
+
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["action"] == "status"
+    assert value["report"] == report
+    assert {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+
+
+def test_migration_execute_selects_items_collision_safely_and_preserves_source(tmp_path: Path) -> None:
+    source = tmp_path / "Legacy University"
+    source.mkdir()
+    first = source / "first.txt"
+    second = source / "second.txt"
+    first.write_text("first", encoding="utf-8")
+    second.write_text("second", encoding="utf-8")
+    planned = run_cli(tmp_path, "migration", "plan", str(source), "--json")
+    assert planned.returncode == 0, planned.stderr
+    plan_value = json.loads(planned.stdout)
+    plan_path = Path(plan_value["plan_path"])
+    destination = Path(plan_value["items"][0]["destination"])
+    destination.parent.mkdir(parents=True)
+    destination.write_text("existing", encoding="utf-8")
+
+    result = run_cli(tmp_path, "migration", "execute", "--plan", str(plan_path), "--item", "0", "--mode", "copy", "--apply", "--json")
+
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["copied"] == 1
+    assert value["selected"] == 1
+    assert first.is_file() and first.read_text(encoding="utf-8") == "first"
+    assert second.is_file()
+    assert destination.read_text(encoding="utf-8") == "existing"
+    collision = Path(value["destinations"][0])
+    assert collision != destination
+    assert collision.read_text(encoding="utf-8") == "first"
+    assert (plan_path.parent / "migration-report.json").is_file()
+
+
+def test_migration_execute_reports_changed_and_missing_sources(tmp_path: Path) -> None:
+    source = tmp_path / "Legacy University"
+    source.mkdir()
+    changed = source / "changed.txt"
+    missing = source / "missing.txt"
+    changed.write_text("before", encoding="utf-8")
+    missing.write_text("to disappear", encoding="utf-8")
+    planned = run_cli(tmp_path, "migration", "plan", str(source), "--json")
+    assert planned.returncode == 0, planned.stderr
+    plan_path = Path(json.loads(planned.stdout)["plan_path"])
+    changed.write_text("after", encoding="utf-8")
+    missing.unlink()
+
+    result = run_cli(tmp_path, "migration", "execute", "--plan", str(plan_path), "--mode", "copy", "--apply", "--json")
+
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["failed"] == 2
+    assert value["copied"] == 0
+    assert all("source" in failure for failure in value["failures"])
+
+
+def test_migration_execute_requires_explicit_move_confirmation(tmp_path: Path) -> None:
+    source = tmp_path / "Legacy University"
+    source.mkdir()
+    document = source / "notes.txt"
+    document.write_text("notes", encoding="utf-8")
+    planned = run_cli(tmp_path, "migration", "plan", str(source), "--json")
+    assert planned.returncode == 0, planned.stderr
+    plan_path = Path(json.loads(planned.stdout)["plan_path"])
+
+    for extra in (("--mode", "move"), ("--mode", "move", "--apply")):
+        result = run_cli(tmp_path, "migration", "execute", "--plan", str(plan_path), *extra, "--json")
+        assert result.returncode == 2
+        assert "confirm-move" in result.stdout
+        assert document.is_file()
+
+    applied = run_cli(tmp_path, "migration", "execute", "--plan", str(plan_path), "--mode", "move", "--apply", "--confirm-move", "--json")
+    assert applied.returncode == 0, applied.stderr
+    assert json.loads(applied.stdout)["moved"] == 1
+    assert not document.exists()
+
+
+def test_migration_rejects_plan_for_another_active_workspace(tmp_path: Path) -> None:
+    config = minimal_config(tmp_path)
+    source = tmp_path / "Legacy University"
+    source.mkdir()
+    (source / "notes.txt").write_text("notes", encoding="utf-8")
+    foreign_root = tmp_path / "Foreign University"
+    plan = build_migration_plan(source, foreign_root, "Fall 2026")
+    plan_path = write_migration_plan(plan, Path(config["runtime"]["install_directory"]) / "migration")["json"]
+    profile = Path(config["runtime"]["install_directory"]) / "profile.json"
+    save_config(profile, config)
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(ROOT)
+
+    result = subprocess.run([sys.executable, "-m", "academia_os", "--profile", str(profile), "migration", "status", "--plan", str(plan_path), "--json"], cwd=ROOT, env=env, text=True, capture_output=True)
+
+    assert result.returncode == 2
+    assert "active profile workspace" in result.stdout
+
+
+def test_migration_rejects_plan_outside_active_runtime_directory_before_reading_or_writing(tmp_path: Path) -> None:
+    config = minimal_config(tmp_path)
+    profile = Path(config["runtime"]["install_directory"]) / "profile.json"
+    save_config(profile, config)
+    outside_directory = tmp_path / "outside-migration"
+    outside_directory.mkdir()
+    outside_plan = outside_directory / "migration-plan.json"
+    outside_plan.write_text("not a migration plan", encoding="utf-8")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(ROOT)
+
+    for command in ("status", "execute"):
+        extra = ["--plan", str(outside_plan)]
+        if command == "execute":
+            extra.extend(["--apply", "--mode", "copy"])
+        result = subprocess.run(
+            [sys.executable, "-m", "academia_os", "--profile", str(profile), "migration", command, *extra, "--json"],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+        assert result.returncode == 2
+        assert "active runtime migration directory" in result.stdout
+        assert outside_plan.read_text(encoding="utf-8") == "not a migration plan"
+        assert not (outside_directory / "migration-report.json").exists()
+
+
+def test_migration_execute_rejects_symlinked_report_without_migrating_or_overwriting_target(tmp_path: Path) -> None:
+    source = tmp_path / "Legacy University"
+    source.mkdir()
+    document = source / "notes.txt"
+    document.write_text("notes", encoding="utf-8")
+    planned = run_cli(tmp_path, "migration", "plan", str(source), "--json")
+    assert planned.returncode == 0, planned.stderr
+    plan_value = json.loads(planned.stdout)
+    plan_path = Path(plan_value["plan_path"])
+    destination = Path(plan_value["items"][0]["destination"])
+    report_path = plan_path.parent / "migration-report.json"
+    report_path.symlink_to(document)
+
+    result = run_cli(tmp_path, "migration", "execute", "--plan", str(plan_path), "--mode", "copy", "--apply", "--json")
+
+    assert result.returncode == 2
+    assert "symlink" in result.stdout
+    assert report_path.is_symlink()
+    assert document.read_text(encoding="utf-8") == "notes"
+    assert not destination.exists()
+
+
+def test_migration_rejects_malformed_plan_and_operational_source(tmp_path: Path) -> None:
+    config = minimal_config(tmp_path)
+    profile = Path(config["runtime"]["install_directory"]) / "profile.json"
+    save_config(profile, config)
+    malformed_path = Path(config["runtime"]["install_directory"]) / "migration" / "malformed-plan.json"
+    malformed_path.parent.mkdir(parents=True)
+    malformed_path.write_text(json.dumps({"version": 99}), encoding="utf-8")
+    operational = Path(config["academic"]["root_directory"]) / ".academia"
+    operational.mkdir(parents=True)
+    (operational / "processing.json").write_text("[]", encoding="utf-8")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(ROOT)
+
+    malformed = subprocess.run([sys.executable, "-m", "academia_os", "--profile", str(profile), "migration", "status", "--plan", str(malformed_path), "--json"], cwd=ROOT, env=env, text=True, capture_output=True)
+    operational_result = subprocess.run([sys.executable, "-m", "academia_os", "--profile", str(profile), "migration", "plan", str(operational), "--json"], cwd=ROOT, env=env, text=True, capture_output=True)
+
+    assert malformed.returncode == 2
+    assert "version" in malformed.stdout
+    assert operational_result.returncode == 2
+    assert "operational" in operational_result.stdout
+
+
+def test_migration_execute_without_apply_is_read_only_confirmation(tmp_path: Path) -> None:
+    source = tmp_path / "Legacy University"
+    source.mkdir()
+    document = source / "notes.txt"
+    document.write_text("notes", encoding="utf-8")
+    planned = run_cli(tmp_path, "migration", "plan", str(source), "--json")
+    assert planned.returncode == 0, planned.stderr
+    plan_path = Path(json.loads(planned.stdout)["plan_path"])
+
+    result = run_cli(tmp_path, "migration", "execute", "--plan", str(plan_path), "--item", "0", "--mode", "copy", "--json")
+
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["applied"] is False
+    assert value["status"] == "confirmation_required"
+    assert document.is_file()
+    assert not (plan_path.parent / "migration-report.json").exists()
+
+
+def test_migration_execute_rejects_invalid_item_indexes(tmp_path: Path) -> None:
+    source = tmp_path / "Legacy University"
+    source.mkdir()
+    document = source / "notes.txt"
+    document.write_text("notes", encoding="utf-8")
+    planned = run_cli(tmp_path, "migration", "plan", str(source), "--json")
+    assert planned.returncode == 0, planned.stderr
+    plan_path = Path(json.loads(planned.stdout)["plan_path"])
+
+    result = run_cli(tmp_path, "migration", "execute", "--plan", str(plan_path), "--item", "1", "--mode", "copy", "--apply", "--json")
+
+    assert result.returncode == 2
+    assert "out of range" in result.stdout
+    assert document.is_file()
+    assert not (plan_path.parent / "migration-report.json").exists()

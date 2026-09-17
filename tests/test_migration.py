@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from installer import migration  # noqa: E402
 from installer.migration import build_migration_plan, execute_migration_plan, write_migration_plan  # noqa: E402
 
 
@@ -83,3 +85,120 @@ def test_migration_plan_writes_ai_reviewable_json_and_markdown(tmp_path: Path) -
     assert paths["json"].is_file()
     assert paths["markdown"].is_file()
     assert "Do not move files directly" in paths["markdown"].read_text(encoding="utf-8")
+
+
+def test_load_migration_plan_reconstructs_and_validates_persisted_paths(tmp_path: Path) -> None:
+    source = tmp_path / "Old University"
+    academic_root = tmp_path / "New University"
+    source.mkdir()
+    document = source / "notes.txt"
+    document.write_text("notes", encoding="utf-8")
+    plan = build_migration_plan(source, academic_root, "Fall 2026")
+    plan_path = write_migration_plan(plan, tmp_path / "migration")["json"]
+
+    restored = migration.load_migration_plan(plan_path)
+
+    assert restored == plan
+
+    malformed = plan.as_json()
+    malformed["items"][0]["relative_path"] = "../escape.txt"
+    plan_path.write_text(json.dumps(malformed), encoding="utf-8")
+    with pytest.raises(ValueError, match="relative path"):
+        migration.load_migration_plan(plan_path)
+
+    malformed = plan.as_json()
+    malformed["items"][0]["source"] = str(tmp_path / "outside.txt")
+    plan_path.write_text(json.dumps(malformed), encoding="utf-8")
+    with pytest.raises(ValueError, match="source"):
+        migration.load_migration_plan(plan_path)
+
+    malformed = plan.as_json()
+    malformed["items"][0]["destination"] = str(tmp_path / "outside-destination.txt")
+    plan_path.write_text(json.dumps(malformed), encoding="utf-8")
+    with pytest.raises(ValueError, match="destination"):
+        migration.load_migration_plan(plan_path)
+
+
+def test_load_migration_plan_rejects_malformed_version_and_operational_source_root(tmp_path: Path) -> None:
+    source = tmp_path / "Old University"
+    source.mkdir()
+    (source / "notes.txt").write_text("notes", encoding="utf-8")
+    plan = build_migration_plan(source, tmp_path / "New University", "Fall 2026")
+    plan_path = write_migration_plan(plan, tmp_path / "migration")["json"]
+
+    malformed = plan.as_json()
+    malformed["version"] = 99
+    plan_path.write_text(json.dumps(malformed), encoding="utf-8")
+    with pytest.raises(ValueError, match="version"):
+        migration.load_migration_plan(plan_path)
+
+    operational = tmp_path / ".academia"
+    operational.mkdir()
+    (operational / "processing.json").write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError, match="operational"):
+        build_migration_plan(operational, tmp_path / "Another University", "Fall 2026")
+
+
+def test_write_migration_plan_rejects_symlinked_plan_target(tmp_path: Path) -> None:
+    source = tmp_path / "Old University"
+    source.mkdir()
+    plan = build_migration_plan(source, tmp_path / "New University", "Fall 2026")
+    directory = tmp_path / "migration"
+    directory.mkdir()
+    protected = tmp_path / "protected-plan.json"
+    protected.write_text("keep plan target", encoding="utf-8")
+    plan_path = directory / "migration-plan.json"
+    plan_path.symlink_to(protected)
+
+    with pytest.raises(ValueError, match="symlink"):
+        write_migration_plan(plan, directory)
+
+    assert plan_path.is_symlink()
+    assert protected.read_text(encoding="utf-8") == "keep plan target"
+
+
+def test_write_migration_plan_rejects_symlinked_review_target(tmp_path: Path) -> None:
+    source = tmp_path / "Old University"
+    source.mkdir()
+    plan = build_migration_plan(source, tmp_path / "New University", "Fall 2026")
+    directory = tmp_path / "migration"
+    paths = write_migration_plan(plan, directory)
+    protected = tmp_path / "protected-review.md"
+    protected.write_text("keep review target", encoding="utf-8")
+    paths["markdown"].unlink()
+    paths["markdown"].symlink_to(protected)
+
+    with pytest.raises(ValueError, match="symlink"):
+        write_migration_plan(plan, directory)
+
+    assert paths["markdown"].is_symlink()
+    assert protected.read_text(encoding="utf-8") == "keep review target"
+
+
+def test_load_migration_plan_rejects_operational_academic_roots(tmp_path: Path) -> None:
+    source = tmp_path / "Old University"
+    source.mkdir()
+
+    for directory_name in (".academia", ".academic-os", ".hermes"):
+        plan = build_migration_plan(source, tmp_path / directory_name / "New University", "Fall 2026")
+        plan_path = write_migration_plan(plan, tmp_path / f"migration-{directory_name[1:]}")["json"]
+
+        with pytest.raises(ValueError, match="academic root.*operational"):
+            migration.load_migration_plan(plan_path)
+
+
+def test_load_migration_plan_rejects_missing_or_non_directory_source_root(tmp_path: Path) -> None:
+    source = tmp_path / "Old University"
+    source.mkdir()
+    plan = build_migration_plan(source, tmp_path / "New University", "Fall 2026")
+    plan_path = write_migration_plan(plan, tmp_path / "migration")["json"]
+    non_directory = tmp_path / "source-file"
+    non_directory.write_text("not a directory", encoding="utf-8")
+
+    for source_root in (tmp_path / "missing-source", non_directory):
+        malformed = plan.as_json()
+        malformed["source_root"] = str(source_root)
+        plan_path.write_text(json.dumps(malformed), encoding="utf-8")
+
+        with pytest.raises(ValueError, match="source root.*folder"):
+            migration.load_migration_plan(plan_path)

@@ -23,6 +23,7 @@ from .settings import preview_config, update_config
 from .workspace import build_workspace_snapshot
 from .workflow import ApprovalWorkflow
 from installer.core import initialize_installation
+from installer.migration import MigrationPlan, build_migration_plan, ensure_safe_text_target, execute_migration_plan, load_migration_plan, safe_atomic_write_text, write_migration_plan
 from .version import __version__
 
 
@@ -165,6 +166,111 @@ def _create_workspace(args: argparse.Namespace) -> dict[str, Any]:
     return result
 
 
+def _active_academic_root(config: dict[str, Any]) -> Path:
+    return Path(config["academic"]["root_directory"]).expanduser().resolve()
+
+
+def _load_active_migration_plan(args: argparse.Namespace) -> tuple[MigrationPlan, Path]:
+    config = load_config(_profile_path(args))
+    plan_path = args.plan.expanduser().resolve()
+    migration_directory = (runtime_directory(config) / "migration").resolve()
+    if migration_directory != plan_path and migration_directory not in plan_path.parents:
+        raise ValueError("migration plan must be inside the active runtime migration directory")
+    plan = load_migration_plan(plan_path)
+    if plan.academic_root != _active_academic_root(config):
+        raise ValueError("migration plan academic root does not match the active profile workspace")
+    return plan, plan_path
+
+
+def _read_migration_report(path: Path) -> Any:
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read migration report {path}: {exc}") from exc
+
+
+def _migration_indexes(args: argparse.Namespace, item_count: int) -> list[int]:
+    supplied = [index for group in (args.item or []) for index in (group if isinstance(group, list) else [group])]
+    indexes = supplied if supplied else list(range(item_count))
+    if len(set(indexes)) != len(indexes):
+        raise ValueError("migration item indexes must not be repeated")
+    invalid = [index for index in indexes if index < 0 or index >= item_count]
+    if invalid:
+        raise ValueError(f"migration item index out of range: {invalid[0]}")
+    return indexes
+
+
+def _migration_plan(args: argparse.Namespace) -> dict[str, Any]:
+    config = load_config(_profile_path(args))
+    plan = build_migration_plan(args.source, _active_academic_root(config), config["academic"]["semester"])
+    paths = write_migration_plan(plan, runtime_directory(config) / "migration")
+    value = plan.as_json()
+    value.update({"plan_path": str(paths["json"]), "review_path": str(paths["markdown"]), "status": "planned", "action": "plan"})
+    return value
+
+
+def _migration_status(args: argparse.Namespace) -> dict[str, Any]:
+    plan, plan_path = _load_active_migration_plan(args)
+    report_path = plan_path.parent / "migration-report.json"
+    value = plan.as_json()
+    value.update(
+        {
+            "plan_path": str(plan_path),
+            "report_path": str(report_path),
+            "report": _read_migration_report(report_path),
+            "status": "report_available" if report_path.is_file() else "ready",
+            "action": "status",
+        }
+    )
+    return value
+
+
+def _migration_execute(args: argparse.Namespace) -> dict[str, Any]:
+    plan, plan_path = _load_active_migration_plan(args)
+    indexes = _migration_indexes(args, len(plan.items))
+    if args.mode == "move" and (not args.apply or not args.confirm_move):
+        raise ValueError("migration mode move requires both --apply and --confirm-move")
+    report_path = plan_path.parent / "migration-report.json"
+    if not args.apply:
+        return {
+            "action": "execute",
+            "status": "confirmation_required",
+            "applied": False,
+            "mode": args.mode,
+            "selected": len(indexes),
+            "selected_indexes": indexes,
+            "plan_path": str(plan_path),
+            "report_path": str(report_path),
+        }
+
+    ensure_safe_text_target(report_path)
+    result = execute_migration_plan(plan, items=[plan.items[index] for index in indexes], mode=args.mode)
+    result.update(
+        {
+            "action": "execute",
+            "status": "completed_with_failures" if result["failed"] else "completed",
+            "applied": True,
+            "selected_indexes": indexes,
+            "plan_path": str(plan_path),
+            "report_path": str(report_path),
+        }
+    )
+    safe_atomic_write_text(report_path, json.dumps(result, indent=2, ensure_ascii=False) + "\n")
+    return result
+
+
+def _migration(args: argparse.Namespace) -> dict[str, Any]:
+    if args.migration_command == "plan":
+        return _migration_plan(args)
+    if args.migration_command == "status":
+        return _migration_status(args)
+    if args.migration_command == "execute":
+        return _migration_execute(args)
+    raise ValueError(f"unsupported migration command: {args.migration_command}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="academia", description="Agent-neutral local Academia OS interface")
     parser.add_argument("--profile", type=Path, help="Path to the local Academia OS profile.json")
@@ -226,6 +332,21 @@ def build_parser() -> argparse.ArgumentParser:
     imported.add_argument("--destination", type=Path, required=True, help="Workspace inbox directory; source files are never moved")
     imported.add_argument("--uncertain", action="store_true", help="Keep the file in general intake and create a Review item")
     imported.add_argument("--json", action="store_true")
+    migration = sub.add_parser("migration", help="Plan and execute safe legacy material migration")
+    migration_sub = migration.add_subparsers(dest="migration_command", required=True)
+    migration_plan = migration_sub.add_parser("plan", help="Create a reviewable migration plan")
+    migration_plan.add_argument("source", type=Path)
+    migration_plan.add_argument("--json", action="store_true")
+    migration_status = migration_sub.add_parser("status", help="Read a migration plan and its report")
+    migration_status.add_argument("--plan", type=Path, required=True)
+    migration_status.add_argument("--json", action="store_true")
+    migration_execute = migration_sub.add_parser("execute", help="Execute selected migration items")
+    migration_execute.add_argument("--plan", type=Path, required=True)
+    migration_execute.add_argument("--item", action="append", nargs="+", type=int, metavar="INDEX")
+    migration_execute.add_argument("--mode", choices=("copy", "move"), default="copy")
+    migration_execute.add_argument("--apply", action="store_true")
+    migration_execute.add_argument("--confirm-move", action="store_true")
+    migration_execute.add_argument("--json", action="store_true")
     return parser
 
 
@@ -239,7 +360,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"courses", "today", "tasks", "course", "domain", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "semester", "watch", "import", "verify", "verify-source", "settings"}:
+        if args.command in {"courses", "today", "tasks", "course", "domain", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "semester", "watch", "import", "verify", "verify-source", "settings", "migration"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -251,6 +372,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def dispatch(args: argparse.Namespace) -> int:
+    if args.command == "migration":
+        _emit(_migration(args), as_json=args.json)
+        return 0
     if args.command == "semester":
         _emit({"semester": resolve_current_semester(timezone_name=args.timezone), "timezone": args.timezone}, as_json=args.json)
         return 0
