@@ -136,6 +136,20 @@ The current capability report is honest: manual import and one-shot watched-fold
 
 For readings, prefer legitimate library, Omni/OpenAthens, publisher, DOI/open-access, institutional, or author-released access. Discovery-only sources do not authorize downloading an unclear copy. Never pay without explicit confirmation, and never silently substitute an edition.
 
+### Legacy-folder migration
+
+A fresh workspace can be populated from an older, messy university folder without changing the original by default. The migration surface is neutral and can be used by the CLI, the React/Tauri app, or an authorized agent:
+
+```bash
+academia migration plan /path/to/old-university-folder --json
+academia migration status --plan ~/.academic-os/migration/migration-plan.json --json
+academia migration execute --plan ~/.academic-os/migration/migration-plan.json --item 0 --item 3 --mode copy --apply --json
+# Destructive mode requires both flags and should be used only after explicit review:
+academia migration execute --plan ~/.academic-os/migration/migration-plan.json --mode move --confirm-move --apply --json
+```
+
+The plan is read-only and records each source hash, proposed semester-aware destination, and review artifact. Current-semester or unknown material is routed to `00_INBOX/LEGACY_IMPORT`; older semesters are routed to `99_ARCHIVE/LEGACY_IMPORT`. Files can be selected individually, copied by default, or left untouched by clearing the selection. Existing destinations are never overwritten. Execution rechecks source hashes, verifies destination hashes, records a JSON report, and preserves the old folder for copy mode. Unsafe/operational folders, symlinks, traversal paths, runtime state, and plans outside the active runtime migration directory are rejected. The migration view is available from the modern desktop navigation and from the final onboarding step.
+
 ## Derived academic domain projection
 
 `academia domain --json` reads the optional `.academia/domain.json` projection. The projection supports evidence-backed `AcademicSource`, `Deadline`, `Assignment`, `Reading`, `Announcement`, and `CourseMeeting` records. Every record retains source path, provenance, confidence, authority, and verification timestamps. Unknown values remain null. The projection is derived state; human-readable academic files remain authoritative, and this pass does not semantically parse the real University workspace.
@@ -198,7 +212,7 @@ npm run build
 npm run dev
 ```
 
-It is a React + TypeScript application with a Tauri 2 shell and a typed bridge to the `academia` CLI. It now includes profile-free first-run onboarding, existing-workspace inspection/attachment, fresh-workspace setup, Home, Courses, Tasks, Library, Import, Review, and Settings views with local-data/error/empty states. Import uses the native Tauri file picker and drag/drop paths but delegates copying, processing, provenance, Activity, and uncertainty Review items to the existing CLI/core. The Tauri bundle is currently a development foundation (`bundle.active` is false); macOS signing, notarization, and sidecar packaging remain release work. The old Tkinter app remains as a compatibility fallback while the new shell matures.
+It is a React + TypeScript application with a Tauri 2 shell and a typed bridge to the `academia` CLI. It now includes profile-free first-run onboarding, existing-workspace inspection/attachment, fresh-workspace setup, Home, Courses, Tasks, Library, Import, **Migrate older material**, Review, and Settings views with local-data/error/empty states. The migration view scans an explicitly selected legacy folder, previews every destination, supports selected copy by default, and gates destructive Move behind an additional confirmation. Import uses the native Tauri file picker and drag/drop paths but delegates copying, processing, provenance, Activity, and uncertainty Review items to the existing CLI/core. The Tauri bundle is currently a development foundation (`bundle.active` is false); macOS signing, notarization, and sidecar packaging remain release work. The old Tkinter app remains as a compatibility fallback while the new shell matures.
 
 ## Optional agents
 

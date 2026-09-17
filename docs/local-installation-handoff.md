@@ -60,6 +60,15 @@ If the recipient wants a fresh folder but has older University material, use **I
 
 To do nothing, close the migration window. The old folder remains available.
 
+The same flow is available from the neutral CLI when an agent or script is authorized to use the local interface:
+
+```bash
+academia migration plan /path/to/old-university-folder --json
+academia migration execute --plan {{INSTALL_ROOT}}/migration/migration-plan.json --item 0 --mode copy --apply --json
+```
+
+The plan path and runtime directory are local operational state. Agents may inspect and suggest, but file changes still require the explicit `--apply` command; Move additionally requires `--confirm-move`.
+
 ## Optional automation
 
 Academia OS core exposes local job specifications and the retryable inbox lifecycle. If Hermes is explicitly enabled, the optional adapter can translate those specifications into Hermes commands. No core workflow requires Hermes, cron, a messaging platform, or a school account.

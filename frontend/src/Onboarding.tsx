@@ -5,6 +5,7 @@ import type { AttachmentResult, WorkspaceCandidate, WorkspaceCreationResult, Wor
 type SetupProps = {
   candidates: WorkspaceCandidate[]
   onComplete: () => Promise<void>
+  onMigration?: () => Promise<void>
 }
 
 type SetupForm = {
@@ -20,7 +21,7 @@ type SetupPreview = AttachmentResult | WorkspaceCreationResult
 
 const steps = ['Welcome', 'Profile', 'Workspace', 'Semester', 'Sources', 'AI & agents', 'Review setup', 'Ready']
 
-export function Onboarding({ candidates, onComplete }: SetupProps) {
+export function Onboarding({ candidates, onComplete, onMigration }: SetupProps) {
   const [step, setStep] = useState(0)
   const [workspaceMode, setWorkspaceMode] = useState<'new' | 'existing'>(candidates.length ? 'existing' : 'new')
   const [form, setForm] = useState<SetupForm>({
@@ -143,7 +144,7 @@ export function Onboarding({ candidates, onComplete }: SetupProps) {
       {step === 4 && <Sources />}
       {step === 5 && <Agents />}
       {step === 6 && <ReviewSetup form={form} mode={workspaceMode} inspection={inspection} preview={preview} onRefresh={() => void preparePreview()} busy={busy} />}
-      {step === 7 && <Ready form={form} mode={workspaceMode} preview={preview} onOpen={onComplete} />}
+      {step === 7 && <Ready form={form} mode={workspaceMode} preview={preview} onOpen={onComplete} onMigration={onMigration} />}
       {error && <p className="setup-error" role="alert">{error}</p>}
       {step < 7 && <div className="onboarding-actions"><button className="quiet-button" onClick={back} disabled={step === 0 || busy}>Back</button><button className="primary-button" onClick={() => void next()} disabled={busy}>{busy ? 'Checking…' : step === 0 ? 'Begin setup' : step === 6 ? 'Review and continue' : 'Continue'}</button></div>}
     </section>
@@ -183,8 +184,8 @@ function ReviewSetup({ form, mode, inspection, preview, onRefresh, busy }: { for
   return <div className="setup-content"><h1>Review your setup</h1><p>Nothing is changed until you confirm. Review the location and the safety boundary first.</p><div className="setup-summary"><SummaryRow label="Workspace" value={form.workspacePath} /><SummaryRow label="Mode" value={mode === 'new' ? 'Create a new workspace' : 'Attach existing workspace'} /><SummaryRow label="Semester" value={form.semester} /><SummaryRow label="Profile" value={`${form.name} · ${form.institution}`} /><SummaryRow label="Browser access" value="Off by default" /></div>{inspection && <InspectionSummary inspection={inspection} />}{preview && <div className="preview-banner"><strong>{preview.applied ? 'Setup applied' : 'Ready for your confirmation'}</strong><span>{preview.academic_files_changed ? 'The workspace was initialized from the reusable template.' : 'Academic files will not be moved, renamed, or rewritten.'}</span></div>}{!preview && <button className="secondary-button" onClick={onRefresh} disabled={busy}>{busy ? 'Preparing…' : 'Prepare setup summary'}</button>}</div>
 }
 
-function Ready({ form, mode, preview, onOpen }: { form: SetupForm; mode: 'new' | 'existing'; preview: SetupPreview | null; onOpen: () => Promise<void> }) {
-  return <div className="setup-content ready-content"><div className="ready-mark">✓</div><h1>You’re ready to begin</h1><p>{mode === 'new' ? 'Your local workspace has been created.' : 'Your existing workspace is connected without changing its academic files.'}</p><div className="setup-summary"><SummaryRow label="Workspace" value={form.workspacePath} /><SummaryRow label="Semester" value={form.semester} /><SummaryRow label="Next step" value="Import your first course material" /></div><button className="primary-button" onClick={() => void onOpen()}>Open Academia OS</button>{preview && 'backup_profile' in preview && preview.backup_profile ? <small className="setup-note">Your previous local profile was preserved as a backup.</small> : null}</div>
+function Ready({ form, mode, preview, onOpen, onMigration }: { form: SetupForm; mode: 'new' | 'existing'; preview: SetupPreview | null; onOpen: () => Promise<void>; onMigration?: () => Promise<void> }) {
+  return <div className="setup-content ready-content"><div className="ready-mark">✓</div><h1>You’re ready to begin</h1><p>{mode === 'new' ? 'Your local workspace has been created.' : 'Your existing workspace is connected without changing its academic files.'}</p><div className="setup-summary"><SummaryRow label="Workspace" value={form.workspacePath} /><SummaryRow label="Semester" value={form.semester} /><SummaryRow label="Next step" value="Import your first course material" /></div><button className="primary-button" onClick={() => void onOpen()}>Open Academia OS</button>{onMigration && <button className="secondary-button onboarding-migration-button" onClick={() => void onMigration()}>Bring in older material <span>↗</span></button>}{preview && 'backup_profile' in preview && preview.backup_profile ? <small className="setup-note">Your previous local profile was preserved as a backup.</small> : null}</div>
 }
 
 function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder: string }) {

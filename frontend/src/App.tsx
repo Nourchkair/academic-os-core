@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ImportView } from './ImportView'
+import { MigrationView } from './MigrationView'
 import { Onboarding } from './Onboarding'
 import { ReviewCard } from './ReviewCard'
 import { SettingsView } from './SettingsView'
@@ -12,6 +13,7 @@ const nav = [
   { id: 'tasks', label: 'Tasks', icon: '✓' },
   { id: 'library', label: 'Library', icon: '▤' },
   { id: 'import', label: 'Import', icon: '↓' },
+  { id: 'migration', label: 'Migrate older material', icon: '↗' },
   { id: 'review', label: 'Review', icon: '◌' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
 ] as const
@@ -31,6 +33,7 @@ function App() {
   const [onboarding, setOnboarding] = useState(false)
   const [setupCandidates, setSetupCandidates] = useState<import('./types').WorkspaceCandidate[]>([])
   const [booting, setBooting] = useState(true)
+  const [migrationBusy, setMigrationBusy] = useState(false)
 
   const beginOnboarding = async () => {
     try {
@@ -43,16 +46,19 @@ function App() {
     }
   }
 
-  const refresh = async () => {
+  const refresh = async (allowDuringMigration = false) => {
+    if (migrationBusy && !allowDuringMigration) return
     try {
       setError(null)
       const next = await api.status()
       if (!next.workspace.workspace_exists) {
+        if (allowDuringMigration) throw new Error('The workspace disappeared while refreshing migration status.')
         await beginOnboarding()
         return
       }
       const inspected = await api.workspaceInspect(next.workspace.academic_root)
       if (!inspected.recognized) {
+        if (allowDuringMigration) throw new Error('The workspace was not recognized while refreshing migration status.')
         await beginOnboarding()
         return
       }
@@ -65,6 +71,7 @@ function App() {
       setDomain(domainData)
       setOnboarding(false)
     } catch (reason) {
+      if (allowDuringMigration) throw reason
       if (reason instanceof BridgeUnavailableError) setError(reason.message)
       else await beginOnboarding()
     } finally {
@@ -77,7 +84,7 @@ function App() {
   useEffect(() => { void refresh() }, [])
 
   if (booting) return <main className="connection-screen"><div className="connection-art">✦</div><p className="eyebrow">Academia OS</p><h2>Checking your local workspace</h2><p>Your academic files stay on this computer while we check whether setup is already complete.</p></main>
-  if (onboarding) return <Onboarding candidates={setupCandidates} onComplete={refresh} />
+  if (onboarding) return <Onboarding candidates={setupCandidates} onComplete={refresh} onMigration={async () => { await refresh(); setOnboarding(false); setView('migration') }} />
 
   const title = nav.find((item) => item.id === view)?.label ?? 'Home'
   return (
@@ -86,13 +93,13 @@ function App() {
         <div className="brand"><div className="brand-mark">A</div><div><strong>Academia</strong><span>OS</span></div></div>
         <div className="workspace-chip"><span className="status-dot" />Local workspace</div>
         <nav aria-label="Primary navigation">
-          {nav.map((item) => <button key={item.id} className={`nav-item ${view === item.id ? 'active' : ''}`} onClick={() => setView(item.id)}><span className="nav-icon">{item.icon}</span>{item.label}{item.id === 'review' && status?.review_count ? <em>{status.review_count}</em> : null}</button>)}
+          {nav.map((item) => <button key={item.id} className={`nav-item ${view === item.id ? 'active' : ''}`} onClick={() => setView(item.id)} disabled={migrationBusy}><span className="nav-icon">{item.icon}</span>{item.label}{item.id === 'review' && status?.review_count ? <em>{status.review_count}</em> : null}</button>)}
         </nav>
-        <div className="sidebar-bottom"><button className="agent-pill" onClick={() => setView('settings')}><span className="agent-avatar">✦</span><span><b>Agents optional</b><small>Manage connections</small></span><span className="chevron">›</span></button></div>
+        <div className="sidebar-bottom"><button className="agent-pill" onClick={() => setView('settings')} disabled={migrationBusy}><span className="agent-avatar">✦</span><span><b>Agents optional</b><small>Manage connections</small></span><span className="chevron">›</span></button></div>
       </aside>
       <main className="main-content">
-        <header className="topbar"><div><p className="eyebrow">{status?.workspace.semester ?? 'Local academic workspace'}</p><h1>{title}</h1></div><div className="top-actions"><button className="search-button" onClick={() => setError('Search will use the local Academia OS index when the desktop bridge is connected.')}><span>⌕</span> Search <kbd>⌘ K</kbd></button><button className="icon-button" aria-label="Refresh" onClick={() => void refresh()}>↻</button><div className="profile-badge">{status?.student.name?.slice(0, 1) ?? 'A'}</div></div></header>
-        {error ? <ConnectionNotice message={error} onRetry={() => void refresh()} /> : <>{view === 'home' && <Home status={status} tasks={tasks} reviews={reviews} activity={activity} domain={domain} onNavigate={setView} />}{view === 'courses' && <Courses courses={courses} domain={domain} />}{view === 'tasks' && <Tasks tasks={tasks} />}{view === 'library' && <Library courses={courses} onNavigate={setView} />}{view === 'import' && status && <ImportView status={status} courses={courses} onImported={refresh} onReview={() => setView('review')} />}{view === 'review' && <Review reviews={reviews} activity={activity} courses={courses} actionBusy={actionBusy} onReviewDecision={async (decision, itemId) => { try { setActionBusy(itemId); setError(null); await api.reviewDecision(itemId, decision); if (decision === 'use_new') await api.reviewExecute(itemId); await refresh() } catch (reason) { setError(String(reason)) } finally { setActionBusy(null) } }} />}{view === 'settings' && <Settings status={status} onSaved={refresh} />}</>}
+        <header className="topbar"><div><p className="eyebrow">{status?.workspace.semester ?? 'Local academic workspace'}</p><h1>{title}</h1></div><div className="top-actions"><button className="search-button" onClick={() => setError('Search will use the local Academia OS index when the desktop bridge is connected.')}><span>⌕</span> Search <kbd>⌘ K</kbd></button><button className="icon-button" aria-label="Refresh" onClick={() => void refresh()} disabled={migrationBusy}>↻</button><div className="profile-badge">{status?.student.name?.slice(0, 1) ?? 'A'}</div></div></header>
+        {error ? <ConnectionNotice message={error} onRetry={() => void refresh()} /> : <>{view === 'home' && <Home status={status} tasks={tasks} reviews={reviews} activity={activity} domain={domain} onNavigate={setView} />}{view === 'courses' && <Courses courses={courses} domain={domain} />}{view === 'tasks' && <Tasks tasks={tasks} />}{view === 'library' && <Library courses={courses} onNavigate={setView} />}{view === 'import' && status && <ImportView status={status} courses={courses} onImported={refresh} onReview={() => setView('review')} />}{view === 'migration' && status && <MigrationView status={status} onApplied={() => refresh(true)} onReview={() => setView('review')} onBusyChange={setMigrationBusy} />}{view === 'review' && <Review reviews={reviews} activity={activity} courses={courses} actionBusy={actionBusy} onReviewDecision={async (decision, itemId) => { try { setActionBusy(itemId); setError(null); await api.reviewDecision(itemId, decision); if (decision === 'use_new') await api.reviewExecute(itemId); await refresh() } catch (reason) { setError(String(reason)) } finally { setActionBusy(null) } }} />}{view === 'settings' && <Settings status={status} onSaved={refresh} />}</>}
       </main>
     </div>
   )

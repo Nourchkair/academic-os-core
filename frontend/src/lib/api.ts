@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActivityEvent, AttachmentResult, Course, DomainEntity, ExtractionPreview, ImportResult, ReviewItem, SettingsPreview, StatusPayload, Task, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
+import type { ActivityEvent, AttachmentResult, Course, DomainEntity, ExtractionPreview, ImportResult, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, ReviewItem, SettingsPreview, StatusPayload, Task, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
@@ -61,6 +61,16 @@ export const api = {
     return command<WorkspaceCreationResult>('workspace', args)
   },
   importFile: (source: string, destination: string, uncertain: boolean) => command<ImportResult>('import', [source, '--destination', destination, ...(uncertain ? ['--uncertain'] : [])]),
+  migrationPlan: (source: string) => command<MigrationPlanResult>('migration', ['plan', source]),
+  migrationStatus: (planPath: string) => command<MigrationStatusResult>('migration', ['status', '--plan', planPath]),
+  migrationExecute: (planPath: string, indexes: number[], mode: 'copy' | 'move', apply: boolean, confirmMove: boolean) => {
+    const args = ['execute', '--plan', planPath]
+    for (const index of indexes) args.push('--item', String(index))
+    args.push('--mode', mode)
+    if (confirmMove) args.push('--confirm-move')
+    if (apply) args.push('--apply')
+    return command<MigrationExecuteResult>('migration', args)
+  },
   extractSyllabus: (source: string, course: string, verifiedCurrent: boolean, apply: boolean) => command<ExtractionPreview>('extract', ['syllabus', source, '--course', course, ...(verifiedCurrent ? ['--verified-current'] : []), ...(apply ? ['--apply'] : [])]),
   settings: () => command<Record<string, unknown>>('settings', ['show']),
   settingsUpdate: (updates: Record<string, unknown>, apply: boolean, approveStructural: boolean) => {

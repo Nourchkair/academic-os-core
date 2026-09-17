@@ -174,3 +174,67 @@ export type StatusPayload = {
   agents: Record<string, AgentStatus>
   acquisition: { watched_folders: string[]; browser: { enabled: boolean; allowed_sites: string[] } }
 }
+
+export type MigrationItem = {
+  source: string
+  destination: string
+  relative_path: string
+  semester: string
+  size: number
+  sha256: string
+}
+
+export type MigrationPlanFields = {
+  version: number
+  source_root: string
+  academic_root: string
+  current_semester: string
+  created_at: string
+  item_count: number
+  total_size: number
+  items: MigrationItem[]
+}
+
+export type MigrationPlanResult = MigrationPlanFields & {
+  plan_path: string
+  review_path: string
+  status: 'planned'
+  action: 'plan'
+}
+
+export type MigrationReport = {
+  mode?: 'copy' | 'move'
+  selected?: number
+  copied?: number
+  moved?: number
+  skipped?: number
+  failed?: number
+  destinations?: string[]
+  failures?: string[]
+  [key: string]: unknown
+}
+
+export type MigrationStatusResult = MigrationPlanFields & {
+  plan_path: string
+  report_path: string
+  report: MigrationReport | null
+  status: 'ready' | 'report_available'
+  action: 'status'
+}
+
+export type MigrationExecuteResult = {
+  action: 'execute'
+  status: 'confirmation_required' | 'completed' | 'completed_with_failures'
+  applied: boolean
+  mode: 'copy' | 'move'
+  selected: number
+  selected_indexes: number[]
+  copied?: number
+  moved?: number
+  skipped?: number
+  failed?: number
+  destinations?: string[]
+  failures?: string[]
+  plan_path: string
+  report_path: string
+}

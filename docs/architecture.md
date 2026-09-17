@@ -39,6 +39,8 @@ The user’s workspace remains the human-readable source of truth. `.academia/` 
 
 `academia_os.config` is the only canonical configuration model. It owns schema version 2, defaults, validation, atomic serialization, and v1 migration. The installer, CLI, desktop compatibility app, and adapters consume it. Hermes is an optional `agents.hermes` section, not a required core path.
 
+The migration engine is also shared across interfaces. `installer/migration.py` creates a hash-verified, semester-aware plan, while `academia migration plan/status/execute` is the stable agent/Tauri contract. The React/Tauri migration view never reimplements routing: it selects items and sends explicit copy or confirmed-move commands to the CLI. Plans, reports, and Markdown review artifacts live under the runtime directory; the academic workspace remains the readable source of truth. Copy is the default, unknown material stays identifiable under `LEGACY_IMPORT`, and unsafe/operational paths are rejected.
+
 Structural settings use `academia_os.settings.update_config()`, which returns a field-level diff and refuses root/runtime/semester changes unless explicitly approved. The desktop UI displays an impact summary before initializing missing structure.
 
 ## Reliability

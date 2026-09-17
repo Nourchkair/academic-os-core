@@ -23,7 +23,13 @@ fn run_academia(args: Vec<String>) -> Result<String, String> {
     if output.status.success() {
         String::from_utf8(output.stdout).map_err(|error| format!("Academia CLI returned invalid UTF-8: {error}"))
     } else {
-        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if stdout.is_empty() {
+            stderr
+        } else {
+            stdout
+        })
     }
 }
 
@@ -48,6 +54,7 @@ fn academia_command(command: String, args: Vec<String>) -> Result<String, String
         "import",
         "domain",
         "extract",
+        "migration",
     ];
     if !allowed.contains(&command.as_str()) {
         return Err(format!("Unsupported Academia command: {command}"));
