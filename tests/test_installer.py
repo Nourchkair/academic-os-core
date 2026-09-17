@@ -120,6 +120,13 @@ def test_initialize_does_not_overwrite_existing_file(tmp_path: Path) -> None:
     assert (academic_root / "README.md").read_text(encoding="utf-8") == "do not overwrite"
 
 
+def test_invalid_timezone_is_rejected(tmp_path: Path) -> None:
+    manifest = sample_manifest(tmp_path)
+    manifest["academic"]["timezone"] = "Toronto"
+    with pytest.raises(ValueError, match="valid IANA"):
+        validate_manifest(manifest)
+
+
 def test_cron_specs_are_local_and_do_not_use_messaging_destinations(tmp_path: Path) -> None:
     manifest = sample_manifest(tmp_path)
     specs = build_cron_specs(manifest)

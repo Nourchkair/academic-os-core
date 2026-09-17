@@ -50,11 +50,19 @@ Hermes integration files are copied into the configured Hermes home only when th
 - Credentials are handled by the user's own OAuth/browser flows, not by this repository.
 - Generated summaries and dashboards are not citation endpoints.
 
-## Development checks
+## Desktop app
+
+The repository also includes a native local desktop wrapper:
 
 ```bash
-python3 -m pytest tests/ -q
-python3 -m compileall installer runtime
+python3 desktop/app.py
 ```
 
-The project has no runtime dependency beyond Python 3.11+; `pytest` is only needed for development tests.
+It provides the friendly onboarding flow, folder discovery, automatic time-zone detection, local dashboard, course creation, verification, and quick links to the University folder and Hermes. On macOS, build a clickable app bundle with:
+
+```bash
+python3 desktop/build_macos_app.py
+open 'dist/Academic OS.app'
+```
+
+The desktop app reuses the same installer/core and never stores credentials. See `desktop/README.md`.

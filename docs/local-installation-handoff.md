@@ -10,11 +10,28 @@ This installation belongs to **{{STUDENT_NAME}}** at **{{INSTITUTION}}**.
 - Semester shell: `{{ACADEMIC_ROOT}}/{{SEMESTER}}`
 - Time zone: `{{TIMEZONE}}`
 
+## Desktop app
+
+If you received the repository, the easiest entry point is:
+
+```bash
+python3 desktop/app.py
+```
+
+On macOS, a clickable application can be built with:
+
+```bash
+python3 desktop/build_macos_app.py
+open 'dist/Academic OS.app'
+```
+
+The app's setup screen can look for an existing University folder, detect the computer's time zone, create or attach to a workspace, and show the local dashboard. It uses the same bootstrapper and verification logic described below.
+
 ## Required manual steps
 
 1. Verify the folder structure with:
 
-   ```text
+   ```bash
    python3 installer/verify.py {{INSTALL_ROOT}}/profile.json
    ```
 

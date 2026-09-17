@@ -17,6 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from installer.core import initialize_installation, load_manifest, validate_manifest
+from desktop.model import detect_local_timezone, discover_academic_folders, semester_suggestions
 
 
 def _ask(label: str, default: str = "") -> str:
@@ -33,12 +34,29 @@ def _yes_no(label: str, default: bool = False) -> bool:
     return value in {"y", "yes"}
 
 
+def _choose_academic_root() -> str:
+    candidates = discover_academic_folders()
+    default_root = str(Path.home() / "Desktop" / "University")
+    if not candidates:
+        return _ask("Where should your University folder live?", default_root)
+    print("\nI found these likely academic folders:")
+    for index, candidate in enumerate(candidates[:5], start=1):
+        print(f"  {index}. {candidate.path} ({', '.join(candidate.reasons)})")
+    choice = _ask("Choose a number, type another folder, or press Enter for the best match", "1").strip()
+    if choice.isdigit() and 1 <= int(choice) <= min(len(candidates), 5):
+        return str(candidates[int(choice) - 1].path)
+    return choice or str(candidates[0].path)
+
+
 def interactive_manifest() -> dict[str, Any]:
     print("Academic OS local setup")
     print("No passwords, tokens, cookies, or MFA codes are collected by this wizard.\n")
-    root = _ask("University folder", str(Path.home() / "Desktop" / "University"))
-    install = _ask("Academic OS install directory", str(Path.home() / ".academic-os"))
-    hermes = _ask("Hermes home directory", str(Path.home() / ".hermes"))
+    root = _choose_academic_root()
+    detected_timezone = detect_local_timezone() or "UTC"
+    print(f"I detected your computer's time zone as {detected_timezone}.")
+    timezone = _ask("Time zone (press Enter to use the detected one)", detected_timezone)
+    install = str(Path.home() / ".academic-os")
+    hermes = str(Path.home() / ".hermes")
     manifest = {
         "schema_version": 1,
         "student": {
@@ -47,8 +65,8 @@ def interactive_manifest() -> dict[str, Any]:
             "program": _ask("Program/faculty", "Not yet specified"),
         },
         "academic": {
-            "semester": _ask("Current semester", "Current Semester"),
-            "timezone": _ask("Time zone", "UTC"),
+            "semester": _ask("Current semester", semester_suggestions()[0]),
+            "timezone": timezone,
             "root_directory": root,
             "school_portal": _ask("School portal name", "Not yet specified"),
         },

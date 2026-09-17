@@ -8,6 +8,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import available_timezones
 
 SCHEMA_VERSION = 1
 TEXT_SUFFIXES = {".md", ".json", ".env", ".py", ".sh", ".txt", ".yaml", ".yml"}
@@ -39,6 +40,8 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     for name, value in required.items():
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{name} is required")
+    if str(required["academic.timezone"]) not in available_timezones():
+        raise ValueError("academic.timezone must be a valid IANA time zone; choose a region from the setup list")
     root = Path(str(required["academic.root_directory"])).expanduser()
     install = Path(str(required["hermes.install_directory"])).expanduser()
     hermes = Path(str(required["hermes.home_directory"])).expanduser()
@@ -112,6 +115,17 @@ def _copy_tree(source_root: Path, destination_root: Path, manifest: dict[str, An
             destination.mkdir(parents=True, exist_ok=True)
         else:
             _copy_file(source, destination, manifest, allow_existing=allow_existing)
+
+
+def _ensure_tree(source_root: Path, destination_root: Path, manifest: dict[str, Any]) -> None:
+    destination_root.mkdir(parents=True, exist_ok=True)
+    for source in sorted(source_root.rglob("*")):
+        relative = source.relative_to(source_root)
+        destination = destination_root / relative
+        if source.is_dir():
+            destination.mkdir(parents=True, exist_ok=True)
+        elif not destination.exists():
+            _copy_file(source, destination, manifest, allow_existing=False)
 
 
 def _cron_time(value: str) -> tuple[str, str]:
@@ -221,22 +235,38 @@ def initialize_installation(
     template_root: Path,
     repo_root: Path,
     allow_existing: bool = False,
+    attach_existing: bool = False,
 ) -> dict[str, Any]:
     validate_manifest(manifest)
     academic_root = Path(str(_get(manifest, "academic", "root_directory"))).expanduser()
     install_root = Path(str(_get(manifest, "hermes", "install_directory"))).expanduser()
-    if academic_root.exists() and any(academic_root.iterdir()) and not allow_existing:
+    root_exists_with_content = academic_root.exists() and any(academic_root.iterdir())
+    if root_exists_with_content and not allow_existing and not attach_existing:
         raise FileExistsError(f"academic root is not empty; refusing to modify it: {academic_root}")
     academic_root.mkdir(parents=True, exist_ok=True)
-    _copy_tree(template_root, academic_root, manifest, allow_existing=allow_existing)
+    if attach_existing:
+        if not (academic_root / "ACADEMIC_OS_RULES.md").is_file() or not (academic_root / "COURSE_TEMPLATE").is_dir():
+            raise ValueError("selected folder does not look like an existing Academic OS folder")
+        _ensure_tree(template_root, academic_root, manifest)
+    else:
+        _copy_tree(template_root, academic_root, manifest, allow_existing=allow_existing)
 
     semester = str(_get(manifest, "academic", "semester"))
     semester_root = academic_root / semester
     semester_template = template_root / "SEMESTER_TEMPLATE"
-    _copy_tree(semester_template, semester_root, manifest, allow_existing=allow_existing)
+    if attach_existing:
+        _ensure_tree(semester_template, semester_root, manifest)
+    else:
+        _copy_tree(semester_template, semester_root, manifest, allow_existing=allow_existing)
 
     install_root.mkdir(parents=True, exist_ok=True)
-    _write_json(install_root / "profile.json", manifest)
+    profile_path = install_root / "profile.json"
+    if profile_path.exists():
+        existing_profile = load_manifest(profile_path)
+        if existing_profile != manifest:
+            raise FileExistsError(f"existing install profile differs; manual review required: {profile_path}")
+    else:
+        _write_json(profile_path, manifest)
     env_lines = [
         f"ACADEMIC_OS_INSTALL_DIR={shlex.quote(str(install_root))}",
         f"ACADEMIC_ROOT={shlex.quote(str(academic_root))}",
