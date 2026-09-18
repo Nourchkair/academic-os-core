@@ -20,44 +20,23 @@ from installer.core import (  # noqa: E402
 
 def sample_manifest(tmp_path: Path) -> dict:
     return {
-        "schema_version": 1,
-        "student": {
-            "name": "Alex Student",
-            "institution": "Example University",
-            "program": "History",
-        },
-        "academic": {
-            "semester": "Fall 2026",
-            "timezone": "America/New_York",
-            "root_directory": str(tmp_path / "University"),
-        },
-        "preferences": {
-            "explanation_style": "detailed",
-            "preferred_format": "markdown",
-            "use_visuals": True,
-            "study_method": "active recall",
-        },
-        "integrations": {
-            "gmail": False,
-            "calendar": False,
-            "drive": False,
-            "school_portal": False,
-        },
-        "automation": {
-            "daily_brief_enabled": True,
-            "daily_brief_time": "09:00",
-            "inbox_processor_enabled": True,
-            "inbox_interval_minutes": 5,
-        },
+        "schema_version": 3,
+        "student": {"name": "Alex Student", "institution": "Example University", "program": "History"},
+        "academic": {"semester": "Fall 2026", "timezone": "America/New_York", "root_directory": str(tmp_path / "University")},
+        "runtime": {"install_directory": str(tmp_path / ".academic-os")},
+        "preferences": {"explanation_style": "detailed", "preferred_format": "markdown", "use_visuals": True, "study_method": "active recall"},
         "browser": {"name": "auto", "user_data_dir": "", "profile_directory": ""},
-        "hermes": {
-            "home_directory": str(tmp_path / ".hermes"),
-            "profile": "default",
-            "install_directory": str(tmp_path / ".academic-os"),
-        },
+        "agents": {"hermes": {"enabled": False, "profile": "default", "home_directory": ""}},
     }
 
 
+def legacy_manifest(tmp_path: Path) -> dict:
+    manifest = sample_manifest(tmp_path)
+    manifest["schema_version"] = 2
+    manifest["academic"]["school_portal"] = "Brightspace"
+    manifest["integrations"] = {"gmail": False, "calendar": False, "drive": False, "school_portal": False}
+    manifest["automation"] = {"daily_brief_enabled": True, "daily_brief_time": "09:00", "inbox_processor_enabled": True, "inbox_interval_minutes": 5}
+    return manifest
 def test_render_text_replaces_safe_profile_tokens() -> None:
     text = "Hello {{STUDENT_NAME}} at {{INSTITUTION}} in {{TIMEZONE}}."
     rendered = render_text(
@@ -95,7 +74,7 @@ def test_initialize_installation_creates_safe_instance(tmp_path: Path) -> None:
         allow_existing=False,
     )
     academic_root = Path(manifest["academic"]["root_directory"])
-    install_root = Path(manifest["hermes"]["install_directory"])
+    install_root = Path(manifest["runtime"]["install_directory"])
     assert result["status"] == "initialized"
     assert (academic_root / "README.md").is_file()
     assert (academic_root / "COURSE_TEMPLATE" / "00_INBOX" / ".gitkeep").is_file()
@@ -103,6 +82,10 @@ def test_initialize_installation_creates_safe_instance(tmp_path: Path) -> None:
     assert (academic_root / "Fall 2026" / "00_INBOX" / ".gitkeep").is_file()
     assert (install_root / "profile.json").is_file()
     assert (install_root / "scripts" / "academic_os_inbox_gate.py").is_file()
+    assert not (install_root / "generated_jobs.json").exists()
+    assert not (install_root / "generated_cron_jobs.json").exists()
+    assert not (install_root / "install_cron.sh").exists()
+
     assert "Alex Student" in (academic_root / "README.md").read_text(encoding="utf-8")
 
 
@@ -128,13 +111,24 @@ def test_invalid_timezone_is_rejected(tmp_path: Path) -> None:
         validate_manifest(manifest)
 
 
-def test_cron_specs_are_local_and_do_not_use_messaging_destinations(tmp_path: Path) -> None:
+def test_fresh_installation_does_not_generate_recurring_jobs(tmp_path: Path) -> None:
     manifest = sample_manifest(tmp_path)
+    assert build_cron_specs(manifest) == []
+
+
+def test_legacy_automation_migrates_to_deprecated_adapter_job_specs(tmp_path: Path) -> None:
+    manifest = legacy_manifest(tmp_path)
     specs = build_cron_specs(manifest)
-    assert {spec["name"] for spec in specs} == {
-        "Academic OS — Daily Brief",
-        "Academic OS — Inbox Processor",
-    }
+    assert {spec["name"] for spec in specs} == {"Academic OS — Daily Brief", "Academic OS — Inbox Processor"}
+    assert all(spec["compatibility"]["deprecated"] is True for spec in specs)
+    assert all(spec["compatibility"]["execution_owner"] == "external_agent" for spec in specs)
+    daily = next(spec for spec in specs if spec["name"].endswith("Daily Brief"))
+    assert "daily_academic_brief" in daily["compatibility"]["note"]
+
+
+def test_cron_specs_are_local_and_do_not_use_messaging_destinations(tmp_path: Path) -> None:
+    manifest = legacy_manifest(tmp_path)
+    specs = build_cron_specs(manifest)
     for spec in specs:
         assert spec["workdir"] == manifest["academic"]["root_directory"]
         assert spec["deliver"] == "local"

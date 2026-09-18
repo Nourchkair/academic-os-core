@@ -80,9 +80,9 @@ Allowed delivery modes are `In Person`, `Online — Synchronous`, `Online — As
 
 Calendar writes require explicit user confirmation. Search for an equivalent before creating or updating an event. Do not create duplicates or delete events without explicit instruction. Date-only information is all-day; exact times are timed events. Log audits and actions in `Calendar_Log.md`.
 
-## 6. Gmail and school communications
+## 6. Academic communications
 
-Process only relevant university/course communications when Gmail is authorized. Extract actionable changes, compare them with current sources, and update only what changed. Record meaningful changes in `Communications_Log.md`. Do not send, delete, archive, or modify email without explicit approval.
+An authorized external agent may, if the student separately permits it, read relevant academic communications through its own email tool. Academia OS does not connect to Gmail or another mailbox, and it never sends, deletes, archives, or modifies school-account messages.
 
 ## 7. Assignments and academic integrity
 
@@ -104,10 +104,10 @@ Use exactly these result labels: `EXACT MATCH — HIGH CONFIDENCE`, `PROBABLE MA
 
 Build week summaries, active-recall questions, weak-area records, and exam knowledge bases from original material plus clearly labelled generated aids. Weak areas require evidence such as repeated errors, confusion, poor performance, or rubric feedback; they are not permanent labels. Confirmed exam scope overrides guesses and historical reports.
 
-## 10. School-portal acquisition boundary
+## 10. School-platform acquisition boundary
 
-The acquisition adapter may use the user's explicitly selected visible browser profile when configured. Manual import and watched folders remain fully supported without browser access. The current browser implementation is limited to optional visible Chromium-family handoff; Firefox, Safari, and a companion extension are future adapters. The workflow is read-only with respect to school sites. It must never enter or store passwords/MFA codes, read cookies, submit assignments, answer quizzes, post messages, change settings, or delete content.
+An authorized external agent may use the student's explicitly selected visible browser profile when the student approves a course-platform workflow. Manual import and watched folders remain fully supported without browser access. The current browser implementation is limited to optional visible Chromium-family handoff; Firefox, Safari, and a companion extension are future adapters. Academia OS does not connect to Brightspace or another school portal, and any school-platform workflow remains read-only: it must never enter or store passwords/MFA codes, read cookies, submit assignments, answer quizzes, post messages, change settings, or delete content.
 
-## 11. Safe automation
+## 11. Agent-owned scheduling and local processing
 
-The inbox gate runs before any processor. It ignores `COURSE_TEMPLATE`, persists retryable processing records under the workspace's rebuildable `.academia/` state, and emits no wake when nothing changed. The processor must preserve uncertain files, verify side effects before acknowledgement, and record failures for retry. Scheduled jobs must use configured local paths and local delivery only.
+The inbox gate runs before any processor. It ignores `COURSE_TEMPLATE`, persists retryable processing records under the workspace's rebuildable `.academia/` state, and emits no wake when nothing changed. The processor must preserve uncertain files, verify side effects before acknowledgement, and record failures for retry. A recurring schedule is not created by Academia OS; an external agent or scheduler owns any cadence and delivery after student authorization.

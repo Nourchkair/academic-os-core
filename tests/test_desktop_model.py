@@ -100,7 +100,7 @@ def test_attach_existing_root_preserves_custom_files(tmp_path: Path) -> None:
         attach_existing=True,
     )
     assert (root / "ACADEMIC_OS_RULES.md").read_text(encoding="utf-8") == "custom rules"
-    assert (Path(manifest["hermes"]["install_directory"]) / "profile.json").is_file()
+    assert (Path(manifest["runtime"]["install_directory"]) / "profile.json").is_file()
 
 
 def test_load_dashboard_reports_empty_and_configured_state(tmp_path: Path) -> None:
@@ -111,7 +111,7 @@ def test_load_dashboard_reports_empty_and_configured_state(tmp_path: Path) -> No
         repo_root=ROOT,
         allow_existing=False,
     )
-    profile = Path(manifest["hermes"]["install_directory"]) / "profile.json"
+    profile = Path(manifest["runtime"]["install_directory"]) / "profile.json"
     dashboard = load_dashboard(profile)
     assert dashboard["student_name"] == "Alex Student"
     assert dashboard["course_count"] == 0

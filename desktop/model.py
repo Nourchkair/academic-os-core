@@ -78,7 +78,6 @@ def load_dashboard(profile_path: Path) -> dict[str, Any]:
         "today_preview": today_preview,
         "root_exists": root.is_dir(),
         "semester_exists": (root / snapshot["semester"]).is_dir(),
-        "integrations": profile.get("integrations", {}),
         "hermes_enabled": bool(hermes_config(profile).get("enabled")),
         "review_count": snapshot["review_count"],
         "tasks": snapshot["tasks"],

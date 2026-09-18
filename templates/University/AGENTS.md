@@ -5,7 +5,7 @@ This folder is a local Academia OS academic workspace. It remains readable and u
 ## Read first
 
 - `ACADEMIC_OS_RULES.md` — safety, provenance, confidence, source verification, and academic-integrity boundaries.
-- `INTEGRATION_STATUS.md` — local capability/authorization state only; never add passwords or tokens.
+- `INTEGRATION_STATUS.md` — local capability and saved playbook-intent status; it never claims that an external account or automation is connected.
 - `VERIFICATION.md` — health checks and evidence.
 - `{{SEMESTER}}/` — the active semester shell and course folders.
 
@@ -34,7 +34,8 @@ Rebuildable indexes and workflow state live under `.academia/`. The underlying a
 - Never invent courses, deadlines, readings, editions, grades, or institutional facts.
 - Uncertain information and approval-required changes belong in the Review Queue.
 - Calendar changes, structural changes, moves, and destructive actions require explicit user approval.
-- Never submit academic work, send school-account messages, contact school personnel, make payments, or authenticate as the user.
+- Never submit academic work, send school-account messages, or authenticate as the user.
+- Academia OS does not implement payments. Agents must never infer payment authorization. Any future payment capability would require explicit student confirmation.
 - Never read or store passwords, MFA codes, browser cookies, session tokens, or hidden secrets.
 
 ## Acquisition

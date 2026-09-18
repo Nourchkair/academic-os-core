@@ -4,6 +4,8 @@ Academia OS is a **local-first, AI-native academic operating layer** for a stude
 
 It is **not** a Hermes product. Hermes is one optional adapter. Academia OS works without Hermes, Codex, ChatGPT/Work, Claude, browser automation, or a school account connection.
 
+> **Status: Early public alpha / pre-1.0.** The current version is `0.4.x`. Source-based macOS installation is the main supported release path; the Tauri bundle is still a development foundation rather than the primary installer. APIs, schemas, and adapter contracts may evolve before 1.0. Academic data remains local to the student's computer.
+
 ## Agent-first architecture
 
 ```text
@@ -104,7 +106,7 @@ academia --profile ~/.academic-os/profile.json workspace attach /path/to/Univers
   --timezone America/Toronto --apply --json
 ```
 
-`workspace inspect` is read-only. `workspace attach` is preview-only unless `--apply` is supplied; attachment writes only the local profile and does not migrate, rename, move, rewrite, or index academic files. Generated profiles use schema version 2, resolve a real semester label, keep browser access off by default, and do not require Hermes. Existing schema-version-1 profiles migrate non-destructively when read.
+`workspace inspect` is read-only. `workspace attach` is preview-only unless `--apply` is supplied; attachment writes only the local profile and does not migrate, rename, move, rewrite, or index academic files. Generated profiles use schema version 3, resolve a real semester label, keep browser access off by default, and do not require Hermes. Existing schema-version-1 and schema-version-2 profiles migrate non-destructively; pre-playbook integration/automation fields are retained only under explicit `legacy_compatibility` metadata.
 
 ## Universal local interface
 
@@ -315,7 +317,7 @@ Academia OS remains useful with no browser access:
 
 The current capability report is honest: manual import and one-shot watched-folder scanning are available; Chromium is limited to optional visible handoff with an explicit allow-list and target; Firefox and Safari are planned, not claimed as connected. The user may choose Chrome, Firefox, Safari, or another profile. A dedicated school/research profile is recommended for privacy but not required. Domain allow-lists narrow intended access but are not a security guarantee.
 
-For readings, prefer legitimate library, Omni/OpenAthens, publisher, DOI/open-access, institutional, or author-released access. Discovery-only sources do not authorize downloading an unclear copy. Never pay without explicit confirmation, and never silently substitute an edition.
+For readings, prefer legitimate library, Omni/OpenAthens, publisher, DOI/open-access, institutional, or author-released access. Discovery-only sources do not authorize downloading an unclear copy. Academia OS does not implement payments; agents must never infer payment authorization. Any future payment capability would require explicit student confirmation. Never silently substitute an edition.
 
 ### Legacy-folder migration
 
@@ -365,7 +367,8 @@ Preview mode does not write the domain projection, source file, workspace files,
 - Originals are preserved; copies and collision-safe names are preferred.
 - Destructive changes require an approved proposal.
 - Calendar changes require approval and duplicate checking.
-- No academic submission, school-account message, payment, or authentication action is implemented or permitted.
+- No coursework, quiz, exam, form, discussion, or other academic work submission is implemented; no school-account messaging is implemented.
+- Academia OS does not implement payments. Agents must never infer payment authorization. Any future payment capability would require explicit student confirmation.
 - Passwords, MFA codes, cookies, session tokens, and hidden secrets are not read or stored.
 - School/browser access is optional and read-only in the current architecture.
 - Local health verification is separate from safe-to-share auditing:

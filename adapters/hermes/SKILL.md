@@ -7,7 +7,7 @@ author: Academia OS contributors
 
 # Optional Hermes adapter
 
-Academia OS works without Hermes. This adapter translates neutral job specifications from `generated_jobs.json` into Hermes scheduling commands when the user explicitly enables the adapter.
+Academia OS works without Hermes. This adapter translates explicitly marked legacy compatibility job specifications into Hermes scheduling commands only when the user explicitly enables the adapter. New installations start from Agent Setup Playbooks and local workflow preferences; they do not create recurring jobs here.
 
 ## Boundaries
 
@@ -15,7 +15,8 @@ Academia OS works without Hermes. This adapter translates neutral job specificat
 - Never copy a user's Hermes profile, memory, sessions, OAuth state, logs, or credentials into a workspace or repository.
 - Keep delivery local unless the user has separately approved an integration; never send school-account messages.
 - The inbox gate only detects work. The worker must complete processing, verify side effects, and acknowledge through the Academia OS lifecycle.
-- Do not submit academic work, answer quizzes, post messages, make payments, or authenticate as the user.
+- Do not submit academic work, answer quizzes, post messages, or authenticate as the user.
+- Academia OS does not implement payments. Agents must never infer payment authorization. Any future payment capability would require explicit student confirmation.
 
 ## Adapter operations
 

@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   python:
     name: Python ${{ matrix.python-version }} · ${{ matrix.os }}

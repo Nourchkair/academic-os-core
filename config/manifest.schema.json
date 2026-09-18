@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Academia OS local profile",
   "type": "object",
-  "required": ["schema_version", "student", "academic", "runtime", "automation", "acquisition", "privacy", "browser", "agents"],
+  "required": ["schema_version", "student", "academic", "runtime", "acquisition", "privacy", "browser", "agents"],
   "properties": {
-    "schema_version": {"const": 2},
+    "schema_version": {"const": 3},
     "student": {
       "type": "object",
       "required": ["name", "institution", "program"],
@@ -21,8 +21,7 @@
       "properties": {
         "semester": {"type": "string", "pattern": "^(Winter|Spring|Summer|Fall) [0-9]{4}$"},
         "timezone": {"type": "string", "minLength": 1},
-        "root_directory": {"type": "string", "minLength": 1},
-        "school_portal": {"type": "string"}
+        "root_directory": {"type": "string", "minLength": 1}
       },
       "additionalProperties": true
     },
@@ -32,13 +31,17 @@
       "properties": {"install_directory": {"type": "string", "minLength": 1}},
       "additionalProperties": true
     },
-    "automation": {
+    "legacy_compatibility": {
       "type": "object",
+      "deprecated": true,
+      "description": "Deprecated pre-playbook fields retained only for migration and old adapter compatibility. Not current Academia OS state.",
       "properties": {
-        "daily_brief_enabled": {"type": "boolean"},
-        "daily_brief_time": {"type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"},
-        "inbox_processor_enabled": {"type": "boolean"},
-        "inbox_interval_minutes": {"type": "integer", "minimum": 1}
+        "deprecated": {"const": true},
+        "source": {"type": "string"},
+        "description": {"type": "string"},
+        "integrations": {"type": "object"},
+        "automation": {"type": "object"},
+        "school_portal_name": {"type": "string"}
       },
       "additionalProperties": true
     },

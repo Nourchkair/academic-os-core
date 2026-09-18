@@ -31,7 +31,7 @@ School-site/browser acquisition is optional and must never define the core. Manu
 
 The current Chromium capability is limited to an optional visible handoff when explicitly configured. Firefox, Safari, and browser-companion adapters are planned rather than implemented. Never imply that a browser profile is a school account, never read passwords, MFA codes, cookies, or hidden session tokens, and keep school sites read-only. If a user explicitly enables an adapter, verify the page itself, exact course/module identity, local file hashes, and the requested source version. If access, identity, legality, or download status is uncertain, stop and report rather than guess.
 
-For legitimate readings, prefer university library, institution, publisher, DOI/open-access, repository, or author-released sources. Discovery-only results do not authorize downloading unclear copies. Never pay without explicit confirmation, and never silently substitute an edition. Record `EXACT MATCH — HIGH CONFIDENCE`, `PROBABLE MATCH — VERIFY MANUALLY`, `MISMATCH`, or `NOT RETRIEVED`.
+For legitimate readings, prefer university library, institution, publisher, DOI/open-access, repository, or author-released sources. Discovery-only results do not authorize downloading unclear copies. Academia OS does not implement payments; agents must never infer payment authorization. Any future payment capability would require explicit student confirmation. Never silently substitute an edition. Record `EXACT MATCH — HIGH CONFIDENCE`, `PROBABLE MATCH — VERIFY MANUALLY`, `MISMATCH`, or `NOT RETRIEVED`.
 
 ## When to Use
 
@@ -143,7 +143,7 @@ Maintain `06_KNOWLEDGE/Source_Index.md` for important original readings, textboo
 
 The professor's current syllabus, assignment instructions, Brightspace reading list/content page, or current announcement is the authoritative target specification. The verification record must separately show what was requested, what was retrieved, its source/provenance, edition/year/publisher, ISBN/DOI, chapter/pages, authorization, every match/mismatch/unavailable/non-comparable field, and a final result. Compare author/editor, exact title/subtitle, edition, year, publisher, ISBN-10/ISBN-13, DOI, volume/issue, chapter, required pages, language, page count where useful, file identity, source URL, and access date. Use only `EXACT MATCH — HIGH CONFIDENCE`, `PROBABLE MATCH — VERIFY MANUALLY`, `MISMATCH`, or `NOT RETRIEVED`. A lecture deck can match a course topic while remaining a mismatch for an assigned book/article. Never use a different edition or source type as a silent substitute; report `MISMATCH — different edition`, list the differences and page-shift risk, and wait for approval.
 
-Anna's Archive is discovery-only unless a copy is clearly public domain, openly licensed, author-released, publisher-released for free, or otherwise legitimately and freely distributable. If legality is unclear, do not download; use metadata to search Brightspace, the configured institution library/Omni, OpenAthens, the publisher, DOI/official open access, repositories, or author-posted manuscripts. Never pay without explicit user confirmation.
+Anna's Archive is discovery-only unless a copy is clearly public domain, openly licensed, author-released, publisher-released for free, or otherwise legitimately and freely distributable. If legality is unclear, do not download; use metadata to search Brightspace, the configured institution library/Omni, OpenAthens, the publisher, DOI/official open access, repositories, or author-posted manuscripts. Academia OS does not implement payments; agents must never infer payment authorization. Any future payment capability would require explicit student confirmation.
 
 Use these labels whenever ambiguity matters:
 
@@ -168,9 +168,9 @@ Use statuses `Not started`, `In progress`, `Ready for review`, `Ready to submit`
 
 Personal study preferences are customizable. Professor preferences may be adapted for private notes. Mandatory submission requirements and academic-integrity restrictions must remain visible. If the user asks to ignore one, explain the academic/grading risk and never imply that the resulting work is compliant.
 
-## Gmail and Google Calendar Integration
+## External-agent-owned email and calendar workflows
 
-Use the configured Google Workspace skill for Gmail/Calendar access when available. Check authentication before use. If authorization is unavailable, build and document the workflow but do not claim the integration is configured; do not fabricate audits or event changes.
+Academia OS does not connect to Gmail or Google Calendar. An authorized external agent may use its own email/calendar tools after the student grants the required permission. Read and write behavior, duplicate checks, verification, and reporting belong to that agent; saved Academia preferences describe desired setup but do not prove access or execution.
 
 For relevant forwarded university email: confirm relevance, identify the course, extract actionable changes, compare against current sources, and make updates only when something changed. Record meaningful changes in `Communications_Log.md`. Do not modify email without explicit approval.
 

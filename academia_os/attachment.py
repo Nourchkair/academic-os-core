@@ -208,9 +208,9 @@ def attach_workspace(
         semester=selected_semester,
     )
     if base:
-        # Preserve non-structural preferences and integration choices from a
-        # genuinely valid profile, while explicitly replacing identity/root data.
-        for section in ("preferences", "integrations", "automation", "acquisition", "privacy", "browser", "agents"):
+        # Preserve non-structural preferences and explicitly marked compatibility data
+        # from a genuinely valid profile, while replacing identity/root data.
+        for section in ("preferences", "acquisition", "privacy", "browser", "agents", "legacy_compatibility"):
             if isinstance(base.get(section), dict):
                 candidate[section] = copy.deepcopy(base[section])
         candidate = validate_config(candidate)

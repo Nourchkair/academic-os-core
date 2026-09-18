@@ -60,7 +60,7 @@ def interactive_manifest() -> dict[str, Any]:
     install = str(Path.home() / ".academic-os")
     current_semester = resolve_current_semester(timezone_name=timezone)
     manifest = {
-        "schema_version": 2,
+        "schema_version": 3,
         "student": {
             "name": _ask("Student name"),
             "institution": _ask("Institution"),
@@ -70,7 +70,6 @@ def interactive_manifest() -> dict[str, Any]:
             "semester": _ask("Current semester", current_semester),
             "timezone": timezone,
             "root_directory": root,
-            "school_portal": _ask("School portal name", "Not yet specified"),
         },
         "runtime": {"install_directory": install},
         "preferences": {
@@ -78,18 +77,6 @@ def interactive_manifest() -> dict[str, Any]:
             "preferred_format": _ask("Preferred format", "markdown"),
             "use_visuals": _yes_no("Use diagrams/visual models", True),
             "study_method": _ask("Study method", "active recall"),
-        },
-        "integrations": {
-            "gmail": _yes_no("Enable Gmail workflow", False),
-            "calendar": _yes_no("Enable Google Calendar workflow", False),
-            "drive": _yes_no("Enable Google Drive workflow", False),
-            "school_portal": _yes_no("Enable school-portal/browser workflow", False),
-        },
-        "automation": {
-            "daily_brief_enabled": _yes_no("Enable daily brief job", True),
-            "daily_brief_time": _ask("Daily brief time (HH:MM)", "09:00"),
-            "inbox_processor_enabled": _yes_no("Enable inbox processor job", True),
-            "inbox_interval_minutes": int(_ask("Inbox polling interval in minutes", "5")),
         },
         "acquisition": {
             "manual_import_enabled": True,
@@ -135,10 +122,10 @@ def main() -> int:
     )
     print(json.dumps(result, indent=2, ensure_ascii=False))
     print("\nNext steps:")
-    print("1. Review the generated HANDOFF.md in the install directory.")
-    print("2. Authorize Google services directly in the user's own browser if enabled.")
-    print("3. Sign into the school portal manually; never enter credentials into this wizard.")
-    print("4. Run verify.py before enabling cron jobs.")
+    print("1. Review the generated HANDOFF.md and Agent Setup Playbooks in the install directory.")
+    print("2. Save desired Daily Academic Brief settings with `academia workflow set`; this changes only local preferences.")
+    print("3. Ask an authorized external agent to implement any selected playbook and request the required permissions directly.")
+    print("4. Run verify.py; no Academia scheduler or external account connection is enabled by this installer.")
     return 0
 
 

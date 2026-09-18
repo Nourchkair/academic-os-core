@@ -4,7 +4,7 @@ This file is adapter-specific. Academia OS core does not require Hermes or Chrom
 
 ## Safe retrieval sequence
 
-For a user-approved request such as `Fetch Brightspace — [course] — Week [N]`:
+For a student-approved request such as `Ask an authorized external agent to inspect course sources — [course] — Week [N]`:
 
 1. Resolve the exact course folder and read its `README.md`, `USER_OVERRIDES.md`, `Course_Context.md`, and `Course_Status.md`.
 2. Run the optional Hermes adapter's visible-browser preflight. The adapter may use `academic_os_brightspace_browser.py ensure` when installed. Confirm it identifies the user's real visible Chromium-family profile and never continue with a clean automation-only profile.

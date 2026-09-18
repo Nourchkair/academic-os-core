@@ -133,7 +133,7 @@ class AcademicOSApp(tk.Tk):
 
     def show_welcome(self) -> None:
         body = self._clear_body()
-        self._header(body, "Local academic workspace", "Your University system, without the technical setup", "The app creates the folders, rules, safe automation, and dashboard locally. You choose what to connect; passwords and MFA codes never go into the app.")
+        self._header(body, "Local academic workspace", "Your academic workspace, without the technical setup", "The app creates your local folders, rules, and dashboard. Agent Setup Playbooks describe desired workflows; an authorized external agent owns any accounts, permissions, and scheduling.")
         card = ttk.Frame(body, style="Panel.TFrame", padding=28)
         card.pack(fill="x", pady=(30, 18))
         ttk.Label(card, text="What happens next", style="PanelHeading.TLabel").pack(anchor="w")
@@ -142,7 +142,7 @@ class AcademicOSApp(tk.Tk):
             "2. You choose where your local workspace should live.",
             "3. We detect your computer's time zone for you.",
             "4. We create your private dashboard and course template.",
-            "5. You connect Google or your school portal later, on your own computer.",
+            "5. You can choose an Agent Setup Playbook and ask an authorized external agent to implement it.",
         ]
         ttk.Label(card, text="\n".join(steps), style="PanelBody.TLabel", justify="left").pack(anchor="w", pady=(14, 0))
         buttons = ttk.Frame(body, style="App.TFrame")
@@ -191,13 +191,6 @@ class AcademicOSApp(tk.Tk):
             "semester": tk.StringVar(value=str((existing_config or {}).get("academic", {}).get("semester", resolve_current_semester()))),
             "root": tk.StringVar(value=str((existing_config or {}).get("academic", {}).get("root_directory", Path.home() / "Desktop" / "University OS"))),
             "timezone": tk.StringVar(value=friendly_timezone_label(str((existing_config or {}).get("academic", {}).get("timezone", detect_local_timezone() or "UTC")))),
-            "school_portal": tk.StringVar(value=str((existing_config or {}).get("academic", {}).get("school_portal", "Brightspace"))),
-            "gmail": tk.BooleanVar(value=bool((existing_config or {}).get("integrations", {}).get("gmail", False))),
-            "calendar": tk.BooleanVar(value=bool((existing_config or {}).get("integrations", {}).get("calendar", False))),
-            "drive": tk.BooleanVar(value=bool((existing_config or {}).get("integrations", {}).get("drive", False))),
-            "school_portal_enabled": tk.BooleanVar(value=bool((existing_config or {}).get("integrations", {}).get("school_portal", False))),
-            "daily_brief": tk.BooleanVar(value=bool((existing_config or {}).get("automation", {}).get("daily_brief_enabled", True))),
-            "inbox_processor": tk.BooleanVar(value=bool((existing_config or {}).get("automation", {}).get("inbox_processor_enabled", True))),
         }
         ttk.Label(left, text="Your profile", style="PanelHeading.TLabel").pack(anchor="w", pady=(0, 14))
         self._field(left, "Your name", self.setup_vars["name"])
@@ -229,13 +222,9 @@ class AcademicOSApp(tk.Tk):
         self.folder_results: list[Any] = []
         ttk.Label(right, text="For a fresh workspace, choose a new or empty location. For an existing workspace, double-click a detected Academic OS folder. Older messy material can be imported later through the migration screen.", style="PanelMuted.TLabel", wraplength=390).pack(anchor="w", pady=(2, 14))
 
-        ttk.Label(right, text="Optional connections", style="PanelHeading.TLabel").pack(anchor="w", pady=(0, 8))
-        for label, key in (("Gmail", "gmail"), ("Google Calendar", "calendar"), ("Google Drive", "drive"), ("School portal / browser handoff", "school_portal_enabled")):
-            ttk.Checkbutton(right, text=label, variable=self.setup_vars[key]).pack(anchor="w")
-        self._field(right, "School portal name", self.setup_vars["school_portal"])
-        ttk.Label(right, text="These choices only prepare the workflow. You authorize each account later in your own browser.", style="PanelMuted.TLabel", wraplength=390).pack(anchor="w", pady=(0, 8))
-        ttk.Checkbutton(right, text="Prepare the daily brief", variable=self.setup_vars["daily_brief"]).pack(anchor="w")
-        ttk.Checkbutton(right, text="Prepare inbox monitoring", variable=self.setup_vars["inbox_processor"]).pack(anchor="w")
+        ttk.Label(right, text="Agent Setup Playbooks", style="PanelHeading.TLabel").pack(anchor="w", pady=(0, 8))
+        ttk.Label(right, text="Choose desired workflows in the modern dashboard and save My playbook preferences locally. An authorized external agent—not Academia OS—decides which tools it can use, asks for permission, and owns any Gmail, Calendar, Drive, course-platform, browser, or recurring-schedule setup.", style="PanelBody.TLabel", wraplength=390).pack(anchor="w")
+        ttk.Label(right, text="Saving a preference does not connect an account, start an automation, or grant access. Use `academia agent playbooks --json` and `academia workflow show daily_academic_brief --json` for the portable setup contract.", style="PanelMuted.TLabel", wraplength=390).pack(anchor="w", pady=(10, 0))
 
         footer = ttk.Frame(body, style="App.TFrame")
         footer.pack(fill="x", pady=(14, 0))
@@ -305,13 +294,6 @@ class AcademicOSApp(tk.Tk):
                     "academic.semester": semester,
                     "academic.timezone": timezone,
                     "academic.root_directory": root,
-                    "academic.school_portal": values["school_portal"].get().strip() or "Not yet specified",
-                    "integrations.gmail": bool(values["gmail"].get()),
-                    "integrations.calendar": bool(values["calendar"].get()),
-                    "integrations.drive": bool(values["drive"].get()),
-                    "integrations.school_portal": bool(values["school_portal_enabled"].get()),
-                    "automation.daily_brief_enabled": bool(values["daily_brief"].get()),
-                    "automation.inbox_processor_enabled": bool(values["inbox_processor"].get()),
                 },
                 approve_structural=True,
             )
@@ -319,7 +301,7 @@ class AcademicOSApp(tk.Tk):
             return validate_manifest(candidate)
         return validate_manifest(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "student": {
                     "name": values["name"].get().strip(),
                     "institution": values["institution"].get().strip(),
@@ -329,14 +311,9 @@ class AcademicOSApp(tk.Tk):
                     "semester": semester,
                     "timezone": timezone,
                     "root_directory": root,
-                    "school_portal": values["school_portal"].get().strip() or "Not yet specified",
                 },
                 "runtime": {"install_directory": str(Path.home() / ".academic-os")},
                 "preferences": {"explanation_style": "detailed", "preferred_format": "markdown", "use_visuals": True, "study_method": "active recall"},
-                "integrations": {
-                    "gmail": bool(values["gmail"].get()), "calendar": bool(values["calendar"].get()), "drive": bool(values["drive"].get()), "school_portal": bool(values["school_portal_enabled"].get())
-                },
-                "automation": {"daily_brief_enabled": bool(values["daily_brief"].get()), "daily_brief_time": "09:00", "inbox_processor_enabled": bool(values["inbox_processor"].get()), "inbox_interval_minutes": 5},
                 "acquisition": {"manual_import_enabled": True, "watched_folders": [], "browser_companion_enabled": False, "browser_access_enabled": False, "advanced_browser_enabled": False, "allowed_sites": []},
                 "privacy": {"browser_access_enabled": False, "allowed_sites": [], "dedicated_profile_recommended": True},
                 "browser": {"name": "auto", "user_data_dir": "", "profile_directory": "", "access_enabled": False, "allowed_sites": []},
@@ -528,8 +505,8 @@ class AcademicOSApp(tk.Tk):
         today_header.columnconfigure(0, weight=1)
         ttk.Label(today_header, text="Today", style="CardHeading.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Button(today_header, text="Open dashboard", style="Ghost.TButton", command=lambda: self._open_today(dashboard)).grid(row=0, column=1, sticky="e")
-        ttk.Label(today, text="Your latest local brief and next focus area.", style="CardMuted.TLabel").grid(row=1, column=0, sticky="nw", pady=(4, 10))
-        preview = dashboard["today_preview"] or "No daily brief has been generated yet. Your priorities will appear here after the first brief run."
+        ttk.Label(today, text="Latest local brief, if an authorized external agent has produced one.", style="CardMuted.TLabel").grid(row=1, column=0, sticky="nw", pady=(4, 10))
+        preview = dashboard["today_preview"] or "No daily brief has been produced yet. Choose the Daily Academic Brief playbook and ask an authorized external agent if you want this view populated."
         preview_box = tk.Text(today, height=8, background="#0d1727", foreground=self.TEXT, insertbackground=self.TEXT, borderwidth=0, highlightthickness=0, wrap="word", padx=13, pady=12, font=("SF Pro Text", 10), relief="flat")
         preview_box.insert("1.0", preview)
         preview_box.configure(state="disabled")
@@ -570,13 +547,12 @@ class AcademicOSApp(tk.Tk):
         ttk.Label(health, text="Workspace health", style="CardHeading.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(health, text="Your local structure is available and ready for review.", style="CardMuted.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 0))
         ttk.Button(health, text="Run verification", style="Ghost.TButton", command=self._run_verification).grid(row=0, column=1, rowspan=2, sticky="e", padx=(12, 0))
-        connections_outer, connections = self._card(footer, padding=14)
-        connections_outer.grid(row=0, column=1, sticky="ew", padx=(8, 0))
-        configured = [label for label, key in (("Gmail", "gmail"), ("Calendar", "calendar"), ("Drive", "drive"), ("School portal", "school_portal")) if dashboard["integrations"].get(key)]
-        connection_state = "Prepared: " + ", ".join(configured) if configured else "No external accounts selected yet"
-        ttk.Label(connections, text="Connections", style="CardHeading.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(connections, text=connection_state, style="CardMuted.TLabel", wraplength=270).grid(row=1, column=0, sticky="w", pady=(4, 0))
-        ttk.Button(connections, text="Settings", style="Ghost.TButton", command=self.show_setup).grid(row=0, column=1, rowspan=2, sticky="e", padx=(12, 0))
+        playbooks_outer, playbooks = self._card(footer, padding=14)
+        playbooks_outer.grid(row=0, column=1, sticky="ew", padx=(8, 0))
+        playbooks.columnconfigure(0, weight=1)
+        ttk.Label(playbooks, text="Agent Setup Playbooks", style="CardHeading.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(playbooks, text="Desired workflows stay local as preferences. An authorized external agent owns any accounts, tools, permissions, and recurring schedule.", style="CardMuted.TLabel", wraplength=270).grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Button(playbooks, text="Open setup", style="Ghost.TButton", command=self.show_setup).grid(row=0, column=1, rowspan=2, sticky="e", padx=(12, 0))
 
     def _stat_card(self, parent: ttk.Frame, title: str, value: str, caption: str, column: int) -> None:
         card = ttk.Frame(parent, style="Panel.TFrame", padding=16)

@@ -6,7 +6,7 @@ Keep entries lightweight. Calendar writes require confirmation; read-only audits
 
 | Date | Event | Action | Notes |
 |---|---|---|---|
-| — | No events audited | Not run | Google Calendar authorization has not been verified |
+| — | No events audited | Not run | No external agent calendar report has been provided |
 
 ## Entry format
 

@@ -72,7 +72,7 @@ The agent interface is the primary product interface for authorized automation. 
 
 `artifacts.py` owns the safe generated-material boundary. `academia artifact create` can write only Markdown under a recognized course’s lazy `06_KNOWLEDGE/AI_GENERATED/` directory. Each record is `AI-GENERATED`, `authoritative: false`, source-linked when the kind is source-derived, and stored in `.academia/artifacts.json` for library/dashboard visibility. Course identifiers accept the canonical ID, code, or exact course/display name. Source references are validated structurally: a course subtree records its actual course ID, a semester-level `00_INBOX` source records `course_id: null`, and files outside recognized academic locations are rejected. There is no arbitrary destination, original-file overwrite, or create/update ambiguity. This pass intentionally implements create-only semantics.
 
-`academia_os.config` is the only canonical configuration model. It owns schema version 2, defaults, validation, atomic serialization, and v1 migration. The installer, CLI, desktop compatibility app, and adapters consume it. Hermes is an optional `agents.hermes` section, not a required core path.
+`academia_os.config` is the only canonical configuration model. It owns schema version 3, defaults, validation, atomic serialization, and v1/v2 migration. The installer, CLI, desktop compatibility app, and adapters consume it. Hermes is an optional `agents.hermes` adapter section, not a required core path. Pre-playbook integration/automation values are moved to `legacy_compatibility` and are never fresh-install defaults.
 
 The migration engine is also shared across interfaces. `installer/migration.py` creates a hash-verified, semester-aware plan, while `academia migration plan/status/execute` is the stable agent/Tauri contract. The React/Tauri migration view never reimplements routing: it selects items and sends explicit copy or confirmed-move commands to the CLI. Plans, reports, and Markdown review artifacts live under the runtime directory; the academic workspace remains the readable source of truth. Copy is the default, unknown material stays identifiable under `LEGACY_IMPORT`, and unsafe/operational paths are rejected.
 
@@ -100,7 +100,7 @@ The Settings dashboard renders each playbook as an expandable guide plus a reusa
 
 ## Action safety
 
-`ActionStore` represents proposed, approved, executed, verified, rejected, and failed actions. School submissions, school-account messaging, payments, and authentication are hard-prohibited. Calendar, file, and configuration changes require explicit approval according to their policy.
+`ActionStore` represents proposed, approved, executed, verified, rejected, and failed actions. School submissions, school-account messaging, and authentication are hard-prohibited. Academia OS does not implement payments; agents must never infer payment authorization, and any future payment capability would require explicit student confirmation. Calendar, file, and configuration changes require explicit approval according to their policy.
 
 ## Optional Hermes boundary
 

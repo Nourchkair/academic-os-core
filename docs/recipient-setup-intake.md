@@ -25,13 +25,14 @@ Complete this form before running the local wizard. Do **not** enter passwords, 
 - Preferred essay workflow:
 - Any durable private-study preferences:
 
-## Integrations to configure later on the recipient's computer
+## Desired workflows
 
-- Gmail: [yes/no]
-- Google Calendar: [yes/no]
-- Google Drive: [yes/no]
-- School portal/browser handoff: [yes/no]
-- School portal name:
+- Agent Setup Playbooks to review:
+- Daily Academic Brief preferences (time, cadence, detail, optional sources):
+- Custom instructions for the implementing agent:
+- Notes for external setup/verification:
+
+Playbook preferences are local desired configuration only. They do not connect Gmail, Calendar, Drive, a course portal, a browser, or a scheduler.
 
 ## Course initialization
 
@@ -48,4 +49,4 @@ The system should create course facts from these sources. It should not invent m
 
 ## Authorization boundary
 
-The recipient signs into Google and the school portal directly on their own computer. The builder does not receive or store the recipient's passwords, OAuth tokens, browser cookies, or MFA codes.
+If the student chooses an external agent workflow, the student authorizes that agent directly on their own computer. Academia OS and the builder do not receive or store passwords, OAuth tokens, browser cookies, or MFA codes.

@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "student": {
     "name": "Example Student",
     "institution": "Example University",
@@ -8,8 +8,7 @@
   "academic": {
     "semester": "Fall 2026",
     "timezone": "UTC",
-    "root_directory": "~/Documents/Academia OS",
-    "school_portal": "Not yet specified"
+    "root_directory": "~/Documents/Academia OS"
   },
   "runtime": {
     "install_directory": "~/.academic-os"
@@ -19,18 +18,6 @@
     "preferred_format": "markdown",
     "use_visuals": true,
     "study_method": "active recall"
-  },
-  "integrations": {
-    "gmail": false,
-    "calendar": false,
-    "drive": false,
-    "school_portal": false
-  },
-  "automation": {
-    "daily_brief_enabled": true,
-    "daily_brief_time": "09:00",
-    "inbox_processor_enabled": true,
-    "inbox_interval_minutes": 5
   },
   "acquisition": {
     "manual_import_enabled": true,

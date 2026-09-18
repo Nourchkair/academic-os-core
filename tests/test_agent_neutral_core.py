@@ -23,25 +23,30 @@ from academia_os.workspace import build_workspace_snapshot
 
 def minimal_config(tmp_path: Path) -> dict:
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "student": {"name": "Alex Student", "institution": "Example University", "program": "History"},
         "academic": {
             "semester": "Fall 2026",
             "timezone": "UTC",
             "root_directory": str(tmp_path / "University OS"),
-            "school_portal": "Not yet specified",
         },
         "runtime": {"install_directory": str(tmp_path / ".academic-os")},
         "preferences": {"explanation_style": "detailed", "preferred_format": "markdown", "use_visuals": True, "study_method": "active recall"},
-        "integrations": {"gmail": False, "calendar": False, "drive": False, "school_portal": False},
-        "automation": {"daily_brief_enabled": True, "daily_brief_time": "09:00", "inbox_processor_enabled": True, "inbox_interval_minutes": 5},
         "acquisition": {"manual_import_enabled": True, "watched_folders": [], "browser_companion_enabled": False, "browser_access_enabled": False, "advanced_browser_enabled": False, "allowed_sites": []},
         "privacy": {"browser_access_enabled": False, "allowed_sites": [], "dedicated_profile_recommended": True},
         "agents": {"hermes": {"enabled": False, "profile": "default"}, "codex": {"enabled": False}, "claude": {"enabled": False}, "chatgpt": {"enabled": False}},
     }
 
 
-def test_v1_config_migrates_to_agent_neutral_v2_without_requiring_hermes(tmp_path: Path) -> None:
+def test_fresh_config_has_no_legacy_integration_or_automation_source_of_truth(tmp_path: Path) -> None:
+    normalized = validate_config(minimal_config(tmp_path))
+    assert normalized["schema_version"] == CURRENT_CONFIG_VERSION
+    assert "integrations" not in normalized
+    assert "automation" not in normalized
+    assert "school_portal" not in normalized["academic"]
+
+
+def test_v1_config_migrates_to_agent_neutral_v3_without_requiring_hermes(tmp_path: Path) -> None:
     legacy = {
         "schema_version": 1,
         "student": {"name": "Alex", "institution": "Example U", "program": "History"},
@@ -53,6 +58,9 @@ def test_v1_config_migrates_to_agent_neutral_v2_without_requiring_hermes(tmp_pat
     assert migrated["academic"]["semester"] == "Fall 2026"
     assert "hermes" not in migrated["runtime"]
     assert migrated["agents"]["hermes"]["enabled"] is False
+    assert migrated["legacy_compatibility"]["deprecated"] is True
+    assert migrated["legacy_compatibility"]["automation"]["daily_brief_time"] == "09:00"
+    assert "automation" not in migrated
     assert validate_config(migrated)["schema_version"] == CURRENT_CONFIG_VERSION
 
 

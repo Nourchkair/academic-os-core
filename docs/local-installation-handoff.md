@@ -39,11 +39,10 @@ The setup/settings screen loads the existing profile when present. It does not s
    python3 installer/verify.py {{INSTALL_ROOT}}/profile.json
    ```
 
-2. Review the profile and generated job specifications. Hermes scheduling is optional and should only be enabled if the user explicitly wants the Hermes adapter.
-3. Authorize selected Google services directly in the user’s own account, if enabled. Never send credentials to the builder or an agent.
-4. Log into any school site manually in the user’s chosen browser profile. Browser access is optional and read-only.
-5. Add authoritative course material only after confirming the course identity.
-6. Keep original syllabi, instructions, rubrics, and other academic sources preserved.
+2. Review the generated Agent Setup Playbooks and local workflow-preference record. Academia OS does not configure external accounts or start recurring schedules.
+3. If desired, ask an authorized external agent to implement a selected playbook. The agent must request Gmail/email, Calendar, Drive, course-platform/browser, or scheduler permissions through its own authorization flow and report what was actually configured and verified.
+4. Add authoritative course material only after confirming the course identity.
+5. Keep original syllabi, instructions, rubrics, and other academic sources preserved.
 
 ## Migration phase
 
@@ -69,14 +68,14 @@ academia migration execute --plan {{INSTALL_ROOT}}/migration/migration-plan.json
 
 The plan path and runtime directory are local operational state. Agents may inspect and suggest, but file changes still require the explicit `--apply` command; Move additionally requires `--confirm-move`.
 
-## Optional automation
+## External-agent-owned workflows
 
-Academia OS core exposes local job specifications and the retryable inbox lifecycle. If Hermes is explicitly enabled, the optional adapter can translate those specifications into Hermes commands. No core workflow requires Hermes, cron, a messaging platform, or a school account.
+Academia OS exposes local capabilities, Agent Setup Playbooks, and saved student preferences. It does not create or own a recurring Daily Brief scheduler. An authorized external agent may translate a selected playbook into its own scheduler or tools after student approval. No core workflow requires Hermes, cron, a messaging platform, or a school account.
 
 ## Important boundaries
 
 - This installation starts with no invented courses or deadlines.
-- Google and school-portal access belong to the recipient.
-- The school-portal helper is read-only and does not submit work, answer quizzes, post messages, or modify settings.
-- Do not place passwords, OAuth tokens, cookies, or API keys in the University directory or Git repository.
+- Google/email, Calendar, Drive, course-platform, browser, and scheduler access belong to the student's authorized external agent, if they choose one.
+- Any school-platform workflow is read-only and does not submit work, answer quizzes, post messages, or modify settings.
+- Do not place passwords, OAuth tokens, cookies, MFA codes, or API keys in the University directory or Git repository.
 - Template upgrades must be reviewed as migrations; do not overwrite personal academic files.

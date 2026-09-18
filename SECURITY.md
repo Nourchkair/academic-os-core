@@ -8,7 +8,9 @@ Academia OS is local-first. Its core remains useful without an agent, browser au
 - Never casually overwrite, delete, rename, or move academic material.
 - Keep `current-confirmed`, `likely`, `unverified`, and `historical` distinctions visible.
 - Keep `ORIGINAL`, `USER-CREATED`, `AI-GENERATED`, and `EXTERNAL` provenance visible.
-- Never submit academic work, send school-account messages, make payments, or authenticate as the user.
+- Never submit academic work or send school-account messages.
+- Academia OS does not implement payments. Agents must never infer payment authorization. Any future payment capability would require explicit student confirmation.
+- Never authenticate as the user.
 - Never read or store passwords, MFA codes, cookies, session tokens, or hidden API keys.
 - School websites are read-only in the current implementation.
 - Calendar changes and destructive/structural changes require explicit user approval.
@@ -22,7 +24,7 @@ The current Chromium capability is limited to explicit visible handoff. Firefox 
 
 ## Source legality and verification
 
-Prefer university library, Omni/OpenAthens, publisher, DOI/open-access, institutional repository, or author-released sources. Discovery-only results do not authorize downloading unclear copies. Never pay without explicit confirmation. Verify that a retrieved source matches the requested edition and retain `EXACT MATCH — HIGH CONFIDENCE`, `PROBABLE MATCH — VERIFY MANUALLY`, `MISMATCH`, or `NOT RETRIEVED` outcomes.
+Prefer university library, Omni/OpenAthens, publisher, DOI/open-access, institutional repository, or author-released sources. Discovery-only results do not authorize downloading unclear copies. Academia OS does not implement payments; agents must never infer payment authorization. Any future payment capability would require explicit student confirmation. Verify that a retrieved source matches the requested edition and retain `EXACT MATCH — HIGH CONFIDENCE`, `PROBABLE MATCH — VERIFY MANUALLY`, `MISMATCH`, or `NOT RETRIEVED` outcomes.
 
 ## Verification scopes
 

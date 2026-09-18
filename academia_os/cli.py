@@ -145,7 +145,7 @@ def _create_workspace(args: argparse.Namespace) -> dict[str, Any]:
     profile_path = _profile_path(args)
     manifest = validate_config(
         {
-            "schema_version": 2,
+            "schema_version": 3,
             "student": {"name": args.name.strip(), "institution": args.institution.strip(), "program": args.program.strip()},
             "academic": {
                 "root_directory": str(root),

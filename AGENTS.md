@@ -185,7 +185,7 @@ Never:
 
 - submit an assignment, quiz, exam, discussion, form, or other academic work;
 - send messages through a university/school account or contact professors, students, TAs, or staff;
-- make a payment;
+- Academia OS does not implement payments. Agents must never infer payment authorization. Any future payment capability would require explicit student confirmation.
 - authenticate as the user or collect passwords, MFA codes, cookies, session tokens, or hidden API keys;
 - casually overwrite or delete academic files;
 - invent courses, deadlines, readings, editions, or institutional facts;

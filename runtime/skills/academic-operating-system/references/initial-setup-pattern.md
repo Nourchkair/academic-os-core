@@ -12,7 +12,7 @@ Use this when the requested academic root is sparse or empty:
 6. Make all dashboards and context files explicitly say `Not yet known` when source data is absent.
 7. Test relative links from the locations where files will actually be read after template duplication. A root-level course README and an `01_COURSE/README.md` have different relative depths to the root rules file.
 8. Run a structural audit after writing, then correct path or layout inconsistencies and rerun it.
-9. Check integration authorization separately. Document Gmail/Calendar workflows and the minimum OAuth action when unavailable; do not claim an audit or write occurred.
+9. Review the Agent Setup Playbook and local workflow preferences. External agents perform their own provider checks; do not claim Gmail/Calendar access, an audit, or a write occurred unless that agent reports and verifies it.
 10. Perform conceptual dry runs for inbox processing, assignment intake, changed deadlines, forwarded email, week study, exam preparation, essay/citation verification, weekly review, and structural repair.
 
 ## Useful verification assertions

@@ -7,7 +7,7 @@ import shlex
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from zoneinfo import available_timezones
 
 from academia_os.config import CURRENT_CONFIG_VERSION, hermes_config, migrate_config, runtime_directory, validate_config as validate_canonical_config
@@ -63,7 +63,7 @@ def profile_tokens(manifest: dict[str, Any]) -> dict[str, str]:
         "INSTALL_ROOT": str(runtime_directory(normalized)),
         "HERMES_HOME": str(Path(str(hermes_home)).expanduser()) if hermes_home else "",
         "HERMES_PROFILE": str(hermes_profile),
-        "SCHOOL_PORTAL": str(_get(normalized, "academic", "school_portal", default="configured school portal")),
+        "SCHOOL_PORTAL": str(_get(normalized, "legacy_compatibility", "school_portal_name", default="not configured")),
     }
 
 
@@ -127,26 +127,37 @@ def _ensure_tree(source_root: Path, destination_root: Path, manifest: dict[str, 
 def _cron_time(value: str) -> tuple[str, str]:
     match = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", value)
     if not match:
-        raise ValueError("automation.daily_brief_time must use HH:MM")
+        raise ValueError("legacy compatibility automation.daily_brief_time must use HH:MM")
     hour, minute = match.groups()
     return str(int(minute)), str(int(hour))
 
 
 def build_cron_specs(manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return neutral local job specifications; an adapter decides how to schedule them."""
+    """Return deprecated neutral jobs only for profiles carrying legacy automation state."""
     validate_manifest(manifest)
+    raw_compatibility = manifest.get("legacy_compatibility")
+    compatibility = cast(dict[str, Any], raw_compatibility) if isinstance(raw_compatibility, dict) else {}
+    raw_automation = compatibility.get("automation")
+    automation = cast(dict[str, Any], raw_automation) if isinstance(raw_automation, dict) else None
+    if automation is None:
+        return []
     academic_root = str(Path(str(_get(manifest, "academic", "root_directory"))).expanduser())
     install_root = runtime_directory(manifest)
     hermes = hermes_config(manifest)
     legacy_hermes = manifest.get("hermes", {}) if isinstance(manifest.get("hermes"), dict) else {}
     profile = str(hermes.get("profile") or legacy_hermes.get("profile", ""))
     specs: list[dict[str, Any]] = []
-    automation = manifest.get("automation", {})
     if bool(automation.get("daily_brief_enabled", True)):
         minute, hour = _cron_time(str(automation.get("daily_brief_time", "09:00")))
         specs.append(
             {
                 "name": "Academic OS — Daily Brief",
+                "compatibility": {
+                    "deprecated": True,
+                    "source": "legacy_compatibility.automation",
+                    "execution_owner": "external_agent",
+                    "note": "Compatibility only. New installs use the daily_academic_brief Agent Setup Playbook and workflow preferences.",
+                },
                 "schedule": f"{minute} {hour} * * *",
                 "deliver": "local",
                 "profile": profile,
@@ -164,10 +175,16 @@ def build_cron_specs(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     if bool(automation.get("inbox_processor_enabled", True)):
         interval = int(automation.get("inbox_interval_minutes", 5))
         if interval < 1:
-            raise ValueError("automation.inbox_interval_minutes must be at least 1")
+            raise ValueError("legacy compatibility automation.inbox_interval_minutes must be at least 1")
         specs.append(
             {
                 "name": "Academic OS — Inbox Processor",
+                "compatibility": {
+                    "deprecated": True,
+                    "source": "legacy_compatibility.automation",
+                    "execution_owner": "external_agent",
+                    "note": "Compatibility only. New installs do not enable a recurring Academia scheduler.",
+                },
                 "schedule": f"every {interval}m",
                 "deliver": "local",
                 "profile": profile,
@@ -287,12 +304,13 @@ def initialize_installation(
         env_path.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
     _write_runtime_files(manifest, repo_root=repo_root)
     specs = build_cron_specs(manifest)
-    _write_json(install_root / "generated_jobs.json", {"schema_version": 1, "jobs": specs})
-    _write_json(install_root / "generated_cron_jobs.json", {"version": 1, "jobs": specs})
+    if specs:
+        _write_json(install_root / "generated_jobs.json", {"schema_version": 1, "jobs": specs})
+        _write_json(install_root / "generated_cron_jobs.json", {"version": 1, "jobs": specs})
 
     hermes_enabled = bool(hermes.get("enabled") and hermes_home)
     cron_path = install_root / "install_cron.sh"
-    if hermes_enabled and (not cron_path.exists() or allow_existing):
+    if hermes_enabled and specs and (not cron_path.exists() or allow_existing):
         cron_lines = [
             "#!/bin/sh",
             "set -eu",

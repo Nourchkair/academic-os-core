@@ -4,16 +4,12 @@
 
 Turn the current Hermes-coupled Python/Tkinter system into a local-first, agent-agnostic academic operating system while preserving the existing academic safety, provenance, non-destructive migration, and read-only school-access principles.
 
-## Current baseline
+## Historical baseline
 
-- Python installer/core, runtime scripts, migration engine, and Tkinter desktop wrapper.
-- 22 passing Python tests.
-- No supported installable Python package or universal CLI.
-- Hermes paths, cron generation, skill installation, and inbox state are embedded in core/runtime behavior.
-- Config schema and Python validation can drift.
-- Inbox gate persists signatures before downstream processing succeeds.
-- No structured persisted Review Queue or Activity model.
-- No React/TypeScript/Tauri foundation.
+- The original implementation combined a Python installer/core, runtime scripts, migration engine, and Tkinter compatibility wrapper.
+- Earlier releases embedded Hermes paths, legacy cron generation, skill installation, and inbox state in compatibility behavior.
+- The current architecture keeps those paths optional and adapter-scoped; fresh config uses Agent Setup Playbooks plus local workflow preferences.
+- The plan below records the refactor history and remaining release work; it is not a second runtime configuration source.
 
 ## Current implementation status
 
@@ -44,7 +40,7 @@ The live user workspace is never a repository fixture. Product tests use tempora
 agents/
   Hermes / Codex / Claude / ChatGPT / future adapters
           |
-adapters/  (optional integrations; no core dependency)
+adapters/  (optional external-agent adapters; no core dependency)
           |
 interface/
   academia CLI + stable JSON contracts + future Tauri commands
@@ -122,7 +118,8 @@ workspace files + rebuildable .academia/ state/index
 - Existing user files and course content are never overwritten or deleted by migration/refactor.
 - Existing schema-version-1 profiles remain readable through migration.
 - Hermes remains usable when detected but is never required for core installation or CLI operation.
-- No academic submission, school-account message, payment, or destructive action is implemented.
+- No academic submission, school-account message, or destructive action is implemented.
+- Academia OS does not implement payments. Agents must never infer payment authorization. Any future payment capability would require explicit student confirmation.
 - Browser access remains opt-in and allowlist-oriented; manual import and watched folders work without browser access.
 - Unsupported integrations are represented as unavailable/planned, not connected.
 

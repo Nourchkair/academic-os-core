@@ -4,7 +4,7 @@ Record only relevant forwarded university/course communications that change cour
 
 ## Log
 
-No relevant communications recorded yet. Gmail authorization has not been verified.
+No relevant communications recorded yet. No external agent email report has been provided.
 
 ## Entry format
 

@@ -70,7 +70,7 @@ def capability_report() -> dict[str, Any]:
         "prohibited": [
             {"id": "school_submission", "label": "Submit coursework, quizzes, exams, forms, or discussions"},
             {"id": "school_message", "label": "Send school-account messages or contact academic staff/students"},
-            {"id": "payment", "label": "Make payments"},
+            {"id": "payment", "label": "Payment capability is not implemented; agents must never infer payment authorization"},
             {"id": "authentication", "label": "Authenticate as the user or handle passwords/MFA"},
             {"id": "credential_access", "label": "Read cookies, session tokens, API keys, or hidden credentials"},
             {"id": "arbitrary_original_overwrite", "label": "Overwrite ORIGINAL or EXTERNAL academic material through the artifact API"},

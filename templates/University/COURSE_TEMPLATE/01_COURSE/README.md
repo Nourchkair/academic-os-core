@@ -38,11 +38,11 @@ Use the authority hierarchy in `../../ACADEMIC_OS_RULES.md`. Generated summaries
 
 ## Calendar and communications
 
-Search Calendar for an equivalent before any create/update. Avoid duplicates. Calendar writes require confirmation. Process only relevant university/course communications when Gmail is authorized and record meaningful changes in `Communications_Log.md`. Never modify email without explicit approval.
+An authorized external agent may read selected calendar or forwarded academic communications after the student grants access through that agent. Academia OS does not connect to Calendar or Gmail. Record any agent-reported context and source in the local logs; calendar writes require confirmation and duplicate checks, and email must never be modified or sent by this workspace.
 
-## School-portal acquisition
+## Course-platform acquisition
 
-If school-site acquisition is explicitly enabled, use the selected visible browser profile through the configured acquisition adapter. Manual import and watched folders work without browser access. The current browser workflow is limited to optional visible Chromium-family handoff; Firefox, Safari, and a browser companion are future adapters. The workflow is read-only: never enter or store passwords/MFA codes, read cookies, submit work, answer quizzes, post messages, or change settings. The handoff only moves new/changed supported downloads into this course's `00_INBOX`; the processing lifecycle owns classification and verification.
+If the student approves an external agent's course-platform workflow, that agent may use its own visible browser handoff. Manual import and watched folders work without browser access. The current browser workflow is limited to optional visible Chromium-family handoff; Firefox, Safari, and a browser companion are future adapters. Academia OS does not connect to Brightspace or another course portal. Any handoff is read-only: never enter or store passwords/MFA codes, read cookies, submit work, answer quizzes, post messages, or change settings. Accepted downloads enter this course's `00_INBOX`; the local processing lifecycle owns classification and verification.
 
 ## Standard commands
 

@@ -51,16 +51,16 @@ Each real course should be a direct child of the semester folder and should use 
 - `Check [assignment]`
 - `Semester review`
 - `What should I work on today?`
-- `Fetch Brightspace — [course] — [week/module]` when the configured school portal is Brightspace.
+- `Ask an authorized external agent to inspect course sources — [course] — [week/module]` when the student has approved that agent's course-platform/browser workflow.
 
-## Automation
+## Agent Setup Playbooks and workflow preferences
 
-`TODAY.md` is an AI-generated dashboard, not an academic source. The generated local installation contains parameterized cron definitions for a daily brief and a gated inbox processor. They deliver locally only; no messaging destination is copied from the builder.
+`TODAY.md` is an AI-generated dashboard, not an academic source. A student may choose the Daily Academic Brief playbook and save desired preferences under `.academia/workflow_preferences.json`. Academia OS does not create a scheduler or claim that a brief will run; an authorized external agent owns implementation, scheduling, delivery, and any optional source access.
 
-The inbox gate scans active course `00_INBOX/` folders, ignores the reusable template, records state outside this academic root, and emits `{"wakeAgent":false}` when no file changed. The school-portal handoff snapshots Downloads and moves only new/changed supported files into a verified course inbox. It does not submit work or handle credentials.
+The inbox gate scans active course `00_INBOX/` folders, ignores the reusable template, records state under rebuildable `.academia/` state, and emits `{"wakeAgent":false}` when no file changed. It is a local capability used by an agent or one-shot command, not a recurring Academia automation.
 
-## Integrations and credentials
+## External-agent access
 
-Google services must be authorized in the user's own browser/account. School-portal authentication must be completed manually in the user's visible browser. This system never asks for, stores, or records passwords, MFA codes, browser cookies, or OAuth tokens in this folder or repository.
+Gmail/email, Calendar, Drive, school portals, browser sessions, research services, and recurring schedules are external-agent capabilities. The student authorizes them directly through the chosen agent. This folder never stores passwords, MFA codes, browser cookies, OAuth tokens, or API keys. School-site work remains read-only and must never submit coursework, quizzes, exams, forms, or discussions, send school-account messages, or modify portal content.
 
-Read `ACADEMIC_OS_RULES.md` before changing academic material. Read `INTEGRATION_STATUS.md` for the current local authorization state and `VERIFICATION.md` for setup evidence.
+Read `ACADEMIC_OS_RULES.md` before changing academic material. Read `INTEGRATION_STATUS.md` for local capability and saved playbook intent, and `VERIFICATION.md` for local setup evidence.

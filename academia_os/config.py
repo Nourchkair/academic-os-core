@@ -12,7 +12,7 @@ from zoneinfo import available_timezones
 
 from .semester import resolve_current_semester
 
-CURRENT_CONFIG_VERSION = 2
+CURRENT_CONFIG_VERSION = 3
 SEMESTER_PATTERN = re.compile(r"^(Winter|Spring|Summer|Fall) [0-9]{4}$")
 
 
@@ -29,11 +29,9 @@ def _deep_merge(base: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any
 def _default_sections() -> dict[str, Any]:
     return {
         "student": {"name": "", "institution": "", "program": ""},
-        "academic": {"semester": "", "timezone": "UTC", "root_directory": "", "school_portal": "Not yet specified"},
+        "academic": {"semester": "", "timezone": "UTC", "root_directory": ""},
         "runtime": {"install_directory": str(Path.home() / ".academic-os")},
         "preferences": {"explanation_style": "detailed", "preferred_format": "markdown", "use_visuals": True, "study_method": "active recall"},
-        "integrations": {"gmail": False, "calendar": False, "drive": False, "school_portal": False},
-        "automation": {"daily_brief_enabled": True, "daily_brief_time": "09:00", "inbox_processor_enabled": True, "inbox_interval_minutes": 5},
         "acquisition": {"manual_import_enabled": True, "watched_folders": [], "browser_companion_enabled": False},
         "privacy": {"dedicated_profile_recommended": True},
         "browser": {"name": "auto", "user_data_dir": "", "profile_directory": "", "access_enabled": False, "allowed_sites": []},
@@ -70,6 +68,34 @@ def _path_string(value: Any, label: str) -> str:
     return str(Path(value).expanduser())
 
 
+def _move_legacy_product_fields(result: dict[str, Any], source_version: int) -> dict[str, Any]:
+    """Move pre-playbook ownership fields into an explicit compatibility namespace."""
+    legacy = copy.deepcopy(result.get("legacy_compatibility")) if isinstance(result.get("legacy_compatibility"), dict) else {}
+    captured: dict[str, Any] = {}
+    for section in ("integrations", "automation"):
+        value = result.pop(section, None)
+        if isinstance(value, dict):
+            captured[section] = value
+    academic = result.get("academic") if isinstance(result.get("academic"), dict) else {}
+    school_portal = academic.pop("school_portal", None)
+    if isinstance(school_portal, str) and school_portal.strip():
+        captured["school_portal_name"] = school_portal
+    if captured:
+        legacy.setdefault("deprecated", True)
+        legacy.setdefault("source", f"pre-playbook schema {source_version}")
+        legacy.setdefault("description", "Retained for migration and adapter compatibility only; not current Academia OS state.")
+        for key, value in captured.items():
+            legacy.setdefault(key, value)
+        result["legacy_compatibility"] = legacy
+    result["schema_version"] = CURRENT_CONFIG_VERSION
+    return result
+
+
+def _has_legacy_product_fields(data: dict[str, Any]) -> bool:
+    academic = data.get("academic") if isinstance(data.get("academic"), dict) else {}
+    return any(key in data for key in ("integrations", "automation")) or "school_portal" in academic
+
+
 def migrate_config(data: dict[str, Any], *, now: datetime | date | None = None) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("configuration must be a JSON object")
@@ -103,7 +129,7 @@ def migrate_config(data: dict[str, Any], *, now: datetime | date | None = None) 
             "allowed_sites": [],
         }
         result["privacy"] = {"browser_access_enabled": False, "allowed_sites": [], "dedicated_profile_recommended": True}
-        result["schema_version"] = CURRENT_CONFIG_VERSION
+    result = _move_legacy_product_fields(result, version)
     result = _normalize_browser_config(result)
     defaults = _default_sections()
     result = _deep_merge(result, defaults)
@@ -117,10 +143,10 @@ def validate_config(data: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("configuration must be a JSON object")
     version = data.get("schema_version")
-    if version == 1:
+    if not isinstance(version, int) or version < 1 or version > CURRENT_CONFIG_VERSION:
+        raise ValueError(f"unsupported configuration schema version: {version}")
+    if version != CURRENT_CONFIG_VERSION or _has_legacy_product_fields(data):
         data = migrate_config(data)
-    if version != CURRENT_CONFIG_VERSION and data.get("schema_version") != CURRENT_CONFIG_VERSION:
-        raise ValueError(f"schema_version must be {CURRENT_CONFIG_VERSION}")
     result = _normalize_browser_config(copy.deepcopy(data))
     result = _deep_merge(result, _default_sections())
     result = _normalize_browser_config(result)
@@ -145,11 +171,6 @@ def validate_config(data: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("academic and runtime directories cannot be filesystem root")
     if root == runtime or root in runtime.parents or runtime in root.parents:
         raise ValueError("academic and runtime directories must not contain one another")
-    interval = result["automation"].get("inbox_interval_minutes", 5)
-    if not isinstance(interval, int) or interval < 1:
-        raise ValueError("automation.inbox_interval_minutes must be at least 1")
-    if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", str(result["automation"].get("daily_brief_time", "09:00"))):
-        raise ValueError("automation.daily_brief_time must use HH:MM")
     result["academic"]["root_directory"] = str(Path(result["academic"]["root_directory"]).expanduser())
     result["runtime"]["install_directory"] = str(Path(result["runtime"]["install_directory"]).expanduser())
     return result

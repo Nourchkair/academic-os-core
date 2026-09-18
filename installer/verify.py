@@ -40,7 +40,11 @@ def verify_installation(profile_path: Path) -> dict[str, Any]:
         checked.append(str(path))
         if not path.is_file():
             failures.append(f"missing required file: {path}")
-    required_runtime = [install_root / "profile.json", install_root / "generated_jobs.json", install_root / "scripts" / "academic_os_inbox_gate.py", install_root / "academia_os" / "__init__.py"]
+    required_runtime = [install_root / "profile.json", install_root / "scripts" / "academic_os_inbox_gate.py", install_root / "academia_os" / "__init__.py"]
+    raw_legacy_compatibility = config.get("legacy_compatibility")
+    legacy_compatibility: dict[str, Any] = raw_legacy_compatibility if isinstance(raw_legacy_compatibility, dict) else {}
+    if isinstance(legacy_compatibility.get("automation"), dict):
+        required_runtime.extend([install_root / "generated_jobs.json", install_root / "generated_cron_jobs.json"])
     for path in required_runtime:
         checked.append(str(path))
         if not path.is_file():

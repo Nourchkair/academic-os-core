@@ -151,7 +151,8 @@ _RECIPES = (
         safety_rules=(
             "Read course sources only through the student's authorized external agent environment.",
             "Never submit assignments, quizzes, exams, or forms; post discussions; or send course messages.",
-            "Never change course settings, enrollment, payments, or other external records.",
+            "Never change course settings, enrollment, or other external records.",
+            "Academia OS does not implement payments; agents must never infer payment authorization.",
             "Never expose passwords, MFA codes, cookies, session tokens, or API keys to Academia OS.",
             "Preserve originals, provenance, source authority, and uncertainty during import.",
         ),

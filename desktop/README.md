@@ -28,7 +28,7 @@ python3 desktop/app.py
 python3 desktop/app.py --print-dashboard --profile ~/.academic-os/profile.json
 ```
 
-It can still discover workspaces, create or attach safely, import legacy files through the migration phase, show the dashboard, edit existing settings, and run health verification. Settings load the existing profile rather than starting from an empty wizard. Structural changes show a diff/impact confirmation and never silently rebuild or overwrite the workspace.
+It can still discover workspaces, create or attach safely, import legacy files through the migration phase, show the dashboard, edit local profile settings, and run health verification. Settings load the existing profile rather than starting from an empty wizard. Structural changes show a diff/impact confirmation and never silently rebuild or overwrite the workspace. The compatibility app does not configure Gmail, Calendar, Drive, Brightspace, browser sessions, or recurring jobs; its Agent Setup Playbooks panel points students to the local playbook/preferences contract and an authorized external agent.
 
 ## Development macOS bundle
 
@@ -46,4 +46,4 @@ This is a lightweight development bundle around the local Python compatibility a
 - **Tasks** — structured work with source and confidence labels.
 - **Library** — live, local inventory of readings, syllabi, notes, references, and imported material, with clickable category filters.
 - **Review** — durable uncertain/approval-required items plus activity history.
-- **Settings** — workspace, import policy, external-access guard, and agent/scheduler ownership summaries; raw paths and runtime details remain advanced concepts.
+- **Settings** — local profile/workspace settings and Agent Setup Playbooks; external accounts, browser sessions, permissions, and schedules remain outside Academia OS.
