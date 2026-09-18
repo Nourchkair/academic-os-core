@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, WorkflowPreferencesPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
+import type { ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
@@ -187,9 +187,11 @@ export const api = {
   playbook: (playbookId: string) => command<AgentSetupPlaybook>('agent', ['playbook', playbookId]),
   workflowPreferences: () => command<WorkflowPreferencesPayload>('workflow', ['preferences']),
   workflowShow: (workflowId: string) => command<WorkflowShowPayload>('workflow', ['show', workflowId]),
-  workflowSet: (workflowId: string, preferences: Record<string, unknown>, customInstructions: string, externalSetupNotes: string, updatedBy = 'user') => {
+  workflowReset: (workflowId: string) => command<WorkflowResetPayload>('workflow', ['reset', workflowId]),
+  workflowSet: (workflowId: string, preferences: Record<string, unknown>, customInstructions: string, externalSetupNotes: string, updatedBy = 'user', replacePreferences = false) => {
     const args = ['set', workflowId]
-    for (const [key, value] of Object.entries(preferences)) args.push('--set', `${key}=${JSON.stringify(value)}`)
+    if (replacePreferences) args.push('--preferences-json', JSON.stringify(preferences), '--replace-preferences')
+    else for (const [key, value] of Object.entries(preferences)) args.push('--set', `${key}=${JSON.stringify(value)}`)
     args.push('--custom-instructions', customInstructions, '--external-setup-notes', externalSetupNotes, '--updated-by', updatedBy)
     return command<WorkflowSetPayload>('workflow', args)
   },

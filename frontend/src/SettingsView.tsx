@@ -18,6 +18,7 @@ type WorkflowCardProps = {
   workflow: AgentSetupPlaybook
   saved: WorkflowPreferenceRecord | null
   onSaved: (record: WorkflowPreferenceRecord) => void
+  onReset: (workflowId: string) => void
 }
 
 export function SettingsView({ status, onSaved }: SettingsViewProps) {
@@ -127,19 +128,19 @@ export function SettingsView({ status, onSaved }: SettingsViewProps) {
       <section className="settings-actions"><button className="secondary-button" onClick={() => void previewChanges()} disabled={busy}>{busy ? 'Preparing…' : 'Preview changes'}</button>{preview && <button className="primary-button" onClick={() => void applyChanges()} disabled={busy}>{structuralPreview ? 'Approve and apply structural changes' : 'Apply settings'}</button>}</section>
       {preview && <SettingsPreviewCard preview={preview} />}
     </> : <div className="loading-card">Loading your local settings…</div>}
-    <EnhanceSetup playbooks={playbooks} savedPreferences={savedPreferences} onSaved={(record) => setSavedPreferences((current) => ({ ...current, [record.workflow_id]: record }))} />
+    <EnhanceSetup playbooks={playbooks} savedPreferences={savedPreferences} onSaved={(record) => setSavedPreferences((current) => ({ ...current, [record.workflow_id]: record }))} onReset={(workflowId) => setSavedPreferences((current) => { const next = { ...current }; delete next[workflowId]; return next })} />
     <details className="advanced-card"><summary><span className="eyebrow">Advanced</span><strong>Technical details</strong></summary><p>Most users do not need these controls.</p><div className="advanced-grid"><Info label="Profile path" value={status?.profile || 'Unavailable'} /><Info label="Runtime path" value={stringAt(config, ['runtime', 'install_directory']) || 'Unavailable'} /><Info label="CLI version" value={status?.version || 'Unavailable'} /></div></details>
   </div>
 }
 
-function EnhanceSetup({ playbooks, savedPreferences, onSaved }: { playbooks: AgentSetupPlaybook[]; savedPreferences: SavedPreferences; onSaved: (record: WorkflowPreferenceRecord) => void }) {
+function EnhanceSetup({ playbooks, savedPreferences, onSaved, onReset }: { playbooks: AgentSetupPlaybook[]; savedPreferences: SavedPreferences; onSaved: (record: WorkflowPreferenceRecord) => void; onReset: (workflowId: string) => void }) {
   return <section className="agent-playbooks">
     <div className="agent-playbooks-heading"><div><p className="eyebrow">Agent setup playbooks</p><h3>Use an authorized agent when you’re ready</h3><p>Academia OS provides portable playbooks for useful academic workflows. Your authorized agent chooses the tools and owns the external implementation; Academia OS does not connect accounts or run these automations.</p></div><span className="setup-boundary-note">Student authorization stays required</span></div>
-    {playbooks.length ? <div className="workflow-card-grid">{playbooks.map((playbook) => <WorkflowCard key={playbook.id} workflow={playbook} saved={savedPreferences[playbook.id] || null} onSaved={onSaved} />)}</div> : <p className="muted-copy">Loading Agent Setup Playbooks…</p>}
+    {playbooks.length ? <div className="workflow-card-grid">{playbooks.map((playbook) => <WorkflowCard key={playbook.id} workflow={playbook} saved={savedPreferences[playbook.id] || null} onSaved={onSaved} onReset={onReset} />)}</div> : <p className="muted-copy">Loading Agent Setup Playbooks…</p>}
   </section>
 }
 
-function WorkflowCard({ workflow, saved, onSaved }: WorkflowCardProps) {
+function WorkflowCard({ workflow, saved, onSaved, onReset }: WorkflowCardProps) {
   const [open, setOpen] = useState(false)
   const [values, setValues] = useState<Record<string, unknown>>(() => mergePreferences(workflow, saved))
   const [customInstructions, setCustomInstructions] = useState(saved?.custom_instructions || '')
@@ -158,11 +159,25 @@ function WorkflowCard({ workflow, saved, onSaved }: WorkflowCardProps) {
   const save = async () => {
     try {
       setBusy(true); setError(null); setMessage(null)
-      const result = await api.workflowSet(workflow.id, preferenceOverrides(workflow.suggested_defaults, values), customInstructions, externalSetupNotes, 'user')
+      const result = await api.workflowSet(workflow.id, preferenceOverrides(workflow.suggested_defaults, values), customInstructions, externalSetupNotes, 'user', true)
       onSaved(result.saved_preferences as WorkflowPreferenceRecord)
       setMessage('Saved locally. This does not configure an external service.')
     } catch (reason) {
       setError(`This setup was not saved: ${String(reason)}`)
+    } finally { setBusy(false) }
+  }
+
+  const reset = async () => {
+    try {
+      setBusy(true); setError(null); setMessage(null)
+      const result = await api.workflowReset(workflow.id)
+      setValues({ ...workflow.suggested_defaults })
+      setCustomInstructions('')
+      setExternalSetupNotes('')
+      setMessage(result.reset_applied ? 'Reset locally to the recommended defaults. No external service was changed.' : 'Already using the recommended defaults. Only Academia’s local preference record was checked.')
+      onReset(workflow.id)
+    } catch (reason) {
+      setError(`Preferences were not reset: ${String(reason)}`)
     } finally { setBusy(false) }
   }
 
@@ -174,7 +189,7 @@ function WorkflowCard({ workflow, saved, onSaved }: WorkflowCardProps) {
     <div className="workflow-prompt"><span>Ask your AI agent</span><code>Use the “{workflow.title}” Agent Setup Playbook with my saved Academia preferences. Check your own tools, ask for any required authorization, and report exactly what you can configure.</code></div>
     {open && <div className="workflow-editor">
       <section className="playbook-guide"><p className="eyebrow">Playbook guide</p><h5>Why it is useful</h5><p>{workflow.why_useful}</p><PlaybookList title="Suggested defaults" items={Object.entries(workflow.suggested_defaults).map(([key, value]) => `${labelFromKey(key)}: ${formatPreferenceValue(value)}`)} /><PlaybookList title="Agent implementation steps" items={workflow.setup_steps.map((step) => `${step.instruction}${step.student_approval_required ? ' (student approval required)' : ''}`)} /><PlaybookList title="Student choices" items={workflow.student_choices} /><PlaybookList title="Safety contract" items={workflow.safety_rules} /><PlaybookList title="Verification" items={workflow.verification_steps} /></section>
-      <section className="playbook-preferences"><p className="eyebrow">My playbook preferences</p><h5>Saved locally for your agent</h5><p className="workflow-helper">Start from the playbook defaults, then save only the choices you want your authorized AI agent to use. Saving here does not create an external connection or automation.</p><div className="workflow-preference-fields">{Object.entries(workflow.suggested_defaults).map(([key, defaultValue]) => <PreferenceField key={key} name={key} defaultValue={defaultValue} value={values[key]} onChange={(value) => setValues((current) => ({ ...current, [key]: value }))} />)}</div><label className="workflow-text-field"><span>Custom instructions</span><textarea value={customInstructions} onChange={(event) => setCustomInstructions(event.target.value)} placeholder="Tell your agent how you want this playbook to behave." /></label><label className="workflow-text-field"><span>Optional notes for the implementing agent</span><textarea value={externalSetupNotes} onChange={(event) => setExternalSetupNotes(event.target.value)} placeholder="Maintenance notes for the agent; do not enter credentials or secrets." /></label><div className="workflow-save-row"><button className="primary-button" type="button" onClick={() => void save()} disabled={busy}>{busy ? 'Saving…' : 'Save my playbook preferences'}</button>{message && <span className="workflow-save-message" role="status">{message}</span>}{error && <span className="workflow-save-error" role="alert">{error}</span>}</div></section>
+      <section className="playbook-preferences"><p className="eyebrow">My playbook preferences</p><h5>Saved locally for your agent</h5><p className="workflow-helper">Start from the playbook defaults, then save only the choices you want your authorized AI agent to use. Saving here does not create an external connection or automation.</p><div className="workflow-preference-fields">{Object.entries(workflow.suggested_defaults).map(([key, defaultValue]) => <PreferenceField key={key} name={key} defaultValue={defaultValue} value={values[key]} onChange={(value) => setValues((current) => ({ ...current, [key]: value }))} />)}</div><label className="workflow-text-field"><span>Custom instructions</span><textarea value={customInstructions} onChange={(event) => setCustomInstructions(event.target.value)} placeholder="Tell your agent how you want this playbook to behave." /></label><label className="workflow-text-field"><span>Optional notes for the implementing agent</span><textarea value={externalSetupNotes} onChange={(event) => setExternalSetupNotes(event.target.value)} placeholder="Maintenance notes for the agent; do not enter credentials or secrets." /></label><div className="workflow-save-row"><button className="primary-button" type="button" onClick={() => void save()} disabled={busy}>{busy ? 'Saving…' : 'Save my playbook preferences'}</button>{message && <span className="workflow-save-message" role="status">{message}</span>}{error && <span className="workflow-save-error" role="alert">{error}</span>}</div><div className="workflow-reset-row"><button className="secondary-button" type="button" onClick={() => void reset()} disabled={busy}>Reset to recommended defaults</button><small>Only resets Academia’s local preference record. It does not change external services, calendars, email, or automations.</small></div></section>
     </div>}
   </article>
 }

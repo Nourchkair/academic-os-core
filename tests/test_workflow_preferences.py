@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from academia_os.config import save_config
-from academia_os.recommendations import get_recipe
+from academia_os.recommendations import get_playbook, get_recipe
 from academia_os.web import SAFE_COMMANDS
 from academia_os.workflow_preferences import WorkflowPreferencesStore
 from tests.test_agent_neutral_core import minimal_config
@@ -68,6 +68,65 @@ def test_workflow_preferences_save_read_and_list_with_user_and_agent_attribution
     assert agent_saved["updated_by"] == "agent:codex"
     assert agent_saved["preferences"] == {"time": "08:30", "cadence": "weekdays", "include_calendar": True, "detail": "standard"}
     assert store.get_saved("daily_academic_brief")["external_setup_notes"] == "Managed by my external AI agent."
+
+
+def test_replace_mode_removes_stale_time_override_and_preserves_notes(tmp_path: Path) -> None:
+    _, root = configured_profile(tmp_path)
+    store = WorkflowPreferencesStore(root)
+    store.set(
+        "daily_academic_brief",
+        preferences={"time": "08:30"},
+        custom_instructions="Keep the briefing short.",
+        external_setup_notes="Local note only.",
+        updated_by="user",
+    )
+
+    replaced = store.set("daily_academic_brief", preferences={}, replace_preferences=True, updated_by="user")
+
+    assert replaced["preferences"] == {}
+    assert replaced["custom_instructions"] == "Keep the briefing short."
+    assert replaced["external_setup_notes"] == "Local note only."
+    assert store.show("daily_academic_brief")["effective_preferences"] == get_playbook("daily_academic_brief")["suggested_defaults"]
+
+
+def test_replace_mode_removes_stale_boolean_override(tmp_path: Path) -> None:
+    _, root = configured_profile(tmp_path)
+    store = WorkflowPreferencesStore(root)
+    store.set("daily_academic_brief", preferences={"include_calendar": True}, updated_by="user")
+
+    replaced = store.set("daily_academic_brief", preferences={}, replace_preferences=True, updated_by="user")
+
+    assert replaced["preferences"] == {}
+    assert store.show("daily_academic_brief")["effective_preferences"]["include_calendar"] is False
+
+
+def test_workflow_reset_removes_local_preferences_without_mutating_playbook_and_is_idempotent(tmp_path: Path) -> None:
+    _, root = configured_profile(tmp_path)
+    store = WorkflowPreferencesStore(root)
+    playbook_before = get_playbook("daily_academic_brief")
+    store.set(
+        "daily_academic_brief",
+        preferences={"time": "08:30", "include_calendar": True},
+        custom_instructions="Keep this short.",
+        external_setup_notes="Local maintenance note.",
+        updated_by="user",
+    )
+
+    assert store.reset("daily_academic_brief") is True
+    shown = store.show("daily_academic_brief")
+    assert shown["saved_preferences"] is None
+    assert shown["effective_preferences"] == playbook_before["suggested_defaults"]
+    assert get_playbook("daily_academic_brief") == playbook_before
+    assert store.reset("daily_academic_brief") is False
+    assert store.show("daily_academic_brief")["saved_preferences"] is None
+
+
+def test_reset_without_saved_preferences_is_safe_and_does_not_create_state(tmp_path: Path) -> None:
+    _, root = configured_profile(tmp_path)
+    store = WorkflowPreferencesStore(root)
+
+    assert store.reset("daily_academic_brief") is False
+    assert not (root / ".academia" / "workflow_preferences.json").exists()
 
 
 def test_workflow_show_returns_recipe_saved_overrides_and_effective_defaults(tmp_path: Path) -> None:
@@ -185,8 +244,46 @@ def test_workflow_preference_cli_rejects_unknown_workflow_and_recipe_commands_st
     assert not (root / ".academia").exists()
 
 
+def test_workflow_replace_mode_cli_replaces_structured_overrides_and_preserves_notes(tmp_path: Path) -> None:
+    profile, _ = configured_profile(tmp_path)
+    saved = run_cli(profile, "workflow", "set", "daily_academic_brief", "--set", "time=08:30", "--set", "include_calendar=true", "--custom-instructions", "Keep it short.", "--external-setup-notes", "Local note.", "--json")
+    assert saved.returncode == 0, saved.stderr
+
+    replaced = run_cli(profile, "workflow", "set", "daily_academic_brief", "--preferences-json", "{}", "--replace-preferences", "--json")
+    assert replaced.returncode == 0, replaced.stderr
+    value = json.loads(replaced.stdout)
+    assert value["saved_preferences"]["preferences"] == {}
+    assert value["saved_preferences"]["custom_instructions"] == "Keep it short."
+    assert value["saved_preferences"]["external_setup_notes"] == "Local note."
+    assert value["effective_preferences"] == value["recommended_playbook"]["suggested_defaults"]
+
+
+def test_workflow_reset_cli_is_local_idempotent_and_does_not_fabricate_integrations(tmp_path: Path) -> None:
+    profile, root = configured_profile(tmp_path)
+    saved = run_cli(profile, "workflow", "set", "daily_academic_brief", "--set", "time=08:30", "--custom-instructions", "Keep it short.", "--external-setup-notes", "Local note.", "--json")
+    assert saved.returncode == 0, saved.stderr
+
+    reset = run_cli(profile, "workflow", "reset", "daily_academic_brief", "--json")
+    assert reset.returncode == 0, reset.stderr
+    reset_value = json.loads(reset.stdout)
+    assert reset_value["reset"] is True
+    assert reset_value["reset_applied"] is True
+    assert reset_value["saved_preferences"] is None
+    assert reset_value["effective_preferences"] == reset_value["recommended_playbook"]["suggested_defaults"]
+    rendered = json.dumps(reset_value).lower()
+    assert '"gmail_connected"' not in rendered
+    assert '"calendar_connected"' not in rendered
+    assert '"automation_enabled"' not in rendered
+
+    repeated = run_cli(profile, "workflow", "reset", "daily_academic_brief", "--json")
+    assert repeated.returncode == 0, repeated.stderr
+    assert json.loads(repeated.stdout)["reset_applied"] is False
+    assert (root / ".academia" / "workflow_preferences.json").is_file()
+
+
 def test_dashboard_exposes_agent_setup_playbooks_and_editable_preferences_without_connection_controls() -> None:
     source = (FRONTEND / "SettingsView.tsx").read_text(encoding="utf-8")
+    api_source = (FRONTEND / "lib" / "api.ts").read_text(encoding="utf-8")
     tauri = (FRONTEND.parent / "src-tauri" / "src" / "lib.rs").read_text(encoding="utf-8")
     assert "workflow" in SAFE_COMMANDS
     assert '"workflow"' in tauri
@@ -195,6 +292,12 @@ def test_dashboard_exposes_agent_setup_playbooks_and_editable_preferences_withou
     assert "Save my playbook preferences" in source
     assert "workflowPreferences" in source
     assert "workflowSet" in source
+    assert "workflowReset" in source
+    assert "Reset to recommended defaults" in source
+    assert "Only resets Academia’s local preference record" in source
+    assert "workflowReset" in api_source
+    assert "--replace-preferences" in api_source
+    assert "JSON.stringify(preferences)" in api_source
     assert "Agent Setup Playbook" in source
     assert "api.playbooks" in source
     assert "Connect Gmail" not in source

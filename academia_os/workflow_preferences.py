@@ -212,11 +212,31 @@ class WorkflowPreferencesStore:
             "preference_semantics": "saved preferences describe the student's desired setup; they do not prove external services are connected or automation is running",
         }
 
+    def reset(self, workflow_id: str) -> bool:
+        """Remove one local preference record without changing the canonical playbook."""
+        get_playbook(workflow_id)
+        if not self.path.exists():
+            return False
+        removed = False
+
+        def transition(raw: dict[str, Any]) -> dict[str, Any]:
+            nonlocal removed
+            state = _validate_state(raw)
+            workflows = [item for item in state["workflows"] if item["workflow_id"] != workflow_id]
+            removed = len(workflows) != len(state["workflows"])
+            if not removed:
+                return state
+            return {"schema_version": WORKFLOW_PREFERENCES_SCHEMA_VERSION, "workflows": workflows}
+
+        self.store.update(_empty_state(), transition)
+        return removed
+
     def set(
         self,
         workflow_id: str,
         *,
         preferences: Mapping[str, Any] | None = None,
+        replace_preferences: bool = False,
         custom_instructions: str | None | object = _UNSET,
         external_setup_notes: str | None | object = _UNSET,
         updated_by: str = "user",
@@ -225,7 +245,9 @@ class WorkflowPreferencesStore:
         updated_by = _validate_updated_by(updated_by)
         current = self.get_saved(workflow_id)
         current_preferences = dict(current["preferences"]) if current else {}
-        if preferences is not None:
+        if replace_preferences:
+            current_preferences = _validate_preferences(recipe, preferences or {})
+        elif preferences is not None:
             current_preferences.update(_validate_preferences(recipe, preferences))
         validated_preferences = _validate_preferences(recipe, current_preferences)
         if custom_instructions is _UNSET:

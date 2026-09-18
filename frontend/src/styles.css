@@ -313,4 +313,7 @@ button.library-file-row:focus-visible { border-color: #79b892; box-shadow: 0 0 0
 .workflow-save-row .primary-button { font-size: 11px; padding: 9px 12px; }
 .workflow-save-message { color: #43805a; font-size: 10px; font-weight: 700; }
 .workflow-save-error { color: #a04d42; font-size: 10px; }
+.workflow-reset-row { align-items: center; border-top: 1px solid #e6eee8; display: flex; flex-wrap: wrap; gap: 10px; margin-top: 15px; padding-top: 13px; }
+.workflow-reset-row .secondary-button { font-size: 11px; padding: 8px 11px; }
+.workflow-reset-row small { color: #7b8e81; font-size: 10px; line-height: 1.45; max-width: 420px; }
 @media (max-width: 760px) { .workflow-preference-fields { grid-template-columns: 1fr; } }

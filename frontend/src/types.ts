@@ -154,6 +154,7 @@ export type WorkflowShowPayload = {
 }
 
 export type WorkflowSetPayload = WorkflowShowPayload & { saved: boolean }
+export type WorkflowResetPayload = WorkflowShowPayload & { reset: boolean; reset_applied: boolean }
 
 export type PlaybooksPayload = {
   schema_version: number

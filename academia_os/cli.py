@@ -205,6 +205,12 @@ def _workflow_preferences(args: argparse.Namespace) -> dict[str, Any] | list[dic
         return {"schema_version": 1, "workflows": store.list()}
     if args.workflow_command == "show":
         return store.show(args.workflow_id)
+    if args.workflow_command == "reset":
+        reset_applied = store.reset(args.workflow_id)
+        result = store.show(args.workflow_id)
+        result["reset"] = True
+        result["reset_applied"] = reset_applied
+        return result
     if args.workflow_command == "set":
         preferences: dict[str, Any] = {}
         if args.preferences_json is not None:
@@ -219,7 +225,12 @@ def _workflow_preferences(args: argparse.Namespace) -> dict[str, Any] | list[dic
             if not key.strip():
                 raise ValueError("workflow preference key must not be empty")
             preferences[key.strip()] = _json_value(value)
-        options: dict[str, Any] = {"preferences": preferences or None, "updated_by": args.updated_by}
+        replace_preferences = bool(args.replace_preferences)
+        options: dict[str, Any] = {
+            "preferences": preferences if (preferences or replace_preferences) else None,
+            "replace_preferences": replace_preferences,
+            "updated_by": args.updated_by,
+        }
         if hasattr(args, "custom_instructions"):
             options["custom_instructions"] = args.custom_instructions
         if hasattr(args, "external_setup_notes"):
@@ -418,10 +429,14 @@ def build_parser() -> argparse.ArgumentParser:
     workflow_show = workflow_sub.add_parser("show", help="Show one Agent Setup Playbook and its saved preferences")
     workflow_show.add_argument("workflow_id")
     workflow_show.add_argument("--json", action="store_true")
+    workflow_reset = workflow_sub.add_parser("reset", help="Reset one playbook's local preferences to its recommended defaults")
+    workflow_reset.add_argument("workflow_id")
+    workflow_reset.add_argument("--json", action="store_true")
     workflow_set = workflow_sub.add_parser("set", help="Save local preference overrides for one Agent Setup Playbook")
     workflow_set.add_argument("workflow_id")
     workflow_set.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="Preference override; JSON booleans, numbers, and arrays are accepted")
     workflow_set.add_argument("--preferences-json", help="JSON object of preference overrides")
+    workflow_set.add_argument("--replace-preferences", action="store_true", help="Replace the complete structured override set instead of merging it")
     workflow_set.add_argument("--custom-instructions", default=argparse.SUPPRESS)
     workflow_set.add_argument("--external-setup-notes", default=argparse.SUPPRESS)
     workflow_set.add_argument("--updated-by", default="user", help="Audit attribution: user or agent:<name>")
