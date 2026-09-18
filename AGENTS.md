@@ -33,7 +33,7 @@ For each recognized semester, the reusable template includes a semester-level `0
 
 Academia OS is an AI-native academic operating layer. The student’s authorized AI agent owns conversation, reading, reasoning, teaching, synthesis, and repetitive maintenance; Academia OS owns academic state, evidence, provenance, permissions, safe actions, generated artifacts, and the audit trail. The dashboard is observational: it provides visibility, browsing, status, Activity, import/migration, and local configuration. It is not a chatbot or reasoning engine.
 
-Agents must use the structured interface first and retrieve source content only when the context bundle identifies a relevant source. Do not recursively inspect the Markdown tree or read `.academia` files directly to reconstruct state.
+Agents must use the structured interface first and retrieve source content only when the context bundle identifies a relevant source. The bounded `sources.library_items` catalog includes metadata for syllabi, readings, notes, generated artifacts, and relevant imports; it includes `id`, name, workspace-relative path, course ownership, category, provenance, source type, and artifact metadata, never file bodies by default. Do not recursively inspect the Markdown tree or read `.academia` files directly to reconstruct state.
 
 Recommended request loop:
 
@@ -41,9 +41,11 @@ Recommended request loop:
 2. `academia agent context --scope today --detail compact --json`
 3. `academia agent attention --json`
 4. Retrieve only the referenced course/source files through the bounded file interface.
-5. Perform reasoning in the agent and ask the student when `attention.items` contains a meaningful decision.
-6. Use explicit Academia actions for imports, Review decisions, and generated artifacts.
-7. Poll `academia agent changes --since CURSOR --json` on the next agent session instead of rereading everything.
+5. Perform reasoning in the agent and ask the student when an attention item presents a meaningful decision.
+6. If `choices` contains an entry with `executable: true`, present those choices exactly as returned. Submit the selected structured action with `academia review decide REVIEW_ID DECISION --json`.
+7. If the selected action has `requires_execution: true`, call `academia review execute REVIEW_ID --json` as a separate step, then verify the result through `academia agent changes` or refreshed context.
+8. Treat every entry in `recommended_next_actions` as advisory guidance. It is not an Academia command and must not be reported as performed.
+9. Poll `academia agent changes --since CURSOR --json` on the next agent session instead of rereading everything.
 
 Academia does not store agent chat transcripts, prompts, model messages, credentials, or conversation history.
 
@@ -85,7 +87,7 @@ academia artifact create --course "COURSE ID" --kind study_guide --title "Week 5
 academia verify-source --requested requested.json --retrieved retrieved.json --json
 ```
 
-JSON output is the preferred agent context format. Human-readable output is for users.
+JSON output is the preferred agent context format. Human-readable output is for users. Any agent command that accepts `--course` resolves the exact canonical course ID, course code, or exact course name/display name to the same canonical course object. Unknown and ambiguous identifiers fail with a structured error; they never fall back to workspace-wide results.
 
 ## Allowed behavior
 
@@ -109,7 +111,7 @@ Generated artifacts are Markdown/text secondary material. They are recorded with
 - A failed action remains failed/retryable; it is never acknowledged as successful.
 - Review items remain open until a human decision is recorded.
 
-`academia agent attention --json` is the conversation-facing Review contract. Each unresolved item includes `id`, `kind`, `course`, `question`, `why_this_needs_human_input`, `current_value`, `proposed_value`, `evidence`, `choices`, `action_proposal_id`, and `status`. The agent should explain the evidence and choices in natural language, ask the student, then call the existing `review decide`/`review execute` workflow and verify the result. Review remains a backend protocol; it is not a chat transcript or an instruction to guess.
+`academia agent attention --json` is the conversation-facing Review contract. Each unresolved item includes `id`, `kind`, `course`, `question`, `why_this_needs_human_input`, `current_value`, `proposed_value`, `evidence`, `choices`, `recommended_next_actions`, `action_proposal_id`, and `status`. `choices[]` means a stable decision that Academia can accept through the existing Review contract; each executable choice includes `id`, `label`, `effect`, `executable: true`, and a structured `action` descriptor. For a supported action, the descriptor identifies the Review decision and, when needed, the separate `review_execute` step. `recommended_next_actions[]` is different: every entry has `executable: false` and is guidance only. It may say `verify_source` or `retry_processing`, but those labels are not claims that a corresponding command exists. Today, linked domain-change Reviews can expose an approve/use-new decision followed by `review execute`; processing retry and source verification remain advisory. The agent asks the student, submits only an executable Review choice, performs the separate execution step only when advertised, and verifies the result. Review remains a backend protocol; it is not a chat transcript or an instruction to guess.
 
 `academia agent changes --since CURSOR --json` reads the append-only Activity feed oldest-first and returns `next_cursor`. Reusing that cursor is idempotent. The cursor is an Activity event id; an ISO timestamp is also accepted for integrations that persist time checkpoints.
 

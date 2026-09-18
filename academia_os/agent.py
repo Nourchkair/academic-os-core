@@ -7,10 +7,12 @@ from zoneinfo import ZoneInfo
 
 from .acquisition import capability_report
 from .activity import ActivityEvent, ActivityLog
+from .course_identity import resolve_course_identifier
 from .domain import DomainProjection
 from .library import list_material
 from .processing import ProcessingRecord, ProcessingStore, ProcessingStatus
 from .review import ReviewItem, ReviewQueue
+from .workflow import is_review_rejection_decision
 from .workspace import build_workspace_snapshot
 
 AGENT_CONTEXT_SCHEMA_VERSION = 1
@@ -52,26 +54,42 @@ def _safe_relative(path: str | Path, root: Path) -> str | None:
 def _course_match(courses: list[dict[str, Any]], requested: str | None) -> dict[str, Any] | None:
     if not requested:
         return None
-    folded = requested.casefold()
-    matches = [course for course in courses if folded in {str(course.get("id", "")).casefold(), str(course.get("code", "")).casefold(), str(course.get("name", "")).casefold()}]
-    if not matches:
-        raise KeyError(f"course not found: {requested}")
-    if len(matches) > 1:
-        raise ValueError(f"course identifier is ambiguous: {requested}")
-    return matches[0]
+    return resolve_course_identifier(courses, requested)
 
 
-def _sanitize_value(value: Any, root: Path, *, depth: int = 0) -> Any:
+_SENSITIVE_KEYS = frozenset({
+    "password",
+    "passwd",
+    "access_token",
+    "refresh_token",
+    "session_token",
+    "api_key",
+    "apikey",
+    "client_secret",
+    "cookie",
+    "cookies",
+    "mfa_code",
+    "authorization",
+})
+
+
+def _normalized_key(key: str | None) -> str:
+    return str(key or "").strip().casefold().replace("-", "_")
+
+
+def _sanitize_value(value: Any, root: Path, *, key: str | None = None, depth: int = 0) -> Any:
+    if _normalized_key(key) in _SENSITIVE_KEYS:
+        return "[REDACTED]"
     if depth > 4:
         return "[TRUNCATED]"
     if isinstance(value, dict):
-        return {str(key): _sanitize_value(item, root, depth=depth + 1) for key, item in list(value.items())[:32]}
+        return {
+            str(item_key): _sanitize_value(item, root, key=str(item_key), depth=depth + 1)
+            for item_key, item in list(value.items())[:32]
+        }
     if isinstance(value, list):
         return [_sanitize_value(item, root, depth=depth + 1) for item in value[:32]]
     if isinstance(value, str):
-        lowered = value.casefold()
-        if any(token in lowered for token in ("password", "passwd", "token", "secret", "api_key", "apikey", "cookie", "mfa")):
-            return "[REDACTED]"
         if value.startswith("/") or value.startswith("~"):
             relative = _safe_relative(value, root)
             return relative or "[OUTSIDE_WORKSPACE]"
@@ -94,7 +112,23 @@ def _compact_course(course: dict[str, Any], root: Path) -> dict[str, Any]:
 
 
 def _compact_library_item(item: dict[str, Any]) -> dict[str, Any]:
-    return {key: item.get(key) for key in ("id", "name", "relative_path", "semester", "course_id", "category", "provenance", "artifact_id", "artifact_kind", "created_by", "authoritative", "source_refs") if item.get(key) is not None}
+    result = {
+        key: item.get(key)
+        for key in (
+            "id",
+            "name",
+            "relative_path",
+            "semester",
+            "course_id",
+            "category",
+            "provenance",
+            "source_type",
+        )
+    }
+    for key in ("artifact_id", "artifact_kind", "created_by", "authoritative", "source_refs"):
+        if item.get(key) is not None:
+            result[key] = item[key]
+    return result
 
 
 def _scope_courses(courses: list[dict[str, Any]], scope: str, course: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -156,7 +190,46 @@ def _compact_entity(entity: dict[str, Any], root: Path, *, include_assignment_fi
     return result
 
 
-def _attention_review(item: ReviewItem, root: Path) -> dict[str, Any]:
+def _recommended_action(action_id: str, label: str, reason: str) -> dict[str, Any]:
+    return {"id": action_id, "label": label, "reason": reason, "executable": False}
+
+
+def _review_choice_candidates(details: dict[str, Any], item: ReviewItem, root: Path) -> list[dict[str, Any]]:
+    choices_value = details.get("choices")
+    candidates: list[dict[str, Any]] = []
+    if isinstance(choices_value, list):
+        for choice in choices_value:
+            if isinstance(choice, dict) and str(choice.get("id", "")).strip() and str(choice.get("label", "")).strip():
+                candidates.append({
+                    "id": str(choice["id"]),
+                    "label": _sanitize_value(str(choice["label"]), root),
+                    "effect": _sanitize_value(str(choice.get("effect", "")), root),
+                })
+    if candidates:
+        return candidates
+    current_value = details.get("current_value", details.get("current"))
+    proposed_value = details.get("proposed_value", details.get("new"))
+    if current_value is not None:
+        candidates.append({
+            "id": "keep_current",
+            "label": f"Keep {_sanitize_value(current_value, root)}",
+            "effect": "Reject the linked proposal; keep the currently saved value.",
+        })
+    if proposed_value is not None:
+        candidates.append({
+            "id": "use_new",
+            "label": f"Use {_sanitize_value(proposed_value, root)}",
+            "effect": "Approve the linked proposal; execute it separately, then verify the result.",
+        })
+    if not candidates and item.action_proposal_id:
+        candidates.extend([
+            {"id": "approve", "label": "Approve the linked action", "effect": "Approve the proposal; execute it separately, then verify the result."},
+            {"id": "reject", "label": "Reject the linked action", "effect": "Reject the proposal without executing it."},
+        ])
+    return candidates
+
+
+def _attention_review(item: ReviewItem, root: Path, *, course_label: str | None = None) -> dict[str, Any]:
     details = dict(item.details)
     evidence_value = details.get("evidence", details.get("evidence_refs", []))
     if isinstance(evidence_value, list):
@@ -165,33 +238,87 @@ def _attention_review(item: ReviewItem, root: Path) -> dict[str, Any]:
         evidence = [_sanitize_value({"reference": str(evidence_value)}, root)]
     else:
         evidence = []
-    choices_value = details.get("choices")
+
+    candidates = _review_choice_candidates(details, item, root)
+    proposal_details = details.get("proposal_details")
+    proposal_action_type = proposal_details.get("action_type") if isinstance(proposal_details, dict) else None
+    action_type = str(details.get("action_type") or proposal_action_type or "")
+    execution_supported = action_type == "domain_change"
     choices: list[dict[str, Any]] = []
-    if isinstance(choices_value, list):
-        for choice in choices_value:
-            if isinstance(choice, dict) and str(choice.get("id", "")).strip() and str(choice.get("label", "")).strip():
-                choices.append({"id": str(choice["id"]), "label": _sanitize_value(str(choice["label"]), root), "effect": _sanitize_value(str(choice.get("effect", "")), root)})
-    if not choices:
-        current_value = details.get("current_value", details.get("current"))
-        proposed_value = details.get("proposed_value", details.get("new"))
-        if current_value is not None:
-            choices.append({"id": "keep_current", "label": f"Keep {_sanitize_value(current_value, root)}", "effect": "No proposed value will be applied."})
-        if proposed_value is not None:
-            choices.append({"id": "use_new", "label": f"Use {_sanitize_value(proposed_value, root)}", "effect": "Apply only through the existing approved action workflow."})
-        if item.kind == "import_classification":
-            choices.append({"id": "keep_general_intake", "label": "Keep in general intake", "effect": "Preserve the file without classifying or moving it."})
+    recommended: list[dict[str, Any]] = []
+    if item.action_proposal_id:
+        for candidate in candidates:
+            decision = str(candidate["id"])
+            requires_execution = not is_review_rejection_decision(decision)
+            if requires_execution and not execution_supported:
+                recommended.append(_recommended_action(
+                    decision,
+                    str(candidate["label"]),
+                    "The linked action has no supported Academia execution step yet; do not treat this as performed.",
+                ))
+                continue
+            action: dict[str, Any] = {
+                "type": "review_decision",
+                "review_id": item.id,
+                "decision": decision,
+                "requires_execution": requires_execution,
+            }
+            if requires_execution:
+                action["execution"] = {
+                    "type": "review_execute",
+                    "review_id": item.id,
+                    "proposal_id": item.action_proposal_id,
+                }
+            choices.append({
+                "id": decision,
+                "label": candidate["label"],
+                "effect": candidate["effect"],
+                "executable": True,
+                "action": action,
+            })
+    else:
+        for candidate in candidates:
+            recommended.append(_recommended_action(
+                str(candidate["id"]),
+                str(candidate["label"]),
+                str(candidate.get("effect") or "No linked Academia action executor is available for this guidance."),
+            ))
+        if not recommended and item.kind == "source_verification":
+            recommended.append(_recommended_action(
+                "verify_source",
+                "Verify the source before treating this fact as confirmed.",
+                "Source verification is guidance only; no supported Review action executor is linked.",
+            ))
+        elif not recommended and item.kind == "import_classification":
+            recommended.append(_recommended_action(
+                "review_import_classification",
+                "Choose the import destination through an approved import workflow.",
+                "This Review item has no linked action executor for moving or classifying the file.",
+            ))
+        elif not recommended:
+            recommended.append(_recommended_action(
+                "review_with_student",
+                "Review this item with the student.",
+                "No linked Academia action executor is available for this Review item.",
+            ))
+
+    why_value = details.get("why_this_needs_human_input") or details.get("reason")
+    if why_value is None:
+        evidence_reason = details.get("evidence")
+        why_value = evidence_reason if isinstance(evidence_reason, str) else "Academia OS cannot safely choose between these alternatives without the student's judgment."
     current_value = details.get("current_value", details.get("current"))
     proposed_value = details.get("proposed_value", details.get("new"))
     return {
         "id": item.id,
         "kind": item.kind,
-        "course": _sanitize_value(item.course, root),
+        "course": _sanitize_value(course_label if course_label is not None else item.course, root),
         "question": _sanitize_value(str(details.get("question") or item.title), root),
-        "why_this_needs_human_input": _sanitize_value(str(details.get("why_this_needs_human_input") or details.get("reason") or details.get("evidence") or "Academia OS cannot safely choose between these alternatives without the student's judgment."), root),
+        "why_this_needs_human_input": _sanitize_value(why_value, root),
         "current_value": _sanitize_value(current_value, root),
         "proposed_value": _sanitize_value(proposed_value, root),
         "evidence": evidence,
         "choices": choices,
+        "recommended_next_actions": recommended,
         "action_proposal_id": item.action_proposal_id,
         "status": item.status.value,
         "priority": item.priority,
@@ -271,6 +398,15 @@ def _filter_today(tasks: list[dict[str, Any]], deadlines: list[dict[str, Any]], 
     return task_result, deadline_result
 
 
+def _normalized_review_course(item: ReviewItem, courses: list[dict[str, Any]]) -> str | None:
+    if item.course is None:
+        return None
+    try:
+        return str(resolve_course_identifier(courses, str(item.course))["id"])
+    except (KeyError, ValueError):
+        return str(item.course)
+
+
 def build_attention(
     config: dict[str, Any],
     snapshot: dict[str, Any],
@@ -282,24 +418,29 @@ def build_attention(
 ) -> dict[str, Any]:
     _limit(detail, "attention")
     root = Path(snapshot["academic_root"]).expanduser().resolve()
-    reviews = ReviewQueue(root / ".academia" / "review.json").list()
+    available_courses = [dict(course) for course in snapshot.get("courses", [])]
+    stored_reviews = ReviewQueue(root / ".academia" / "review.json").list()
+    normalized_reviews = [(item, _normalized_review_course(item, available_courses)) for item in stored_reviews]
     if course_id:
-        reviews = [item for item in reviews if item.course in {None, course_id}]
+        normalized_reviews = [(item, normalized) for item, normalized in normalized_reviews if normalized in {None, course_id}]
     elif course_ids is not None:
-        reviews = [item for item in reviews if item.course is None or item.course in course_ids]
+        normalized_reviews = [(item, normalized) for item, normalized in normalized_reviews if normalized is None or normalized in course_ids]
     processing = ProcessingStore(root / ".academia" / "processing.json")
     records = processing.list()
     if semester:
         records = [record for record in records if (_safe_relative(record.source_path, root) or "").split("/", 1)[0] == semester]
     failed_processing, pending_processing = _processing_attention(records, root, detail)
-    review_items = [_attention_review(item, root) for item in reviews[:_limit(detail, "attention")]]
+    review_items = [
+        _attention_review(item, root, course_label=normalized)
+        for item, normalized in normalized_reviews[:_limit(detail, "attention")]
+    ]
     conflicts = [item for item in review_items if "conflict" in item["kind"].casefold() or "conflict" in item["question"].casefold()]
     uncertain = [item for item in review_items if "uncertain" in item["kind"].casefold() or "classification" in item["kind"].casefold() or item["kind"] == "source_verification"]
     projection = DomainProjection(root / ".academia" / "domain.json")
-    course_ids = {course_id} if course_id else {str(course.get("id")) for course in snapshot.get("courses", [])}
+    scoped_course_ids = {course_id} if course_id else (course_ids if course_ids is not None else {str(course.get("id")) for course in available_courses})
     unverified = []
     for entity in projection.list():
-        if entity.get("course_id") not in course_ids:
+        if entity.get("course_id") not in scoped_course_ids:
             continue
         evidence_value = entity.get("evidence")
         evidence = evidence_value if isinstance(evidence_value, dict) else {}
@@ -307,9 +448,56 @@ def build_attention(
             item = _compact_entity(entity, root)
             if item.get("evidence") is not None:
                 unverified.append(item)
-    attention_items = [*review_items, *[{"id": item["id"], "kind": "processing_failure", "course": None, "question": f"Processing failed for {item.get('source') or 'an academic file'}", "why_this_needs_human_input": item.get("failure_reason") or "Processing requires an agent retry or a different authorized handling path.", "current_value": item.get("status"), "proposed_value": None, "evidence": [{"reference": item.get("source")}], "choices": [{"id": "retry", "label": "Retry processing", "effect": "Return the item to the retryable processing state."}], "action_proposal_id": None, "status": item.get("status"), "priority": "normal", "created_at": item.get("updated_at"), "updated_at": item.get("updated_at")} for item in failed_processing]]
-    attention_items.extend({"id": item.get("id"), "kind": "unverified_fact", "course": item.get("course_id"), "question": f"Verify the academic fact: {item.get('title') or item.get('id')}", "why_this_needs_human_input": "The current evidence is not marked current-confirmed.", "current_value": item, "proposed_value": None, "evidence": [item.get("evidence")], "choices": [{"id": "verify_source", "label": "Verify source before treating as confirmed", "effect": "Keep the fact non-authoritative until verification."}], "action_proposal_id": None, "status": "attention", "priority": "normal", "created_at": None, "updated_at": None} for item in unverified)
-    attention_items = attention_items[:_limit(detail, "attention")]
+
+    processing_items = [
+        {
+            "id": item["id"],
+            "kind": "processing_failure",
+            "course": None,
+            "question": f"Processing failed for {item.get('source') or 'an academic file'}",
+            "why_this_needs_human_input": item.get("failure_reason") or "Processing requires an agent retry or a different authorized handling path.",
+            "current_value": item.get("status"),
+            "proposed_value": None,
+            "evidence": [{"reference": item.get("source")}],
+            "choices": [],
+            "recommended_next_actions": [_recommended_action(
+                "retry_processing",
+                "Retry processing",
+                "No supported processing retry command is exposed by this contract yet.",
+            )],
+            "action_proposal_id": None,
+            "status": item.get("status"),
+            "priority": "normal",
+            "created_at": item.get("updated_at"),
+            "updated_at": item.get("updated_at"),
+        }
+        for item in failed_processing
+    ]
+    unverified_items = [
+        {
+            "id": item.get("id"),
+            "kind": "unverified_fact",
+            "course": item.get("course_id"),
+            "question": f"Verify the academic fact: {item.get('title') or item.get('id')}",
+            "why_this_needs_human_input": "The current evidence is not marked current-confirmed.",
+            "current_value": item,
+            "proposed_value": None,
+            "evidence": [item.get("evidence")],
+            "choices": [],
+            "recommended_next_actions": [_recommended_action(
+                "verify_source",
+                "Verify source before treating as confirmed",
+                "Verification is guidance only; no supported Review action executor is linked.",
+            )],
+            "action_proposal_id": None,
+            "status": "attention",
+            "priority": "normal",
+            "created_at": None,
+            "updated_at": None,
+        }
+        for item in unverified
+    ]
+    attention_items = [*review_items, *processing_items, *unverified_items][:_limit(detail, "attention")]
     return {
         "schema_version": AGENT_CONTEXT_SCHEMA_VERSION,
         "generated_at": _generated_at(),
@@ -352,9 +540,12 @@ def build_agent_context(config: dict[str, Any], snapshot: dict[str, Any], *, sco
     deadlines = [_compact_entity(entity, root) for entity in entities if entity.get("entity_type") == "deadline" and entity.get("evidence", {}).get("confidence") == "current-confirmed"]
     assignments = [_compact_entity(entity, root, include_assignment_fields=True) for entity in entities if entity.get("entity_type") == "assignment"]
     materials = list_material(root, current_semester)
-    materials = [item for item in materials if item.get("course_id") in ids]
+    if scope == "course":
+        materials = [item for item in materials if item.get("course_id") in ids]
+    else:
+        materials = [item for item in materials if item.get("course_id") in ids or (item.get("category") == "imports" and item.get("course_id") is None)]
     readings = [_compact_library_item(item) for item in materials if item.get("category") == "readings"]
-    source_items = [item for item in materials if item.get("category") in {"readings", "generated"}]
+    source_items = materials
     if scope == "today":
         open_tasks, deadlines = _filter_today(open_tasks, deadlines, str(config["academic"]["timezone"]))
     open_tasks = open_tasks[:_limit(detail, "tasks")]
@@ -433,8 +624,11 @@ def build_agent_changes(config: dict[str, Any], *, since: str | None = None, lim
 
 
 def build_agent_attention(config: dict[str, Any], snapshot: dict[str, Any], *, detail: str = "standard", course_id: str | None = None) -> dict[str, Any]:
+    canonical_course_id = None
+    if course_id:
+        canonical_course_id = str(resolve_course_identifier(snapshot.get("courses", []), course_id)["id"])
     course_ids = {str(course.get("id")) for course in snapshot.get("courses", [])}
-    return build_attention(config, snapshot, detail=detail, course_id=course_id, course_ids=None if course_id else course_ids, semester=str(snapshot.get("semester") or ""))
+    return build_attention(config, snapshot, detail=detail, course_id=canonical_course_id, course_ids=None if canonical_course_id else course_ids, semester=str(snapshot.get("semester") or ""))
 
 
 def build_agent_capabilities() -> dict[str, Any]:

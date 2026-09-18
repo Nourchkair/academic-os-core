@@ -43,7 +43,8 @@ def test_dashboard_has_semester_courses_library_and_activity_surfaces() -> None:
     assert "AI-created material" in courses
     assert "AI-generated" in courses
     assert "api.filePreview(item.path, item.semester)" in courses
-    assert "Needs input" in source
+    assert "Open decisions" in source
+    assert "Needs input" not in source
 
 
 def test_action_panel_owns_import_and_migration_without_review_navigation() -> None:

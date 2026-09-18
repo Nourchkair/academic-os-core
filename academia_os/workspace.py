@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import SEMESTER_PATTERN, validate_config
+from .course_identity import course_records
 from .domain import DomainProjection
 from .library import list_material
 from .state import JsonStateStore
@@ -98,10 +99,10 @@ def build_workspace_snapshot(config: dict[str, Any], *, persist: bool = True, se
         if isinstance(course_id, str):
             material_counts[course_id] = material_counts.get(course_id, 0) + 1
     if semester_root.is_dir():
-        for candidate in sorted(semester_root.iterdir()):
-            if candidate.is_dir() and (candidate / "01_COURSE").is_dir():
-                courses.append(_course_summary(candidate, material_count=material_counts.get(candidate.name, 0)))
-                tasks.extend(_extract_tasks(candidate / "01_COURSE" / "Course_Status.md", candidate.name))
+        for record in course_records(semester_root):
+            candidate = Path(str(record["path"]))
+            courses.append(_course_summary(candidate, material_count=material_counts.get(candidate.name, 0)))
+            tasks.extend(_extract_tasks(candidate / "01_COURSE" / "Course_Status.md", candidate.name))
     tasks.extend(_domain_tasks(root, {course["id"] for course in courses}))
     # The template checklist is onboarding guidance, not academic workload. Actual
     # tasks should come from course evidence or a structured task file.

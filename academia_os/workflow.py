@@ -9,6 +9,11 @@ from .activity import ActivityLog
 from .review import ReviewItem, ReviewQueue, ReviewStatus
 
 
+def is_review_rejection_decision(decision: str) -> bool:
+    normalized = decision.strip()
+    return normalized in {"reject", "dismiss", "keep_current", "keep_existing", "keep_unassigned", "keep_general_intake"} or normalized.startswith("reject_") or normalized.startswith("dismiss_")
+
+
 class ApprovalWorkflow:
     """Coordinate action proposals, human review, verification, and activity.
 
@@ -107,7 +112,7 @@ class ApprovalWorkflow:
         if not decision:
             raise ValueError("review decision is required")
         review = self.reviews.get(review_id)
-        rejection = decision in {"reject", "dismiss", "keep_current", "keep_existing", "keep_unassigned", "keep_general_intake"} or decision.startswith("reject_") or decision.startswith("dismiss_")
+        rejection = is_review_rejection_decision(decision)
         status = ReviewStatus.REJECTED if rejection else ReviewStatus.APPROVED
         action_status: str | None = None
         if review.action_proposal_id:

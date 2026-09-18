@@ -16,6 +16,7 @@ from .actions import ActionStore
 from .activity import ActivityLog
 from .attachment import assess_profile, attach_workspace, backup_profile, inspect_workspace
 from .config import load_config, save_config, runtime_directory, validate_config
+from .course_identity import resolve_course_identifier
 from .discovery import discover_academic_folders
 from .domain import ENTITY_TYPES, DomainProjection
 from .file_preview import preview_file
@@ -549,10 +550,7 @@ def dispatch(args: argparse.Namespace) -> int:
         _, snapshot, _ = _context(args)
         if not args.course_id:
             _emit(snapshot["courses"], as_json=args.json); return 0
-        matches = [course for course in snapshot["courses"] if args.course_id.casefold() in {course["id"].casefold(), course["code"].casefold(), course["name"].casefold()}]
-        if not matches:
-            raise KeyError(f"course not found: {args.course_id}")
-        _emit(matches[0], as_json=args.json); return 0
+        _emit(resolve_course_identifier(snapshot["courses"], args.course_id), as_json=args.json); return 0
     if args.command == "domain":
         _, snapshot, _ = _context(args)
         projection = DomainProjection(Path(snapshot["academic_root"]) / ".academia" / "domain.json")

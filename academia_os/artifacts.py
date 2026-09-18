@@ -9,7 +9,7 @@ from typing import Any, Iterable
 from uuid import uuid4
 
 from .activity import ActivityLog
-from .config import SEMESTER_PATTERN
+from .course_identity import resolve_course_directory, source_course_id
 from .domain import DomainProjection
 from .provenance import ProvenanceLabel
 from .state import JsonStateStore
@@ -170,33 +170,12 @@ def _reject_symlink_components(path: Path, root: Path, label: str) -> None:
 
 
 def _course_root(workspace_root: Path, semester: str, course_id: str) -> Path:
-    if SEMESTER_PATTERN.fullmatch(semester) is None:
-        raise ValueError("artifact semester must use a term and four-digit year")
-    semester_root = workspace_root / semester
-    _reject_symlink_components(semester_root, workspace_root, "semester")
-    if not semester_root.is_dir():
-        raise ValueError(f"semester not found: {semester}")
-    folded = course_id.strip().casefold()
-    matches = []
-    for candidate in sorted(semester_root.iterdir()):
-        if not candidate.is_dir() or candidate.is_symlink() or not (candidate / "01_COURSE").is_dir():
-            continue
-        _reject_symlink_components(candidate, workspace_root, "course")
-        code = candidate.name.split(" - ", 1)[0].strip()
-        if folded in {candidate.name.casefold(), code.casefold()}:
-            matches.append(candidate)
-    if not matches:
-        raise KeyError(f"course not found: {course_id}")
-    if len(matches) > 1:
-        raise ValueError(f"course identifier is ambiguous: {course_id}")
-    try:
-        matches[0].resolve().relative_to(workspace_root)
-    except ValueError as exc:
-        raise ValueError("artifact course must remain inside the academic workspace") from exc
-    return matches[0]
+    course_root = resolve_course_directory(workspace_root, semester, course_id)
+    _reject_symlink_components(course_root, workspace_root, "course")
+    return course_root
 
 
-def _safe_source_reference(workspace_root: Path, course_id: str, reference: str) -> dict[str, Any]:
+def _safe_source_reference(workspace_root: Path, reference: str) -> dict[str, Any]:
     if not isinstance(reference, str) or not reference.strip() or "\x00" in reference:
         raise ValueError("source references must be non-empty strings without NUL bytes")
     raw = reference.strip()
@@ -204,21 +183,25 @@ def _safe_source_reference(workspace_root: Path, course_id: str, reference: str)
     candidate = Path(raw).expanduser()
     if not candidate.is_absolute():
         candidate = root / candidate
-    _reject_symlink_components(candidate, root, "source reference")
+    try:
+        _reject_symlink_components(candidate, root, "source reference")
+    except ValueError as exc:
+        raise ValueError("source reference must identify recognized academic material") from exc
     if candidate.is_symlink():
         raise ValueError("source references cannot be symlinks")
     try:
         resolved = candidate.resolve()
         relative = resolved.relative_to(root)
     except (OSError, ValueError) as exc:
-        raise ValueError("source references must identify files inside the academic workspace") from exc
+        raise ValueError("source reference must identify recognized academic material") from exc
     if ".academia" in relative.parts or not resolved.is_file():
         raise ValueError("source references must identify regular academic workspace files, not operational state")
+    actual_course_id = source_course_id(root, resolved)
     return {
         "type": "file",
         "id": relative.as_posix(),
         "relative_path": relative.as_posix(),
-        "course_id": course_id,
+        "course_id": actual_course_id,
         "exists": True,
     }
 
@@ -306,7 +289,7 @@ def create_generated_artifact(
     normalized_title = _validate_title(title)
     normalized_creator = _validate_created_by(created_by)
     projection = DomainProjection(root / ".academia" / "domain.json")
-    sources = tuple(_safe_source_reference(root, normalized_course_id, value) for value in source_refs)
+    sources = tuple(_safe_source_reference(root, value) for value in source_refs)
     domains = tuple(_domain_reference(projection, normalized_course_id, value) for value in domain_refs)
     if normalized_kind in SOURCE_DERIVED_KINDS and not sources and not domains:
         raise ValueError(f"artifact kind {normalized_kind} requires at least one source or domain reference")
