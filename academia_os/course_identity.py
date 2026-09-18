@@ -9,7 +9,8 @@ from .config import SEMESTER_PATTERN
 
 def course_code(course_name: str) -> str:
     """Return the code portion used by the workspace's canonical course naming."""
-    return course_name.split(" - ", 1)[0].strip() if " - " in course_name else course_name.split()[0]
+    normalized = " ".join(course_name.strip().split())
+    return normalized.split(" - ", 1)[0].strip() if " - " in normalized else normalized
 
 
 def course_records(semester_root: Path) -> list[dict[str, Any]]:

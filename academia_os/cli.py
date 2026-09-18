@@ -629,6 +629,7 @@ def dispatch(args: argparse.Namespace) -> int:
             actions=ActionStore(state_root / "actions.json"),
             reviews=queue,
             activity=ActivityLog(state_root / "activity.jsonl"),
+            courses=snapshot.get("courses", []),
         )
         if args.action != "list":
             if not args.item_id:

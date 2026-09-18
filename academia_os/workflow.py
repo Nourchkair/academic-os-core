@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
 from .actions import ActionProposal, ActionStatus, ActionStore, ActionType
 from .activity import ActivityLog
-from .review import ReviewItem, ReviewQueue, ReviewStatus
+from .review import ReviewItem, ReviewQueue, ReviewStatus, validate_review_decision
 
 
 def is_review_rejection_decision(decision: str) -> bool:
@@ -23,10 +23,11 @@ class ApprovalWorkflow:
     data successfully.
     """
 
-    def __init__(self, *, actions: ActionStore, reviews: ReviewQueue, activity: ActivityLog) -> None:
+    def __init__(self, *, actions: ActionStore, reviews: ReviewQueue, activity: ActivityLog, courses: Iterable[Mapping[str, Any]] = ()) -> None:
         self.actions = actions
         self.reviews = reviews
         self.activity = activity
+        self.courses = [dict(course) for course in courses]
 
     def propose(
         self,
@@ -108,10 +109,8 @@ class ApprovalWorkflow:
         return self.reviews.update(review_id, status=ReviewStatus.REJECTED)
 
     def decide_review(self, review_id: str, decision: str) -> ReviewItem:
-        decision = decision.strip()
-        if not decision:
-            raise ValueError("review decision is required")
         review = self.reviews.get(review_id)
+        decision = validate_review_decision(review, decision, self.courses)
         rejection = is_review_rejection_decision(decision)
         status = ReviewStatus.REJECTED if rejection else ReviewStatus.APPROVED
         action_status: str | None = None

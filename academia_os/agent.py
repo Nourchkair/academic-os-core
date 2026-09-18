@@ -11,7 +11,7 @@ from .course_identity import resolve_course_identifier
 from .domain import DomainProjection
 from .library import list_material
 from .processing import ProcessingRecord, ProcessingStore, ProcessingStatus
-from .review import ReviewItem, ReviewQueue
+from .review import ReviewItem, ReviewQueue, review_decision_ids
 from .workflow import is_review_rejection_decision
 from .workspace import build_workspace_snapshot
 
@@ -196,6 +196,7 @@ def _recommended_action(action_id: str, label: str, reason: str) -> dict[str, An
 
 def _review_choice_candidates(details: dict[str, Any], item: ReviewItem, root: Path) -> list[dict[str, Any]]:
     choices_value = details.get("choices")
+    allowed_ids = review_decision_ids(item)
     candidates: list[dict[str, Any]] = []
     if isinstance(choices_value, list):
         for choice in choices_value:
@@ -206,7 +207,7 @@ def _review_choice_candidates(details: dict[str, Any], item: ReviewItem, root: P
                     "effect": _sanitize_value(str(choice.get("effect", "")), root),
                 })
     if candidates:
-        return candidates
+        return [candidate for candidate in candidates if candidate["id"] in allowed_ids]
     current_value = details.get("current_value", details.get("current"))
     proposed_value = details.get("proposed_value", details.get("new"))
     if current_value is not None:
@@ -226,7 +227,7 @@ def _review_choice_candidates(details: dict[str, Any], item: ReviewItem, root: P
             {"id": "approve", "label": "Approve the linked action", "effect": "Approve the proposal; execute it separately, then verify the result."},
             {"id": "reject", "label": "Reject the linked action", "effect": "Reject the proposal without executing it."},
         ])
-    return candidates
+    return [candidate for candidate in candidates if candidate["id"] in allowed_ids]
 
 
 def _attention_review(item: ReviewItem, root: Path, *, course_label: str | None = None) -> dict[str, Any]:

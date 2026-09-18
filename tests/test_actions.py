@@ -48,3 +48,48 @@ def test_approval_workflow_links_review_to_exact_action_and_resolves_after_verif
     assert verified.status == ActionStatus.VERIFIED.value
     assert reviews.get(review.id).status is ReviewStatus.RESOLVED
     assert activity.list(limit=1)[0].event_type == "action.verified"
+
+
+def test_invalid_review_decision_fails_closed_without_state_or_activity(tmp_path: Path) -> None:
+    actions = ActionStore(tmp_path / "actions.json")
+    reviews = ReviewQueue(tmp_path / "review.json")
+    activity = ActivityLog(tmp_path / "activity.jsonl")
+    proposal = actions.propose(action_type=ActionType.DOMAIN_CHANGE, title="Update deadline", details={"before": "October 8", "after": "October 11"})
+    item = reviews.add(
+        kind="deadline_conflict",
+        title="Assignment 2 deadline",
+        details={"current": "October 8", "new": "October 11"},
+        action_proposal_id=proposal.id,
+    )
+
+    with pytest.raises(ValueError, match="unsupported review decision"):
+        ApprovalWorkflow(actions=actions, reviews=reviews, activity=activity).decide_review(item.id, "banana")
+
+    unchanged = reviews.get(item.id)
+    assert unchanged.status is ReviewStatus.OPEN
+    assert unchanged.details == {"current": "October 8", "new": "October 11"}
+    assert actions.get(proposal.id).status == ActionStatus.PROPOSED.value
+    assert activity.list() == []
+
+
+def test_choose_course_decision_requires_a_recognized_course(tmp_path: Path) -> None:
+    actions = ActionStore(tmp_path / "actions.json")
+    reviews = ReviewQueue(tmp_path / "review.json")
+    activity = ActivityLog(tmp_path / "activity.jsonl")
+    courses = [{"id": "POL 2103 - Politics", "code": "POL 2103", "name": "POL 2103 - Politics"}]
+    workflow = ApprovalWorkflow(actions=actions, reviews=reviews, activity=activity, courses=courses)
+    valid = reviews.add(kind="course_identity_uncertainty", title="Choose course", details={"candidates": [{"id": "POL 2103 - Politics"}]})
+
+    decided = workflow.decide_review(valid.id, "choose_course:POL 2103 - Politics")
+
+    assert decided.status is ReviewStatus.APPROVED
+    assert decided.details["decision"] == "choose_course:POL 2103 - Politics"
+    assert len(activity.list()) == 1
+
+    invalid = reviews.add(kind="course_identity_uncertainty", title="Choose course", details={"candidates": [{"id": "POL 2103 - Politics"}]})
+    activity_count = len(activity.list())
+    with pytest.raises(ValueError, match="recognized course"):
+        workflow.decide_review(invalid.id, "choose_course:banana")
+    assert reviews.get(invalid.id).status is ReviewStatus.OPEN
+    assert "decision" not in reviews.get(invalid.id).details
+    assert len(activity.list()) == activity_count
