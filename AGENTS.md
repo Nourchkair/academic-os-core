@@ -32,17 +32,18 @@ For each recognized semester, the reusable template includes a semester-level `0
 
 ## Agent-first operating model
 
-Academia OS is an AI-native academic operating layer. The student’s authorized AI agent owns conversation, reading, reasoning, teaching, synthesis, and repetitive maintenance; Academia OS owns academic state, evidence, provenance, permissions, safe actions, generated artifacts, and the audit trail. The dashboard is observational: it provides visibility, browsing, status, Activity, import/migration, local configuration, and optional workflow guidance. It is not a chatbot or reasoning engine.
+Academia OS is an AI-native academic operating layer. The student’s authorized AI agent owns conversation, reading, reasoning, teaching, synthesis, and repetitive maintenance; Academia OS owns academic state, evidence, provenance, permissions, safe actions, generated artifacts, and the audit trail. The dashboard is observational: it provides visibility, browsing, status, Activity, import/migration, local configuration, and Agent Setup Playbooks. It is not a chatbot or reasoning engine.
 
 Keep these product layers separate:
 
 - **Capabilities:** what Academia OS itself actually implements and can report through `academia agent capabilities --json`.
-- **Recommendations:** optional external workflows that may improve the student's setup.
-- **Recipes:** Academia's safe reference implementation pattern for a recommendation; an agent may adapt mechanics to its own tools while preserving outcomes, authorization, provenance, authority, safety, and verification.
-- **External agent:** checks its own available tools and implements an approved recipe.
-- **Student:** remains the final authority and must approve optional external access or automation.
+- **Agent Setup Playbooks:** portable, read-only guides describing a desired student workflow, required capabilities, safety boundaries, and verification contract.
+- **External agent:** checks its own available tools, obtains any required authorization, and implements or adapts a selected playbook.
+- **Student:** remains the final authority and chooses workflows and external access.
 
-Academia must not claim Gmail, calendar, Brightspace, Canvas, Moodle, Blackboard, Omni, browser, scheduler, Reddit, web-search, or other external access merely because a recipe mentions it. It must not store external connection state or configure those systems itself.
+Academia OS owns local academic state, student preferences, provenance, Review, Activity, and safety boundaries. It does not own the external scheduler, browser session, account connection, credentials, or automation created by an external agent.
+
+Academia must not claim Gmail, calendar, Brightspace, Canvas, Moodle, Blackboard, Omni, browser, scheduler, Reddit, web-search, or other external access merely because a playbook mentions it. It must not store external connection state or configure those systems itself.
 
 Agents must use the structured interface first and retrieve source content only when the context bundle identifies a relevant source. The bounded `sources.library_items` catalog includes metadata for syllabi, readings, notes, generated artifacts, and relevant imports; it includes `id`, name, workspace-relative path, course ownership, category, provenance, source type, and artifact metadata, never file bodies by default. Do not recursively inspect the Markdown tree or read `.academia` files directly to reconstruct state.
 
@@ -60,22 +61,22 @@ Recommended request loop:
 
 Academia does not store agent chat transcripts, prompts, model messages, credentials, or conversation history.
 
-## Optional workflow recommendations and recipes
+## Agent Setup Playbooks
 
 After Academia is installed and configured successfully, an authorized external agent should:
 
 1. verify the local Academia interface;
-2. inspect `academia agent recommendations --json`;
-3. compare the recommendations with its actual capabilities;
-4. tell the student which optional workflows may improve the setup and which tools appear available in the agent environment;
-5. offer guidance only for workflows the student wants, without repeatedly presenting every recommendation;
+2. inspect `academia agent playbooks --json`;
+3. compare the playbooks with its actual capabilities;
+4. tell the student which playbooks may improve the setup and which tools appear available in the agent environment;
+5. offer guidance only for workflows the student wants;
 6. obtain explicit authorization before external service access or automation is created;
-7. retrieve the selected recipe with `academia agent recipe WORKFLOW_ID --json`;
-8. adapt the recipe to its own scheduler, browser, research, mail, calendar, or community tools while preserving the recipe's outcome and safety boundaries;
-9. verify the setup through the recipe's verification steps;
+7. retrieve the selected playbook with `academia agent playbook PLAYBOOK_ID --json`;
+8. adapt the playbook to its own scheduler, browser, research, mail, calendar, or community tools while preserving the desired outcome and safety boundaries;
+9. verify the setup through the playbook's verification steps;
 10. report exactly what the external agent configured and what remains outside its capabilities.
 
-The recommendation and recipe commands are read-only. They do not create schedules, connect accounts, grant permissions, read external systems, or store integration status. A recipe is guidance, not a mandatory implementation.
+The playbook commands are read-only. They do not create schedules, connect accounts, grant permissions, read external systems, or store integration status. A playbook is guidance and an implementation contract, not a deployment manifest. Existing `academia agent recommendations` and `academia agent recipe` commands remain compatibility aliases for older agents.
 
 Saved workflow preferences are a separate, local student-owned layer. They are not external integration state and do not authorize a new external connection. The dashboard and an authorized agent read and write the same `<academic_root>/.academia/workflow_preferences.json` file through the workflow preference interface:
 
@@ -92,9 +93,9 @@ academia workflow set daily_academic_brief \
   --updated-by agent:codex --json
 ```
 
-`workflow preferences` lists saved records without creating missing state. `workflow show` returns `recommended_recipe`, `saved_preferences`, and merged `effective_preferences`. `workflow set` validates overrides against the selected recipe, preserves unrelated existing overrides, writes atomically, and records `updated_at` plus an audit-only `updated_by` such as `user` or `agent:codex`. It never edits the static recipe. Agents must:
+`workflow preferences` lists saved records without creating missing state. `workflow show` returns canonical `recommended_playbook`, a compatibility `recommended_recipe`, `saved_preferences`, and merged `effective_preferences`. `workflow set` validates overrides against the selected playbook, preserves unrelated existing overrides, writes atomically, and records `updated_at` plus an audit-only `updated_by` such as `user` or `agent:codex`. It never edits the static playbook. Agents must:
 
-1. read the recipe;
+1. read the playbook;
 2. read the saved workflow preferences;
 3. treat them as the student's desired configuration;
 4. explain any external authorization still required;
@@ -103,7 +104,6 @@ academia workflow set daily_academic_brief \
 7. report what was actually configured, without claiming that saved preferences prove it is running.
 
 Preference values and notes must not contain passwords, MFA codes, tokens, cookies, API keys, or other credentials. The workflow preference file is not an authentication mechanism.
-
 ## Stable interface
 
 Use the installed CLI or its equivalent local API:
@@ -134,9 +134,12 @@ academia inbox --json
 academia activity --json
 academia capabilities --json
 academia agent capabilities --json
+academia agent playbooks --json
+academia agent playbook daily_academic_brief --json
+academia agent playbook course_source_sync --json
+# Compatibility aliases for older agents:
 academia agent recommendations --json
 academia agent recipe daily_academic_brief --json
-academia agent recipe course_source_sync --json
 academia workflow preferences --json
 academia workflow show daily_academic_brief --json
 academia workflow set daily_academic_brief --set time=08:30 --set cadence=weekdays --updated-by user --json

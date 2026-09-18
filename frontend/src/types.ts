@@ -123,6 +123,12 @@ export type WorkflowRecipe = {
   authority_notes?: Record<string, unknown>
 }
 
+export type AgentSetupPlaybook = WorkflowRecipe & {
+  kind: 'agent_setup_playbook'
+  execution_owner: 'external_agent'
+  ownership: Record<'academia_os' | 'playbook' | 'external_agent' | 'student', string>
+}
+
 export type WorkflowPreferenceRecord = {
   workflow_id: string
   preferences: Record<string, unknown>
@@ -139,6 +145,8 @@ export type WorkflowPreferencesPayload = {
 
 export type WorkflowShowPayload = {
   workflow_id: string
+  recommended_playbook: AgentSetupPlaybook
+  /** @deprecated Use recommended_playbook. Kept for compatibility with older agents. */
   recommended_recipe: WorkflowRecipe
   saved_preferences: WorkflowPreferenceRecord | null
   effective_preferences: Record<string, unknown>
@@ -146,6 +154,13 @@ export type WorkflowShowPayload = {
 }
 
 export type WorkflowSetPayload = WorkflowShowPayload & { saved: boolean }
+
+export type PlaybooksPayload = {
+  schema_version: number
+  kind: 'agent_setup_playbook_registry'
+  ownership: Record<'academia_os' | 'playbook' | 'external_agent' | 'student', string>
+  playbooks: AgentSetupPlaybook[]
+}
 
 export type RecommendationsPayload = {
   schema_version: number

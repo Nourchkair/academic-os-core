@@ -74,12 +74,15 @@ def test_onboarding_does_not_present_browser_or_agent_configuration() -> None:
     assert "function Agents" not in source
 
 
-def test_settings_discover_recommended_workflows_without_external_connection_controls() -> None:
+def test_settings_exposes_agent_setup_playbooks_without_external_connection_controls() -> None:
     source = (FRONTEND / "SettingsView.tsx").read_text(encoding="utf-8")
-    assert "Enhance your setup" in source
+    assert "Agent setup playbooks" in source
     assert "EnhanceSetup" in source
     assert "Ask your AI agent" in source
-    assert "api.recommendations" in source
+    assert "api.playbooks" in source
+    assert "Agent Setup Playbook" in source
+    assert "Save my playbook preferences" in source
+    assert "This does not configure an external service" in source
     assert "Connect Gmail" not in source
     assert "Connect Brightspace" not in source
     assert "Connect Calendar" not in source

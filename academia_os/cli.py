@@ -22,7 +22,7 @@ from .domain import ENTITY_TYPES, DomainProjection
 from .file_preview import preview_file
 from .library import filter_material, list_material
 from .provenance import verify_source_metadata
-from .recommendations import get_recipe, list_recommendations
+from .recommendations import get_playbook, get_recipe, list_playbooks, list_recommendations
 from .review import ReviewQueue
 from .semester import resolve_current_semester
 from .settings import preview_config, update_config
@@ -401,19 +401,24 @@ def build_parser() -> argparse.ArgumentParser:
     agent_changes.add_argument("--json", action="store_true")
     agent_capabilities = agent_sub.add_parser("capabilities", help="Return categorized agent capability boundaries")
     agent_capabilities.add_argument("--json", action="store_true")
-    agent_recommendations = agent_sub.add_parser("recommendations", help="List optional recommended external-agent workflows")
+    agent_playbooks = agent_sub.add_parser("playbooks", help="List read-only Agent Setup Playbooks")
+    agent_playbooks.add_argument("--json", action="store_true")
+    agent_playbook = agent_sub.add_parser("playbook", help="Read one read-only Agent Setup Playbook")
+    agent_playbook.add_argument("playbook_id")
+    agent_playbook.add_argument("--json", action="store_true")
+    agent_recommendations = agent_sub.add_parser("recommendations", help="Compatibility alias for `agent playbooks`")
     agent_recommendations.add_argument("--json", action="store_true")
-    agent_recipe = agent_sub.add_parser("recipe", help="Read one optional external-agent workflow recipe")
+    agent_recipe = agent_sub.add_parser("recipe", help="Compatibility alias for `agent playbook`")
     agent_recipe.add_argument("workflow_id")
     agent_recipe.add_argument("--json", action="store_true")
     workflow = sub.add_parser("workflow", help="Read or save local student workflow preferences")
     workflow_sub = workflow.add_subparsers(dest="workflow_command", required=True)
     workflow_preferences = workflow_sub.add_parser("preferences", help="List saved workflow preferences")
     workflow_preferences.add_argument("--json", action="store_true")
-    workflow_show = workflow_sub.add_parser("show", help="Show one recipe and its saved preferences")
+    workflow_show = workflow_sub.add_parser("show", help="Show one Agent Setup Playbook and its saved preferences")
     workflow_show.add_argument("workflow_id")
     workflow_show.add_argument("--json", action="store_true")
-    workflow_set = workflow_sub.add_parser("set", help="Save local preference overrides for one workflow")
+    workflow_set = workflow_sub.add_parser("set", help="Save local preference overrides for one Agent Setup Playbook")
     workflow_set.add_argument("workflow_id")
     workflow_set.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="Preference override; JSON booleans, numbers, and arrays are accepted")
     workflow_set.add_argument("--preferences-json", help="JSON object of preference overrides")
@@ -558,6 +563,12 @@ def dispatch(args: argparse.Namespace) -> int:
     if args.command == "agent":
         if args.agent_command == "capabilities":
             _emit(build_agent_capabilities(), as_json=args.json)
+            return 0
+        if args.agent_command == "playbooks":
+            _emit(list_playbooks(), as_json=args.json)
+            return 0
+        if args.agent_command == "playbook":
+            _emit(get_playbook(args.playbook_id), as_json=args.json)
             return 0
         if args.agent_command == "recommendations":
             _emit(list_recommendations(), as_json=args.json)

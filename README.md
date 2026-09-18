@@ -138,9 +138,12 @@ academia activity --json
 academia agents --json
 academia capabilities --json
 academia agent capabilities --json
+academia agent playbooks --json
+academia agent playbook daily_academic_brief --json
+academia agent playbook course_source_sync --json
+# Compatibility aliases:
 academia agent recommendations --json
 academia agent recipe daily_academic_brief --json
-academia agent recipe course_source_sync --json
 academia workflow preferences --json
 academia workflow show daily_academic_brief --json
 academia workflow set daily_academic_brief --set time=08:30 --set cadence=weekdays --set include_calendar=true --updated-by user --json
@@ -157,11 +160,11 @@ academia watch --json  # one-shot scan of configured folders
 
 Use `--profile /path/to/profile.json` when the profile is not at `~/.academic-os/profile.json`.
 
-### Recommendations and setup recipes
+### Agent Setup Playbooks
 
-Academia OS keeps optional setup guidance separate from capabilities. `academia agent capabilities --json` describes what Academia itself implements. `academia agent recommendations --json` lists optional workflows that may improve the experience, and `academia agent recipe WORKFLOW_ID --json` returns a machine-readable reference recipe.
+Academia OS keeps local capabilities separate from portable external-agent guidance. `academia agent capabilities --json` describes what Academia itself implements. `academia agent playbooks --json` lists read-only Agent Setup Playbooks, and `academia agent playbook PLAYBOOK_ID --json` returns one machine-readable playbook.
 
-The shipped recipes are:
+The shipped playbooks are:
 
 - Daily Academic Brief
 - Course Source Sync
@@ -173,11 +176,13 @@ The shipped recipes are:
 - Practice Material Discovery
 - Visual / Media Learning Sources
 
-These are not integrations, connection checks, or automations. They do not read Gmail, calendars, course portals, browsers, libraries, communities, or the web. An authorized external agent compares each recipe with its own tools, asks the student, adapts the implementation, and verifies what it configured. The student remains in control; Academia OS does not store external service status or configure those systems.
+These are not integrations, connection checks, deployment manifests, or running automations. They do not read Gmail, calendars, course portals, browsers, libraries, communities, or the web. An authorized external agent compares each playbook with its own tools, asks the student, adapts the implementation, and verifies what it actually configured. Academia OS owns the local academic state and safety contract; the external agent owns its scheduler, tools, credentials, and external automation.
 
-### My setup / workflow preferences
+The older `academia agent recommendations` and `academia agent recipe` commands remain compatibility aliases for existing agents.
 
-The student can save desired workflow configuration locally without configuring any external service. The dashboard Settings → Enhance your setup cards expose the human-readable Recommended setup and an expandable My setup editor. The editor starts with the recipe defaults and can save structured overrides, custom instructions, optional external setup notes, and audit attribution.
+### My playbook preferences
+
+The student can save desired playbook configuration locally without configuring any external service. The dashboard Settings → Agent setup playbooks cards expose the human-readable playbook guide and an expandable My playbook preferences editor. The editor starts with playbook defaults and can save structured overrides, custom instructions, optional notes for the implementing agent, and audit attribution.
 
 For example:
 
@@ -194,14 +199,14 @@ academia workflow set daily_academic_brief \
   --updated-by user --json
 ```
 
-Read the saved configuration together with its recipe:
+Read the saved configuration together with its playbook:
 
 ```bash
 academia workflow preferences --json
 academia workflow show daily_academic_brief --json
 ```
 
-The show response contains `recommended_recipe`, `saved_preferences`, and `effective_preferences`. The saved file is `<academic_root>/.academia/workflow_preferences.json`. It is local preference data, not an account-connection record: it never proves that Gmail, Calendar, a course portal, a browser, a scheduler, or any other external service is available or running. A new connection or automation still requires the agent to explain and obtain the required student authorization. Credentials, MFA codes, tokens, cookies, passwords, and API keys are rejected from preference values and notes.
+The show response contains canonical `recommended_playbook`, compatibility `recommended_recipe`, `saved_preferences`, and `effective_preferences`. The saved file is `<academic_root>/.academia/workflow_preferences.json`. It is local preference data, not an account-connection record: it never proves that Gmail, Calendar, a course portal, a browser, a scheduler, or any other external service is available or running. A new connection or automation still requires the agent to explain and obtain the required student authorization. Credentials, MFA codes, tokens, cookies, passwords, and API keys are rejected from preference values and notes.
 
 ### Agent Context and safe secondary material
 

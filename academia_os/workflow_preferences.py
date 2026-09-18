@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from zoneinfo import available_timezones
 
-from .recommendations import get_recipe
+from .recommendations import get_playbook, get_recipe
 from .state import JsonStateStore
 
 
@@ -81,7 +81,7 @@ def _validate_preference_value(key: str, value: Any, expected: Any) -> Any:
     else:
         valid = isinstance(value, type(expected)) and not isinstance(value, bool)
     if not valid:
-        raise ValueError(f"workflow preference {key!r} must match the recipe's {type(expected).__name__} value type")
+        raise ValueError(f"workflow preference {key!r} must match the playbook's {type(expected).__name__} value type")
 
     if isinstance(value, str):
         if not value.strip():
@@ -180,7 +180,7 @@ def _effective_preferences(recipe: Mapping[str, Any], saved: Mapping[str, Any] |
 
 
 class WorkflowPreferencesStore:
-    """Local student-owned workflow preferences, separate from static recipes."""
+    """Local student-owned workflow preferences, separate from static playbooks."""
 
     def __init__(self, academic_root: Path) -> None:
         self.academic_root = Path(academic_root).expanduser().resolve()
@@ -200,13 +200,15 @@ class WorkflowPreferencesStore:
         return next((copy.deepcopy(item) for item in self._read_state()["workflows"] if item["workflow_id"] == workflow_id), None)
 
     def show(self, workflow_id: str) -> dict[str, Any]:
+        playbook = get_playbook(workflow_id)
         recipe = get_recipe(workflow_id)
         saved = self.get_saved(workflow_id)
         return {
             "workflow_id": workflow_id,
+            "recommended_playbook": playbook,
             "recommended_recipe": recipe,
             "saved_preferences": saved,
-            "effective_preferences": _effective_preferences(recipe, saved),
+            "effective_preferences": _effective_preferences(playbook, saved),
             "preference_semantics": "saved preferences describe the student's desired setup; they do not prove external services are connected or automation is running",
         }
 

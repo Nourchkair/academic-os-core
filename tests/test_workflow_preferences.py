@@ -77,6 +77,8 @@ def test_workflow_show_returns_recipe_saved_overrides_and_effective_defaults(tmp
 
     value = store.show("daily_academic_brief")
 
+    assert value["recommended_playbook"]["kind"] == "agent_setup_playbook"
+    assert value["recommended_playbook"]["execution_owner"] == "external_agent"
     assert value["recommended_recipe"]["suggested_defaults"]["time"] == "09:00"
     assert value["saved_preferences"]["preferences"] == {"time": "08:30", "include_calendar": True}
     assert value["effective_preferences"]["time"] == "08:30"
@@ -152,6 +154,7 @@ def test_workflow_preference_cli_reads_and_writes_same_local_state(tmp_path: Pat
     assert saved_value["effective_preferences"]["time"] == "08:30"
     assert saved_value["effective_preferences"]["cadence"] == "weekdays"
     assert saved_value["effective_preferences"]["include_calendar"] is True
+    assert saved_value["recommended_playbook"]["kind"] == "agent_setup_playbook"
     assert saved_value["recommended_recipe"]["suggested_defaults"]["time"] == "09:00"
 
     shown = run_cli(profile, "workflow", "show", "daily_academic_brief", "--json")
@@ -182,17 +185,18 @@ def test_workflow_preference_cli_rejects_unknown_workflow_and_recipe_commands_st
     assert not (root / ".academia").exists()
 
 
-def test_dashboard_exposes_recommended_setup_and_editable_my_setup_without_connection_controls() -> None:
+def test_dashboard_exposes_agent_setup_playbooks_and_editable_preferences_without_connection_controls() -> None:
     source = (FRONTEND / "SettingsView.tsx").read_text(encoding="utf-8")
     tauri = (FRONTEND.parent / "src-tauri" / "src" / "lib.rs").read_text(encoding="utf-8")
     assert "workflow" in SAFE_COMMANDS
     assert '"workflow"' in tauri
-    assert "Recommended setup" in source
-    assert "My setup" in source
-    assert "Save my setup" in source
+    assert "Playbook guide" in source
+    assert "My playbook preferences" in source
+    assert "Save my playbook preferences" in source
     assert "workflowPreferences" in source
     assert "workflowSet" in source
-    assert "using my saved Academia preferences" in source
+    assert "Agent Setup Playbook" in source
+    assert "api.playbooks" in source
     assert "Connect Gmail" not in source
     assert "Connect Calendar" not in source
     assert "automation definitely running" not in source

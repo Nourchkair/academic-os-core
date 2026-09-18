@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActivityEvent, AttachmentResult, Course, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, WorkflowPreferencesPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
+import type { ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, WorkflowPreferencesPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
@@ -179,8 +179,12 @@ export const api = {
     return command<SettingsPreview>('settings', args)
   },
   capabilities: () => command<Record<string, unknown>>('capabilities'),
+  playbooks: () => command<PlaybooksPayload>('agent', ['playbooks']),
+  /** @deprecated Use playbooks(). */
   recommendations: () => command<RecommendationsPayload>('agent', ['recommendations']),
+  /** @deprecated Use playbook(). */
   recipe: (workflowId: string) => command<Record<string, unknown>>('agent', ['recipe', workflowId]),
+  playbook: (playbookId: string) => command<AgentSetupPlaybook>('agent', ['playbook', playbookId]),
   workflowPreferences: () => command<WorkflowPreferencesPayload>('workflow', ['preferences']),
   workflowShow: (workflowId: string) => command<WorkflowShowPayload>('workflow', ['show', workflowId]),
   workflowSet: (workflowId: string, preferences: Record<string, unknown>, customInstructions: string, externalSetupNotes: string, updatedBy = 'user') => {

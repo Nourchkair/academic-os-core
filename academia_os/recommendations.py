@@ -1,3 +1,10 @@
+"""Agent Setup Playbook registry.
+
+The module name remains ``recommendations`` for import compatibility with the
+first public registry contract. New callers should use ``list_playbooks`` and
+``get_playbook``.
+"""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -17,6 +24,19 @@ RECOMMENDATION_IDS = (
     "visual_learning_sources",
 )
 
+# Canonical public vocabulary. RECOMMENDATION_IDS remains as a compatibility
+# alias for existing agents and scripts that consumed the original registry.
+PLAYBOOK_IDS = RECOMMENDATION_IDS
+
+PLAYBOOK_OWNERSHIP_MODEL = {
+    "academia_os": "owns local academic state, student preferences, provenance, review, and safety boundaries",
+    "playbook": "describes a desired student workflow and its safe implementation contract",
+    "external_agent": "checks its own tools, obtains authorization, and implements or adapts the playbook",
+    "student": "chooses workflows and authorizes external access or automation",
+}
+
+# Legacy response shape retained for existing integrations. New callers should
+# use list_playbooks() and get_playbook().
 OWNERSHIP_MODEL = {
     "academia": "defines capabilities, recommendations, recipes, and safety boundaries",
     "external_agent": "checks its own tools and implements an approved recipe",
@@ -87,7 +107,7 @@ _RECIPES = (
         student_choices=("brief time", "daily or weekdays cadence", "detail level", "include calendar", "include academic email", "check course sources first"),
         suggested_defaults={"time": "09:00", "timezone": "local", "cadence": "daily", "detail": "compact", "include_calendar": False, "include_academic_email": False, "check_course_sources_first": False},
         setup_steps=(
-            _step("inspect", "Read Academia capabilities and recommendations, then compare them with the agent's own tools."),
+            _step("inspect", "Read Academia capabilities and Agent Setup Playbooks, then compare them with the agent's own tools."),
             _step("choose", "Show the student the schedule, cadence, detail, and optional source choices before proposing automation.", approval=True),
             _step("schedule", "After approval, create the recurring job using the agent's own scheduler or automation mechanism.", approval=True),
             _step("collect", "At each run, read the changes cursor, today compact context, and attention; read optional sources only when authorized and available."),
@@ -107,14 +127,14 @@ _RECIPES = (
             "Confirm the change cursor advances only after a brief is successfully produced.",
         ),
         maintenance=("Review the cadence and included sources each term.", "Preserve and resume from the last successful changes cursor.", "Report failed runs instead of silently skipping them."),
-        academia_interfaces=("academia agent capabilities --json", "academia agent recommendations --json", "academia agent changes --json", "academia agent context --scope today --detail compact --json", "academia agent attention --json"),
+        academia_interfaces=("academia agent capabilities --json", "academia agent playbooks --json", "academia agent changes --json", "academia agent context --scope today --detail compact --json", "academia agent attention --json"),
         adaptation_notes=("A scheduler, task runner, or agent-native automation mechanism may be used.", "The implementation may change delivery mechanics while preserving the briefing contents, authorization, provenance, and verification behavior."),
         authority_notes={"course_authoritative_sources_outrank": ["official course material", "verified student records", "general web or community context"]},
     ),
     WorkflowRecipe(
         id="course_source_sync",
         title="Course Source Sync",
-        summary="A vendor-neutral recipe for an external agent to check authorized course portals and import meaningful new material.",
+        summary="A vendor-neutral playbook for an external agent to check authorized course portals and import meaningful new material.",
         why_useful="Keeps syllabi, announcements, readings, slides, and assignment instructions discoverable without making Academia OS responsible for school-platform access.",
         level="recommended",
         requires=("academia_cli", "course_platform_read", "file_download"),
@@ -144,7 +164,7 @@ _RECIPES = (
     WorkflowRecipe(
         id="academic_research_access",
         title="Academic Library / Scholarly Research",
-        summary="A source-faithful research recipe for an external agent using legitimate library, publisher, DOI, repository, and open-access routes.",
+        summary="A source-faithful playbook for an external agent using legitimate library, publisher, DOI, repository, and open-access routes.",
         why_useful="Improves research quality by helping the agent find legitimate sources and preserve edition, authority, and retrieval information.",
         level="recommended",
         requires=("academia_cli", "academic_research_access"),
@@ -162,7 +182,7 @@ _RECIPES = (
     WorkflowRecipe(
         id="calendar_awareness",
         title="Calendar Awareness",
-        summary="A planning recipe that lets an external agent incorporate classes, exams, deadlines, appointments, and study blocks.",
+        summary="A planning playbook that lets an external agent incorporate classes, exams, deadlines, appointments, and study blocks.",
         why_useful="Adds time-aware planning while keeping calendar ownership and any writes with the student's authorized external agent.",
         level="optional",
         requires=("calendar_read",),
@@ -170,7 +190,7 @@ _RECIPES = (
         student_choices=("read only or read/write", "which calendars", "whether study blocks may be suggested", "whether event creation may occur after approval"),
         suggested_defaults={"access": "read_only", "calendars": "student_choice", "suggest_study_blocks": False, "create_events_after_approval": False},
         setup_steps=(_step("scope", "Ask which calendars and whether the agent may read or propose calendar changes.", approval=True), _step("read", "Read calendar context through the external agent and distinguish it from Academia-confirmed academic facts."), _step("propose", "For any write, check duplicates and show the exact proposed event before asking for approval.", approval=True), _step("write", "If approved and supported, perform the change through the external calendar tool and not through Academia OS.", approval=True), _step("verify", "Read the external calendar again and report the result.")),
-        safety_rules=("Academia OS does not claim calendar read or write access merely because this recipe exists.", "Calendar writes require duplicate checking, explicit approval, and post-write verification.", "Do not create events silently or treat an external calendar item as authoritative course evidence without provenance."),
+        safety_rules=("Academia OS does not claim calendar read or write access merely because this playbook exists.", "Calendar writes require duplicate checking, explicit approval, and post-write verification.", "Do not create events silently or treat an external calendar item as authoritative course evidence without provenance."),
         verification_steps=("Confirm selected calendars and access mode.", "Show the next read or proposed event to the student.", "For writes, verify the event ID or equivalent external result after approval."),
         maintenance=("Review calendar scope each term.", "Recheck duplicate behavior after changing external calendar tooling.", "Keep read-only access as the fallback when writes are not supported."),
         academia_interfaces=("academia agent context --scope today --json", "academia agent attention --json", "academia agent changes --json"),
@@ -179,7 +199,7 @@ _RECIPES = (
     WorkflowRecipe(
         id="academic_email_awareness",
         title="Academic Email Awareness",
-        summary="A read/search-oriented recipe for noticing relevant academic email changes without sending school messages.",
+        summary="A read/search-oriented playbook for noticing relevant academic email changes without sending school messages.",
         why_useful="Helps an authorized agent notice course announcements, deadline updates, and forwarded school messages that the student wants included in planning.",
         level="optional",
         requires=("academic_email_read",),
@@ -197,7 +217,7 @@ _RECIPES = (
     WorkflowRecipe(
         id="web_research",
         title="General Web Research",
-        summary="A source-aware recipe for supplementing academic work with legitimate public and current information.",
+        summary="A source-aware playbook for supplementing academic work with legitimate public and current information.",
         why_useful="Provides background, official public information, definitions, and current context when course-authoritative sources do not answer the question.",
         level="optional",
         requires=("public_web_search",),
@@ -215,7 +235,7 @@ _RECIPES = (
     WorkflowRecipe(
         id="community_research",
         title="Community Research",
-        summary="A bounded recipe for using Reddit, student forums, and public course communities as informal context.",
+        summary="A bounded playbook for using Reddit, student forums, and public course communities as informal context.",
         why_useful="Can reveal common student questions, study strategies, difficult topics, and potentially useful public resources.",
         level="optional",
         requires=("community_search",),
@@ -233,7 +253,7 @@ _RECIPES = (
     WorkflowRecipe(
         id="practice_material_discovery",
         title="Practice Material Discovery",
-        summary="A provenance-preserving recipe for finding legitimate public practice material and creating clearly labeled new study aids.",
+        summary="A provenance-preserving playbook for finding legitimate public practice material and creating clearly labeled new study aids.",
         why_useful="Expands study options with practice exams, sample questions, study guides, drills, and flashcards without confusing unofficial material with professor-issued work.",
         level="optional",
         requires=("academia_cli", "public_practice_search"),
@@ -251,7 +271,7 @@ _RECIPES = (
     WorkflowRecipe(
         id="visual_learning_sources",
         title="Visual / Media Learning Sources",
-        summary="A supplementary-learning recipe for finding public diagrams, videos, lectures, maps, charts, documentaries, and demonstrations.",
+        summary="A supplementary-learning playbook for finding public diagrams, videos, lectures, maps, charts, documentaries, and demonstrations.",
         why_useful="Some concepts become easier to understand through visual explanations or demonstrations alongside written course material.",
         level="optional",
         requires=("public_media_search",),
@@ -299,3 +319,29 @@ def get_recipe(workflow_id: str) -> dict[str, Any]:
         if recipe.id == workflow_id:
             return recipe.as_dict()
     raise KeyError(f"unknown recommended workflow: {workflow_id}")
+
+
+def _playbook_payload(recipe: WorkflowRecipe) -> dict[str, Any]:
+    value = recipe.as_dict()
+    value["kind"] = "agent_setup_playbook"
+    value["execution_owner"] = "external_agent"
+    value["ownership"] = deepcopy(PLAYBOOK_OWNERSHIP_MODEL)
+    return value
+
+
+def list_playbooks() -> dict[str, Any]:
+    """Return the canonical, read-only Agent Setup Playbook registry."""
+    return {
+        "schema_version": 1,
+        "kind": "agent_setup_playbook_registry",
+        "ownership": deepcopy(PLAYBOOK_OWNERSHIP_MODEL),
+        "playbooks": [_playbook_payload(recipe) for recipe in _RECIPES],
+    }
+
+
+def get_playbook(playbook_id: str) -> dict[str, Any]:
+    """Return one canonical Agent Setup Playbook without touching workspace state."""
+    for recipe in _RECIPES:
+        if recipe.id == playbook_id:
+            return _playbook_payload(recipe)
+    raise KeyError(f"unknown agent setup playbook: {playbook_id}")
