@@ -1,25 +1,28 @@
 # Academia OS
 
-Academia OS is a local-first academic operating system for a student’s computer. It organizes a human-readable University workspace, keeps provenance and uncertainty visible, provides a durable review/activity model, and exposes a stable local CLI/API contract for any authorized agent.
+Academia OS is a **local-first, AI-native academic operating layer** for a student’s computer. Authorized agents such as Codex, Hermes, Claude Code, ChatGPT-compatible local workflows, or future tools perform conversation, reading, reasoning, source analysis, planning, and study support. Academia OS owns the human-readable workspace, academic state, evidence, provenance, permissions, safe actions, generated secondary material, and audit trail. The visual dashboard gives the student visibility and control; it is not the reasoning engine.
 
 It is **not** a Hermes product. Hermes is one optional adapter. Academia OS works without Hermes, Codex, ChatGPT/Work, Claude, browser automation, or a school account connection.
 
-## What changed in the agent-neutral architecture
+## Agent-first architecture
 
 ```text
-Hermes / Codex / ChatGPT / Claude / future agents
-                         │ optional adapters
+Student ↔ authorized AI agent
+          reasoning · teaching · synthesis · planning
+                         │ structured local CLI/API
                          ▼
-              Academia OS interface (CLI / Tauri bridge)
+                   Academia OS
+     context · evidence · provenance · permissions
+     Review protocol · safe actions · artifacts · Activity
                          │
                          ▼
-              academia_os core and local workspace
-              ├── human-readable files
-              ├── .academia indexes/state
-              └── proposals → approval → execute → verify → activity
+              human-readable academic workspace
+        originals · student material · AI-generated material
+
+Dashboard: observability · browsing · status · Activity · settings
 ```
 
-The core owns configuration, workspace discovery, semesters, courses, sources, provenance, source verification, review items, activity, processing state, migration, acquisition metadata, and action policy. It does not import Hermes.
+The core composes existing workspace, courses, tasks, Library, domain projections, Review, Activity, processing, provenance, and capabilities into bounded `academia agent ... --json` views. It does not create a second database, import model SDKs, or store AI conversations.
 
 ## Install the core locally
 
@@ -134,12 +137,47 @@ academia inbox --json
 academia activity --json
 academia agents --json
 academia capabilities --json
+academia agent capabilities --json
+academia agent context --scope today --detail compact --json
+academia agent context --scope semester --detail standard --json
+academia agent context --scope course --course "POL 2103 - Politics" --detail compact --json
+academia agent attention --json
+academia agent changes --since CURSOR --json
+academia artifact create --course "POL 2103 - Politics" --kind study_guide --title "Week 4 Study Guide" --content-file /tmp/week-4-guide.md --source "Fall 2026/POL 2103 - Politics/05_REFERENCE/week-4-reading.md" --created-by codex --json
 academia import /path/to/file.pdf --destination /path/to/workspace/Fall\ 2026/COURSE/00_INBOX --json
 academia import /path/to/unknown-file.pdf --destination /path/to/workspace/Fall\ 2026/00_INBOX --uncertain --json
 academia watch --json  # one-shot scan of configured folders
 ```
 
 Use `--profile /path/to/profile.json` when the profile is not at `~/.academic-os/profile.json`.
+
+### Agent Context and safe secondary material
+
+`academia agent context --json` is the primary machine-facing interface. It composes existing state without duplicating it and returns a bounded bundle containing:
+
+- workspace and semester identity;
+- scoped courses, open tasks, current assignments, and confirmed upcoming deadlines;
+- relevant Library references and evidence references without automatically loading file contents;
+- unresolved Review decisions translated into `attention.items` with a question, why human input is needed, evidence, choices, and linked action proposal;
+- failed or pending processing, important unverified facts, recent Activity, capability categories, and controlled write locations.
+
+Scopes are `workspace`, `semester`, `course`, and `today`. Detail modes are `compact`, `standard`, and `deep`; compact is recommended for routine agent turns. Course and source paths are workspace-scoped references. Agents should retrieve a bounded preview or authorized file only after context identifies it.
+
+`academia agent changes --since CURSOR --json` returns append-only Activity events oldest-first and a `next_cursor`. Reusing the cursor is idempotent. Academia accepts an Activity event ID or ISO timestamp as a cursor and does not store chat-session state.
+
+Authorized agents can create secondary academic material without arbitrary filesystem writes:
+
+```bash
+academia artifact create \
+  --course "POL 2103 - Politics" \
+  --kind study_guide \
+  --title "Week 4 Study Guide" \
+  --content-file /tmp/week-4-guide.md \
+  --source "Fall 2026/POL 2103 - Politics/05_REFERENCE/week-4-reading.md" \
+  --created-by codex --json
+```
+
+The create-only command writes Markdown under `<semester>/<course>/06_KNOWLEDGE/AI_GENERATED/`, creates that directory lazily, records `.academia/artifacts.json`, preserves source references, and appends Activity with optional `agent:<name>` attribution. Generated material is always `AI-GENERATED` and `authoritative: false`; it cannot overwrite originals or external imports. Source-derived kinds such as `study_guide`, `reading_summary`, `practice_questions`, `exam_review`, `source_notes`, and `assignment_outline` require at least one workspace source or domain reference. A revised guide should be created as a new artifact in this pass; update/delete operations are intentionally not implemented.
 
 ### Browser dashboard
 

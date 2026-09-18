@@ -42,8 +42,12 @@ class JsonStateStore:
             return default
 
     def read(self, default: Any) -> Any:
-        with self.locked():
-            return self._read_unlocked(default)
+        """Read atomically replaced state without creating locks/directories.
+
+        Reads are intentionally side-effect free: absence is represented by the
+        default value. Writers still use the locked transition methods.
+        """
+        return self._read_unlocked(default)
 
     def _write_unlocked(self, value: Any) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

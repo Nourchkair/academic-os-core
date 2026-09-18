@@ -4,8 +4,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .artifacts import artifact_index
+from .state import JsonStateStore
 
-LIBRARY_CATEGORIES = ("syllabi", "readings", "notes", "imports", "other")
+
+LIBRARY_CATEGORIES = ("syllabi", "readings", "notes", "generated", "imports", "other")
 
 # These are workspace control files, not academic material. They remain available
 # through the workspace and agent interfaces but should not clutter Library.
@@ -44,6 +47,8 @@ def _category(relative_path: Path) -> str:
 
     if "00_inbox" in parts:
         return "imports"
+    if "ai_generated" in parts:
+        return "generated"
     if "syllabus" in filename or "course guide" in filename or "course_outline" in filename or "course-outline" in filename:
         return "syllabi"
     if "05_reference" in parts or any(token in joined for token in ("reading", "reference", "bibliography", "source_index")):
@@ -75,6 +80,19 @@ def _is_material(path: Path, relative: Path) -> bool:
     return True
 
 
+def _acquisition_index(workspace_root: Path) -> dict[str, dict[str, Any]]:
+    path = workspace_root / ".academia" / "acquisition.json"
+    if not path.is_file():
+        return {}
+    value = JsonStateStore(path).read({"records": {}})
+    records = value.get("records") if isinstance(value, dict) else {}
+    return {
+        str(key): item
+        for key, item in records.items()
+        if isinstance(item, dict) and item.get("provenance") in {"ORIGINAL", "USER-CREATED", "AI-GENERATED", "EXTERNAL"}
+    } if isinstance(records, dict) else {}
+
+
 def list_material(workspace_root: Path, semester: str) -> list[dict[str, Any]]:
     """List visible files in one semester without reading or changing their contents.
 
@@ -87,6 +105,8 @@ def list_material(workspace_root: Path, semester: str) -> list[dict[str, Any]]:
     semester_root = root / semester
     if not semester_root.is_dir():
         return []
+    artifacts = artifact_index(root)
+    acquisitions = _acquisition_index(root)
 
     items: list[dict[str, Any]] = []
     for path in sorted(semester_root.rglob("*")):
@@ -104,6 +124,9 @@ def list_material(workspace_root: Path, semester: str) -> list[dict[str, Any]]:
             stat = path.stat()
         except OSError:
             continue
+        artifact = artifacts.get(relative.as_posix())
+        acquisition = acquisitions.get(relative.as_posix())
+        base_category = _category(path.relative_to(semester_root))
         items.append(
             {
                 "id": relative.as_posix(),
@@ -112,10 +135,17 @@ def list_material(workspace_root: Path, semester: str) -> list[dict[str, Any]]:
                 "relative_path": relative.as_posix(),
                 "semester": semester,
                 "course_id": _course_id(semester_root, path),
-                "category": _category(path.relative_to(semester_root)),
+                "category": "generated" if artifact else base_category,
                 "extension": path.suffix.lower(),
                 "size": stat.st_size,
                 "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+                "provenance": artifact.get("provenance") if artifact else (acquisition.get("provenance") if acquisition else None),
+                "source_type": "AI-generated" if artifact else (acquisition.get("source_type") if acquisition else ("Imported" if base_category == "imports" else "Workspace material")),
+                "artifact_id": artifact.get("id") if artifact else None,
+                "artifact_kind": artifact.get("kind") if artifact else None,
+                "created_by": artifact.get("created_by") if artifact else None,
+                "authoritative": artifact.get("authoritative") if artifact else None,
+                "source_refs": artifact.get("source_refs", []) if artifact else [],
             }
         )
     return items

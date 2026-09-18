@@ -29,6 +29,24 @@ The workspace must remain readable without Academia OS. Indexes and caches must 
 
 For each recognized semester, the reusable template includes a semester-level `00_INBOX/` for academic material whose course identity is not known yet. It is distinct from a course's direct `00_INBOX/`; imports must target exactly one of those two structures and may not use arbitrary dump folders or nested subfolders.
 
+## Agent-first operating model
+
+Academia OS is an AI-native academic operating layer. The student’s authorized AI agent owns conversation, reading, reasoning, teaching, synthesis, and repetitive maintenance; Academia OS owns academic state, evidence, provenance, permissions, safe actions, generated artifacts, and the audit trail. The dashboard is observational: it provides visibility, browsing, status, Activity, import/migration, and local configuration. It is not a chatbot or reasoning engine.
+
+Agents must use the structured interface first and retrieve source content only when the context bundle identifies a relevant source. Do not recursively inspect the Markdown tree or read `.academia` files directly to reconstruct state.
+
+Recommended request loop:
+
+1. `academia agent capabilities --json`
+2. `academia agent context --scope today --detail compact --json`
+3. `academia agent attention --json`
+4. Retrieve only the referenced course/source files through the bounded file interface.
+5. Perform reasoning in the agent and ask the student when `attention.items` contains a meaningful decision.
+6. Use explicit Academia actions for imports, Review decisions, and generated artifacts.
+7. Poll `academia agent changes --since CURSOR --json` on the next agent session instead of rereading everything.
+
+Academia does not store agent chat transcripts, prompts, model messages, credentials, or conversation history.
+
 ## Stable interface
 
 Use the installed CLI or its equivalent local API:
@@ -58,6 +76,12 @@ academia settings show --json
 academia inbox --json
 academia activity --json
 academia capabilities --json
+academia agent capabilities --json
+academia agent context --scope today --detail compact --json
+academia agent context --scope course --course "COURSE ID" --detail standard --json
+academia agent attention --json
+academia agent changes --since CURSOR --json
+academia artifact create --course "COURSE ID" --kind study_guide --title "Week 5 Study Guide" --content-file /tmp/guide.md --source "Fall 2026/COURSE ID/05_REFERENCE/week-5.md" --created-by codex --json
 academia verify-source --requested requested.json --retrieved retrieved.json --json
 ```
 
@@ -70,10 +94,13 @@ An agent may, when operating through the user-approved local interface:
 - read structured workspace status, courses, tasks, library material, review items, activity, and source metadata;
 - stage user-selected files through manual import or configured watched folders;
 - create a plan or action proposal;
-- create user-authored or AI-generated secondary material with explicit provenance;
+- create AI-generated secondary material only through `academia artifact create`; the destination is always a recognized course’s `06_KNOWLEDGE/AI_GENERATED/` directory;
+- attach workspace source references or evidence-backed domain references to generated material;
 - update rebuildable indexes and append activity records;
 - perform non-destructive, verified file copies when the user has approved the proposal;
 - prepare a settings diff for the user to review.
+
+Generated artifacts are Markdown/text secondary material. They are recorded with `provenance: AI-GENERATED`, `authoritative: false`, an optional `created_by` audit label, and source/domain references. Artifact creation is create-only in this pass: it cannot update, rename, delete, or overwrite an existing artifact or any ORIGINAL, USER-CREATED, or EXTERNAL material. Use a new artifact when a guide needs a revised version.
 
 ## Approval boundaries
 
@@ -81,6 +108,10 @@ An agent may, when operating through the user-approved local interface:
 - Destructive changes, moves, renames, or structural workspace changes require explicit approval and a visible impact summary.
 - A failed action remains failed/retryable; it is never acknowledged as successful.
 - Review items remain open until a human decision is recorded.
+
+`academia agent attention --json` is the conversation-facing Review contract. Each unresolved item includes `id`, `kind`, `course`, `question`, `why_this_needs_human_input`, `current_value`, `proposed_value`, `evidence`, `choices`, `action_proposal_id`, and `status`. The agent should explain the evidence and choices in natural language, ask the student, then call the existing `review decide`/`review execute` workflow and verify the result. Review remains a backend protocol; it is not a chat transcript or an instruction to guess.
+
+`academia agent changes --since CURSOR --json` reads the append-only Activity feed oldest-first and returns `next_cursor`. Reusing that cursor is idempotent. The cursor is an Activity event id; an ISO timestamp is also accepted for integrations that persist time checkpoints.
 
 ## Prohibited behavior
 

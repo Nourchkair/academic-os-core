@@ -40,7 +40,10 @@ def test_dashboard_has_semester_courses_library_and_activity_surfaces() -> None:
     assert "Choose a semester" in courses
     assert "Syllabi & guides" in courses
     assert "Readings & references" in courses
+    assert "AI-created material" in courses
+    assert "AI-generated" in courses
     assert "api.filePreview(item.path, item.semester)" in courses
+    assert "Needs input" in source
 
 
 def test_action_panel_owns_import_and_migration_without_review_navigation() -> None:

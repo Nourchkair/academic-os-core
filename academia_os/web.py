@@ -63,6 +63,8 @@ SAFE_COMMANDS = frozenset(
         "verify",
         "verify-source",
         "agents",
+        "agent",
+        "artifact",
     }
 )
 ALLOWED_ORIGINS = frozenset({"http://localhost:4173", "http://127.0.0.1:4173"})

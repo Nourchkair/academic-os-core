@@ -8,6 +8,7 @@ from typing import Any
 
 from .config import SEMESTER_PATTERN, validate_config
 from .processing import ProcessingStore
+from .state import JsonStateStore
 
 
 def browser_access_policy(config: dict[str, Any]) -> dict[str, Any]:
@@ -42,8 +43,38 @@ def acquisition_defaults() -> dict[str, Any]:
     }
 
 
-def capability_report() -> dict[str, dict[str, Any]]:
+def capability_report() -> dict[str, Any]:
+    """Return implementation details plus hard agent permission categories.
+
+    The categorized entries are the stable machine-facing contract.  The named
+    acquisition/browser entries remain for compatibility with the earlier CLI.
+    """
     return {
+        "schema_version": 1,
+        "allowed_directly": [
+            {"id": "read_structured_context", "label": "Read structured academic context", "mode": "direct"},
+            {"id": "read_authorized_workspace_files", "label": "Read authorized academic files through bounded workspace interfaces", "mode": "direct"},
+            {"id": "inspect_domain_state", "label": "Inspect evidence-backed domain state", "mode": "direct"},
+            {"id": "inspect_review", "label": "Inspect unresolved Review decisions", "mode": "direct"},
+            {"id": "create_ai_generated_artifact", "label": "Create clearly marked AI-generated secondary material", "mode": "create_only"},
+            {"id": "create_non_destructive_index", "label": "Create or rebuild non-destructive local indexes", "mode": "direct"},
+            {"id": "read_activity_changes", "label": "Read append-only Activity changes with a cursor", "mode": "direct"},
+        ],
+        "approval_required": [
+            {"id": "file_move", "label": "Move a file", "mode": "explicit_approval_and_verification"},
+            {"id": "file_rename", "label": "Rename a file", "mode": "explicit_approval_and_verification"},
+            {"id": "destructive_structural_change", "label": "Delete or structurally reorganize academic material", "mode": "explicit_approval_and_verification"},
+            {"id": "calendar_update", "label": "Change a calendar event", "mode": "explicit_approval_duplicate_check_and_verification"},
+            {"id": "confirmed_academic_state_change", "label": "Change confirmed academic state after conflicting evidence", "mode": "Review_then_approved_action_then_verification"},
+        ],
+        "prohibited": [
+            {"id": "school_submission", "label": "Submit coursework, quizzes, exams, forms, or discussions"},
+            {"id": "school_message", "label": "Send school-account messages or contact academic staff/students"},
+            {"id": "payment", "label": "Make payments"},
+            {"id": "authentication", "label": "Authenticate as the user or handle passwords/MFA"},
+            {"id": "credential_access", "label": "Read cookies, session tokens, API keys, or hidden credentials"},
+            {"id": "arbitrary_original_overwrite", "label": "Overwrite ORIGINAL or EXTERNAL academic material through the artifact API"},
+        ],
         "manual_import": {
             "status": "available",
             "mode": "copy_to_selected_inbox",
@@ -113,6 +144,23 @@ def validate_import_source(source: Path) -> Path:
     return source
 
 
+def _record_acquisition(workspace_root: Path, destination: Path, metadata: dict[str, Any]) -> None:
+    root = Path(workspace_root).expanduser().resolve()
+    relative = destination.resolve().relative_to(root).as_posix()
+    path = root / ".academia" / "acquisition.json"
+
+    def transition(raw: dict[str, Any]) -> dict[str, Any]:
+        state = raw if isinstance(raw, dict) else {"schema_version": 1, "records": {}}
+        records_value = state.get("records")
+        records: dict[str, Any] = records_value if isinstance(records_value, dict) else {}
+        records[relative] = dict(metadata)
+        state["schema_version"] = 1
+        state["records"] = records
+        return state
+
+    JsonStateStore(path).update({"schema_version": 1, "records": {}}, transition)
+
+
 def import_file(
     source: Path,
     destination_inbox: Path,
@@ -147,6 +195,7 @@ def import_file(
     }
     if source_label is not None:
         metadata["source_label"] = source_label
+    _record_acquisition(workspace_root, destination, metadata)
     if processing is not None:
         processing.detect(destination, signature=f"{destination.stat().st_size}:{destination.stat().st_mtime_ns}")
     return metadata

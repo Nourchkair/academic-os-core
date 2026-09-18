@@ -41,15 +41,43 @@ class ActivityLog:
         self.store.append_json_line(asdict(event))
         return event
 
-    def list(self, limit: int = 100) -> list[ActivityEvent]:
+    def _read_events(self) -> list[ActivityEvent]:
         if not self.path.is_file():
             return []
         events: list[ActivityEvent] = []
-        for line in self.path.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]:
+        for line in self.path.read_text(encoding="utf-8", errors="replace").splitlines():
             try:
                 value = json.loads(line)
                 if isinstance(value, dict):
                     events.append(ActivityEvent.from_dict(value))
             except (ValueError, TypeError, KeyError):
                 continue
-        return list(reversed(events))
+        return events
+
+    def list(self, limit: int = 100) -> list[ActivityEvent]:
+        return list(reversed(self._read_events()[-limit:]))
+
+    def changes_since(self, cursor: str | None = None, *, limit: int = 100) -> tuple[list[ActivityEvent], str | None]:
+        """Return append-only changes after an activity id or ISO timestamp.
+
+        Activity ids are opaque cursors.  A timestamp is accepted for agents that
+        persist time checkpoints instead of ids.  Events are returned oldest-first
+        so an agent can apply them in order; the cursor is the id of the last
+        event returned and is safe to reuse for an idempotent paginated poll.
+        """
+        if not isinstance(limit, int) or limit < 1:
+            raise ValueError("activity change limit must be at least 1")
+        events = self._read_events()
+        start = 0
+        if cursor:
+            matching = next((index for index, event in enumerate(events) if event.id == cursor), None)
+            if matching is not None:
+                start = matching + 1
+            else:
+                try:
+                    checkpoint = datetime.fromisoformat(cursor)
+                except ValueError as exc:
+                    raise ValueError("activity cursor must be an activity id or ISO timestamp") from exc
+                start = next((index for index, event in enumerate(events) if datetime.fromisoformat(event.created_at) > checkpoint), len(events))
+        changes = events[start : start + limit]
+        return changes, (changes[-1].id if changes else cursor)

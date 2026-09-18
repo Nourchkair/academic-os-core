@@ -94,6 +94,36 @@ def test_health_endpoint_returns_structured_local_service_status(tmp_path: Path)
     assert "access-control-allow-origin" not in headers
 
 
+def test_health_endpoint_advertises_agent_transport_command(tmp_path: Path) -> None:
+    with running_server(tmp_path) as server:
+        status, _headers, payload = request(server, "GET", "/api/v1/health")
+
+    assert status == 200
+    assert "agent" in json.loads(payload)["commands"]
+    assert "artifact" in json.loads(payload)["commands"]
+
+
+def test_agent_command_is_allowed_by_local_transport_without_shell_interpretation(tmp_path: Path) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    def runner(command: str, args: list[str]) -> CommandResult:
+        calls.append((command, args))
+        return CommandResult(0, json.dumps({"schema_version": 1, "items": []}), "")
+
+    with running_server(tmp_path, runner=runner) as server:
+        status, _headers, payload = request(
+            server,
+            "POST",
+            "/api/v1/command",
+            body=command_body("agent", ["attention"]),
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert status == 200
+    assert json.loads(payload)["schema_version"] == 1
+    assert calls == [("agent", ["attention", "--json"])]
+
+
 def test_cors_allows_only_the_local_frontend_origins(tmp_path: Path) -> None:
     with running_server(tmp_path) as server:
         allowed_status, allowed_headers, _ = request(

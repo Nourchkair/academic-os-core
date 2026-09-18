@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from academia_os.acquisition import import_file
 from academia_os.domain import Deadline, DomainProjection, Evidence
 from academia_os.library import list_material
+from academia_os.processing import ProcessingStore
 from academia_os.workspace import build_workspace_snapshot
 from tests.test_agent_neutral_core import minimal_config
 
@@ -38,7 +40,23 @@ def test_library_lists_current_semester_material_with_transparent_categories(tmp
         ("unknown-material.pdf", "imports"),
     }
     assert next(item for item in items if item["name"] == "unknown-material.pdf")["course_id"] is None
+    assert next(item for item in items if item["name"] == "unknown-material.pdf")["provenance"] is None
     assert all(".academia" not in item["path"] for item in items)
+
+
+def test_library_labels_only_recorded_imports_as_external(tmp_path: Path) -> None:
+    config = minimal_config(tmp_path)
+    root = Path(config["academic"]["root_directory"])
+    destination = root / "Fall 2026" / "POL 2103 - Politics" / "00_INBOX"
+    (destination.parent / "01_COURSE").mkdir(parents=True)
+    source = tmp_path / "external.pdf"
+    source.write_bytes(b"external")
+    metadata = import_file(source, destination, ProcessingStore(root / ".academia" / "processing.json"), workspace_root=root)
+
+    item = next(item for item in list_material(root, "Fall 2026") if item["name"] == "external.pdf")
+    assert metadata["provenance"] == "EXTERNAL"
+    assert item["provenance"] == "EXTERNAL"
+    assert item["source_type"] == "manual_file"
 
 
 def test_workspace_snapshot_includes_material_counts_and_structured_domain_tasks(tmp_path: Path) -> None:

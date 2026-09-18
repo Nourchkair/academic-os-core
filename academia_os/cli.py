@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .acquisition import browser_access_policy, capability_report, configured_watched_folders, import_file, scan_watched_folder, validate_import_destination
+from .agent import build_agent_attention, build_agent_capabilities, build_agent_changes, build_agent_context
+from .artifacts import create_generated_artifact
 from .actions import ActionStore
 from .activity import ActivityLog
 from .attachment import assess_profile, attach_workspace, backup_profile, inspect_workspace
@@ -57,6 +59,14 @@ def _semester_context(args: argparse.Namespace) -> tuple[dict[str, Any], dict[st
     semester = getattr(args, "semester", None)
     if semester and semester != snapshot["semester"]:
         snapshot = build_workspace_snapshot(config, persist=False, semester_override=semester)
+    return config, snapshot, profile_path
+
+
+def _agent_semester_context(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any], Path]:
+    profile_path = _profile_path(args)
+    config = load_config(profile_path)
+    semester = getattr(args, "semester", None)
+    snapshot = build_workspace_snapshot(config, persist=False, semester_override=semester)
     return config, snapshot, profile_path
 
 
@@ -331,6 +341,37 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--json", action="store_true")
         if name == "courses":
             command.add_argument("--semester", help="Read courses from a specific semester folder")
+    agent = sub.add_parser("agent", help="Stable bounded context and change-feed interface for authorized agents")
+    agent_sub = agent.add_subparsers(dest="agent_command", required=True)
+    agent_context = agent_sub.add_parser("context", help="Build bounded structured academic context")
+    agent_context.add_argument("--scope", choices=("workspace", "semester", "course", "today"), default="workspace")
+    agent_context.add_argument("--course", dest="course_id")
+    agent_context.add_argument("--semester", help="Read context from a specific semester folder")
+    agent_context.add_argument("--detail", choices=("compact", "standard", "deep"), default="standard")
+    agent_context.add_argument("--json", action="store_true")
+    agent_attention = agent_sub.add_parser("attention", help="Return unresolved decisions and retryable issues")
+    agent_attention.add_argument("--course", dest="course_id")
+    agent_attention.add_argument("--semester", help="Read attention for a specific semester folder")
+    agent_attention.add_argument("--detail", choices=("compact", "standard", "deep"), default="standard")
+    agent_attention.add_argument("--json", action="store_true")
+    agent_changes = agent_sub.add_parser("changes", help="Read Activity changes after an optional cursor")
+    agent_changes.add_argument("--since", help="Activity id or ISO timestamp cursor")
+    agent_changes.add_argument("--limit", type=int, default=100)
+    agent_changes.add_argument("--json", action="store_true")
+    agent_capabilities = agent_sub.add_parser("capabilities", help="Return categorized agent capability boundaries")
+    agent_capabilities.add_argument("--json", action="store_true")
+    artifact = sub.add_parser("artifact", help="Create safe AI-generated secondary academic material")
+    artifact_sub = artifact.add_subparsers(dest="artifact_command", required=True)
+    artifact_create = artifact_sub.add_parser("create", help="Create a new Markdown artifact in Academia's generated-material location")
+    artifact_create.add_argument("--course", dest="course_id", required=True)
+    artifact_create.add_argument("--semester", help="Semester containing the course; defaults to the active semester")
+    artifact_create.add_argument("--kind", required=True, help="Artifact kind such as study_guide or reading_summary")
+    artifact_create.add_argument("--title", required=True)
+    artifact_create.add_argument("--content-file", required=True, help="UTF-8 Markdown/text file, or '-' to read stdin")
+    artifact_create.add_argument("--source", action="append", default=[], help="Workspace file reference; may be repeated")
+    artifact_create.add_argument("--domain-ref", action="append", default=[], help="Evidence-backed domain entity id; may be repeated")
+    artifact_create.add_argument("--created-by", help="Optional audit attribution such as codex, hermes, or claude")
+    artifact_create.add_argument("--json", action="store_true")
     semester = sub.add_parser("semester", help="Resolve the current semester using the shared calendar and timezone policy")
     semester.add_argument("--timezone", default="UTC")
     semester.add_argument("--json", action="store_true")
@@ -346,7 +387,7 @@ def build_parser() -> argparse.ArgumentParser:
     domain.add_argument("entity_type", choices=ENTITY_TYPES, nargs="?")
     domain.add_argument("--json", action="store_true")
     library = sub.add_parser("library", help="List visible material in the active semester")
-    library.add_argument("--category", choices=("all", "syllabi", "readings", "notes", "imports", "other"), default="all")
+    library.add_argument("--category", choices=("all", "syllabi", "readings", "notes", "generated", "imports", "other"), default="all")
     library.add_argument("--course", dest="course_id")
     library.add_argument("--query", default="")
     library.add_argument("--semester", help="Read material from a specific semester folder")
@@ -434,7 +475,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"courses", "today", "tasks", "course", "domain", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
+        if args.command in {"courses", "today", "tasks", "course", "domain", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "artifact", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -452,6 +493,48 @@ def dispatch(args: argparse.Namespace) -> int:
         return 0
     if args.command == "migration":
         _emit(_migration(args), as_json=args.json)
+        return 0
+    if args.command == "agent":
+        if args.agent_command == "capabilities":
+            _emit(build_agent_capabilities(), as_json=args.json)
+            return 0
+        if args.agent_command == "changes":
+            config = load_config(_profile_path(args))
+            _emit(build_agent_changes(config, since=args.since, limit=args.limit), as_json=args.json)
+            return 0
+        config, snapshot, _ = _agent_semester_context(args)
+        if args.agent_command == "context":
+            value = build_agent_context(config, snapshot, scope=args.scope, detail=args.detail, course_id=args.course_id, semester=args.semester)
+        elif args.agent_command == "attention":
+            value = build_agent_attention(config, snapshot, detail=args.detail, course_id=args.course_id)
+        else:
+            raise ValueError(f"unsupported agent command: {args.agent_command}")
+        _emit(value, as_json=args.json)
+        return 0
+    if args.command == "artifact":
+        if args.artifact_command != "create":
+            raise ValueError(f"unsupported artifact command: {args.artifact_command}")
+        config, snapshot, _ = _context(args)
+        if args.content_file == "-":
+            content = sys.stdin.read()
+        else:
+            content_path = Path(args.content_file).expanduser()
+            if content_path.is_symlink() or not content_path.is_file():
+                raise ValueError("artifact content-file must be a regular local text file or '-'")
+            content = content_path.read_text(encoding="utf-8")
+        workspace_root = Path(snapshot["academic_root"]).expanduser().resolve()
+        value = create_generated_artifact(
+            workspace_root,
+            semester=args.semester or snapshot["semester"],
+            course_id=args.course_id,
+            kind=args.kind,
+            title=args.title,
+            content=content,
+            source_refs=args.source,
+            domain_refs=args.domain_ref,
+            created_by=args.created_by,
+        )
+        _emit(value, as_json=args.json)
         return 0
     if args.command == "semester":
         _emit({"semester": resolve_current_semester(timezone_name=args.timezone), "timezone": args.timezone}, as_json=args.json)

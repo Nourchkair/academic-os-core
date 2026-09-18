@@ -205,5 +205,9 @@ class ProcessingStore:
             self.store.update([], transition)
         return recovered
 
+    def list(self) -> list[ProcessingRecord]:
+        """Return persisted records without changing their lifecycle state."""
+        return self._records()
+
     def pending(self) -> list[ProcessingRecord]:
         return [record for record in self._records() if record.status in {ProcessingStatus.PENDING, ProcessingStatus.FAILED, ProcessingStatus.PROCESSING, ProcessingStatus.VERIFIED}]

@@ -12,6 +12,8 @@ academia_os/                       agent-neutral core and CLI
 ├── discovery.py                   workspace discovery
 ├── workspace.py                   rebuildable index/projection
 ├── library.py                     safe current-semester material inventory
+├── agent.py                        bounded Agent Context, attention, changes, capabilities
+├── artifacts.py                    create-only AI-generated secondary material + registry
 ├── provenance.py                  labels + source verification
 ├── review.py                      durable Review Queue
 ├── activity.py                    durable append-only activity
@@ -34,9 +36,35 @@ templates/University/              readable academic workspace template
 
 ## Source of truth and projections
 
-The user’s workspace remains the human-readable source of truth. `.academia/` is local structured state: indexes, review/activity records, processing records, and proposals. Indexes can be rebuilt from the workspace; they are not a database dump that makes files inaccessible.
+The user’s workspace remains the human-readable source of truth. `.academia/` is local structured state: rebuildable indexes, acquisition/provenance records, generated-artifact registry, review/activity records, processing records, and proposals. Indexes can be rebuilt from the workspace; they are not a database dump that makes files inaccessible.
 
-## Configuration
+## AI-native operating boundary
+
+```text
+AI AGENT
+Reasoning · conversation · teaching · writing assistance · planning · research synthesis
+                                      │
+                                      ▼
+ACADEMIA OS
+Academic state · bounded Agent Context · evidence · provenance · permissions
+Review protocol · safe actions · generated artifacts · Activity audit trail
+                                      │
+                                      ▼
+ACADEMIC WORKSPACE
+Human-readable originals · student material · AI-generated secondary material
+
+DASHBOARD
+Observability · visual reference · browsing · status · Activity · Courses · Tasks
+Files · Settings · import/migration
+```
+
+The agent interface is the primary product interface for authorized automation. `academia agent context`, `attention`, `changes`, and `capabilities` compose existing services; they do not create a parallel database or expose `.academia` internals. Context is deliberately bounded by scope (`workspace`, `semester`, `course`, or `today`) and detail (`compact`, `standard`, or `deep`). It returns identifiers, workspace-relative paths, evidence references, and safe-write locations rather than dumping source contents.
+
+`attention.items` is the conversation-facing representation of unresolved Review decisions and retryable issues. It includes a stable question, why human input is needed, evidence, explicit choices, and any linked action proposal. The agent asks the student in its own conversation and then uses the existing Review/Action/Verification workflow. Academia does not store the conversation.
+
+`agent changes` reads append-only Activity oldest-first after an Activity ID or ISO timestamp cursor and returns a new cursor. Reusing the returned cursor is idempotent. Activity remains a record of changes the core actually performed, not reads or chat messages.
+
+`artifacts.py` owns the safe generated-material boundary. `academia artifact create` can write only Markdown under a recognized course’s lazy `06_KNOWLEDGE/AI_GENERATED/` directory. Each record is `AI-GENERATED`, `authoritative: false`, source-linked when the kind is source-derived, and stored in `.academia/artifacts.json` for library/dashboard visibility. There is no arbitrary destination, original-file overwrite, or create/update ambiguity. This pass intentionally implements create-only semantics.
 
 `academia_os.config` is the only canonical configuration model. It owns schema version 2, defaults, validation, atomic serialization, and v1 migration. The installer, CLI, desktop compatibility app, and adapters consume it. Hermes is an optional `agents.hermes` section, not a required core path.
 
