@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActivityEvent, AttachmentResult, Course, DomainEntity, ExtractionPreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, ProcessingRecord, ReviewItem, SettingsPreview, StatusPayload, Task, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
+import type { ActivityEvent, AttachmentResult, Course, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, ProcessingRecord, ReviewItem, SettingsPreview, StatusPayload, Task, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
@@ -92,9 +92,27 @@ async function uploadFile(file: File, destination: string, uncertain: boolean): 
   return readJsonResponse<ImportResult>(response)
 }
 
+async function browserFilePreview(path: string, semester?: string): Promise<FilePreview> {
+  let response: Response
+  try {
+    const query = new URLSearchParams({ path })
+    if (semester) query.set('semester', semester)
+    response = await fetch(`/api/v1/file-preview?${query.toString()}`)
+  } catch {
+    throw new BridgeUnavailableError()
+  }
+  return readJsonResponse<FilePreview>(response)
+}
+
+export function fileUrl(path: string, semester?: string): string {
+  const query = new URLSearchParams({ path })
+  if (semester) query.set('semester', semester)
+  return `/api/v1/file?${query.toString()}`
+}
+
 export const api = {
   status: () => command<StatusPayload>('status'),
-  courses: () => command<Course[]>('courses'),
+  courses: (semester?: string) => command<Course[]>('courses', semester ? ['--semester', semester] : []),
   tasks: () => command<Task[]>('tasks'),
   review: () => command<ReviewItem[]>('review'),
   reviewAction: (action: 'approve' | 'reject' | 'resolve', itemId: string) => command<ReviewItem>('review', [action, itemId]),
@@ -102,13 +120,15 @@ export const api = {
   reviewExecute: (itemId: string) => command<Record<string, unknown>>('review', ['execute', itemId]),
   activity: () => command<ActivityEvent[]>('activity'),
   domain: (entityType?: string) => command<DomainEntity[]>('domain', entityType ? [entityType] : []),
-  library: (options: { category?: string; courseId?: string; query?: string } = {}) => {
+  library: (options: { category?: string; courseId?: string; query?: string; semester?: string } = {}) => {
     const args = []
+    if (options.semester) args.push('--semester', options.semester)
     if (options.category && options.category !== 'all') args.push('--category', options.category)
     if (options.courseId) args.push('--course', options.courseId)
     if (options.query) args.push('--query', options.query)
     return command<LibraryItem[]>('library', args)
   },
+  filePreview: (path: string, semester?: string) => isTauriEnvironment() ? command<FilePreview>('file-preview', [path, ...(semester ? ['--semester', semester] : [])]) : browserFilePreview(path, semester),
   inbox: () => command<ProcessingRecord[]>('inbox'),
   workspace: () => command<WorkspaceSnapshot>('workspace'),
   workspaceDiscover: () => command<WorkspaceCandidate[]>('workspace', ['discover']),

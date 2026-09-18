@@ -21,10 +21,10 @@ The original architecture/refactor slices are implemented and verified. The curr
 
 - **Existing-workspace attachment:** `academia workspace discover` and `workspace inspect PATH` are profile-free and read-only. `workspace attach` previews the filesystem projection and writes only a local profile after `--apply`; stale/invalid test profiles are backed up first.
 - **Fresh-workspace setup:** `workspace create PATH` previews the existing installer/template plan and invokes `installer.core.initialize_installation` only after `--apply`.
-- **Modern onboarding:** the React/Tauri shell now detects missing/stale/unrecognized setup and guides Welcome → Profile → Workspace → Semester → Sources → Agents → Review → Ready.
+- **Modern onboarding:** the React/Tauri shell now detects missing/stale/unrecognized setup and guides Welcome → Profile → Workspace → Semester → Sources → Interface note → Review → Ready.
 - **Modern import:** the frontend uses the native Tauri dialog and Tauri drag/drop paths, while every copy still goes through the existing `academia import` command. “Not sure where this belongs” stages general intake and creates a durable `import_classification` Review item.
 - **Typed Review:** deadline conflicts, source/reading verification, imported-file classification, course uncertainty, and action approval now render as decision-specific cards and persist choices through `review decide`.
-- **Functional Settings:** Profile, Workspace, Sources & Imports, AI & Agents, Privacy, Automation, and Advanced sections now use the backend preview/apply contract. Structural changes show before/after and require explicit approval.
+- **Functional Settings:** one local setup section now groups Profile, Workspace, and Sources & Imports. AI/agent connections, browser sessions, and automation schedules are intentionally not Settings controls because they are owned outside Academia OS; Advanced only shows local technical paths/version. Structural changes still show before/after and require explicit approval.
 - **Domain foundation:** evidence-backed `AcademicSource`, `Deadline`, `Assignment`, `Reading`, `Announcement`, and `CourseMeeting` projections persist under `.academia/domain.json`; no real-workspace semantic extraction is performed.
 - **Controlled syllabus extraction:** local text/Markdown/text-PDF extraction produces page/line-referenced candidates for course identity, assignments, explicit deadlines, weights, readings, and recurring meetings. Preview is side-effect free; apply reconciles idempotently, creates typed deadline conflicts, and exposes verified `DOMAIN_CHANGE` execution through the existing Review → Action → Verification → Activity workflow.
 - **Still intentionally incomplete:** OCR, arbitrary-document semantic extraction, persistent background watchers, external source retrieval, execution of every possible action type, bundled sidecar packaging, signing, and notarization.
@@ -95,7 +95,7 @@ workspace files + rebuildable .academia/ state/index
 
 ### Slice 6 — Modern frontend foundation
 
-- Add a React + TypeScript frontend with a polished Home/Courses/Tasks/Library/Review/Settings shell.
+- Add a React + TypeScript frontend with a polished Home/semester-scoped Courses/Tasks/Activity/Settings shell; Courses owns the academic library browser and external-agent Review records are not presented as a built-in queue.
 - Add a reproducible Vite build and typed interface client against the CLI/service contract.
 - Add structured empty/loading/error states and accessibility foundations.
 - Add a Tauri-ready `src-tauri` boundary only where the local environment supports it; do not claim native packaging/signing if Rust/Tauri are unavailable.

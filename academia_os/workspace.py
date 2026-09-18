@@ -77,10 +77,12 @@ def _domain_tasks(root: Path, course_ids: set[str]) -> list[dict[str, Any]]:
     return tasks
 
 
-def build_workspace_snapshot(config: dict[str, Any], *, persist: bool = True) -> dict[str, Any]:
+def build_workspace_snapshot(config: dict[str, Any], *, persist: bool = True, semester_override: str | None = None) -> dict[str, Any]:
     normalized = validate_config(config)
     root = Path(normalized["academic"]["root_directory"]).expanduser().resolve()
-    semester = normalized["academic"]["semester"]
+    semester = semester_override or normalized["academic"]["semester"]
+    if not SEMESTER_PATTERN.fullmatch(semester):
+        raise ValueError("semester must use a term and four-digit year, such as Fall 2026")
     semester_root = root / semester
     available_semesters = sorted(
         candidate.name

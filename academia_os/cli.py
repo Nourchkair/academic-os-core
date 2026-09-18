@@ -16,6 +16,7 @@ from .attachment import assess_profile, attach_workspace, backup_profile, inspec
 from .config import load_config, save_config, runtime_directory, validate_config
 from .discovery import discover_academic_folders
 from .domain import ENTITY_TYPES, DomainProjection
+from .file_preview import preview_file
 from .library import filter_material, list_material
 from .provenance import verify_source_metadata
 from .review import ReviewQueue
@@ -48,6 +49,14 @@ def _context(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any], 
     profile_path = _profile_path(args)
     config = load_config(profile_path)
     snapshot = build_workspace_snapshot(config)
+    return config, snapshot, profile_path
+
+
+def _semester_context(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any], Path]:
+    config, snapshot, profile_path = _context(args)
+    semester = getattr(args, "semester", None)
+    if semester and semester != snapshot["semester"]:
+        snapshot = build_workspace_snapshot(config, persist=False, semester_override=semester)
     return config, snapshot, profile_path
 
 
@@ -320,6 +329,8 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("status", "courses", "today", "tasks", "inbox", "activity", "agents", "capabilities"):
         command = sub.add_parser(name)
         command.add_argument("--json", action="store_true")
+        if name == "courses":
+            command.add_argument("--semester", help="Read courses from a specific semester folder")
     semester = sub.add_parser("semester", help="Resolve the current semester using the shared calendar and timezone policy")
     semester.add_argument("--timezone", default="UTC")
     semester.add_argument("--json", action="store_true")
@@ -338,7 +349,12 @@ def build_parser() -> argparse.ArgumentParser:
     library.add_argument("--category", choices=("all", "syllabi", "readings", "notes", "imports", "other"), default="all")
     library.add_argument("--course", dest="course_id")
     library.add_argument("--query", default="")
+    library.add_argument("--semester", help="Read material from a specific semester folder")
     library.add_argument("--json", action="store_true")
+    file_preview_command = sub.add_parser("file-preview", help="Read a bounded preview of one active-semester Library file")
+    file_preview_command.add_argument("source", type=Path)
+    file_preview_command.add_argument("--semester", help="Read the file from a specific semester folder")
+    file_preview_command.add_argument("--json", action="store_true")
     extract = sub.add_parser("extract", help="Extract supported facts from an authoritative local source")
     extract_sub = extract.add_subparsers(dest="extract_type", required=True)
     syllabus = extract_sub.add_parser("syllabus", help="Preview or reconcile a local syllabus")
@@ -418,7 +434,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"courses", "today", "tasks", "course", "domain", "library", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
+        if args.command in {"courses", "today", "tasks", "course", "domain", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -441,7 +457,7 @@ def dispatch(args: argparse.Namespace) -> int:
         _emit({"semester": resolve_current_semester(timezone_name=args.timezone), "timezone": args.timezone}, as_json=args.json)
         return 0
     if args.command == "courses":
-        _, snapshot, _ = _context(args); _emit(snapshot["courses"], as_json=args.json); return 0
+        _, snapshot, _ = _semester_context(args); _emit(snapshot["courses"], as_json=args.json); return 0
     if args.command == "today":
         _, snapshot, _ = _context(args); _emit(snapshot["today"], as_json=args.json); return 0
     if args.command == "tasks":
@@ -459,9 +475,13 @@ def dispatch(args: argparse.Namespace) -> int:
         projection = DomainProjection(Path(snapshot["academic_root"]) / ".academia" / "domain.json")
         _emit(projection.list(args.entity_type), as_json=args.json); return 0
     if args.command == "library":
-        _, snapshot, _ = _context(args)
+        _, snapshot, _ = _semester_context(args)
         items = list_material(Path(snapshot["academic_root"]), snapshot["semester"])
         _emit(filter_material(items, category=args.category, course_id=args.course_id, query=args.query), as_json=args.json); return 0
+    if args.command == "file-preview":
+        _, snapshot, _ = _semester_context(args)
+        value = preview_file(args.source, workspace_root=Path(snapshot["academic_root"]), semester=snapshot["semester"])
+        _emit(value, as_json=args.json); return 0
     if args.command == "extract":
         if args.extract_type != "syllabus":
             raise ValueError(f"unsupported extraction source type: {args.extract_type}")

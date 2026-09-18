@@ -19,7 +19,7 @@ type SetupForm = {
 
 type SetupPreview = AttachmentResult | WorkspaceCreationResult
 
-const steps = ['Welcome', 'Profile', 'Workspace', 'Semester', 'Sources', 'Optional agents', 'Review setup', 'Ready']
+const steps = ['Welcome', 'Profile', 'Workspace', 'Semester', 'Sources', 'Interface note', 'Review setup', 'Ready']
 
 export function Onboarding({ candidates, onComplete, onMigration }: SetupProps) {
   const [step, setStep] = useState(0)
@@ -142,7 +142,7 @@ export function Onboarding({ candidates, onComplete, onMigration }: SetupProps) 
       {step === 2 && <Workspace form={form} update={update} mode={workspaceMode} setMode={(value) => { setWorkspaceMode(value); setInspection(null); setPreview(null) }} candidates={candidates} selectedCandidate={selectedCandidate} inspection={inspection} onInspect={() => void inspect()} busy={busy} />}
       {step === 3 && <Semester form={form} update={update} inspection={inspection} />}
       {step === 4 && <Sources />}
-      {step === 5 && <Agents />}
+      {step === 5 && <InterfaceNote />}
       {step === 6 && <ReviewSetup form={form} mode={workspaceMode} inspection={inspection} preview={preview} onRefresh={() => void preparePreview()} busy={busy} />}
       {step === 7 && <Ready form={form} mode={workspaceMode} preview={preview} onOpen={onComplete} onMigration={onMigration} />}
       {error && <p className="setup-error" role="alert">{error}</p>}
@@ -173,15 +173,15 @@ function Semester({ form, update, inspection }: { form: SetupForm; update: (key:
 }
 
 function Sources() {
-  return <div className="setup-content"><h1>How will material arrive?</h1><p>Start with the safest options. You can change these later from Settings.</p><div className="choice-list"><div className="choice-card selected"><span className="choice-icon">↓</span><div><strong>Import files manually</strong><small>Choose PDFs, documents, slides, or notes whenever you receive them.</small></div><b>On</b></div><div className="choice-card"><span className="choice-icon">◫</span><div><strong>Watch a local folder</strong><small>Scan a folder such as Downloads when you ask Academia OS to check it.</small></div><b>Later</b></div><div className="choice-card"><span className="choice-icon">◎</span><div><strong>Browser access</strong><small>Optional and advanced. It stays off by default and never handles passwords or MFA.</small></div><b>Off</b></div></div></div>
+  return <div className="setup-content"><h1>How will material arrive?</h1><p>Importing is always available from the + workspace action. Academia OS keeps the choice explicit and local instead of turning intake preferences into another setting.</p><div className="choice-list"><div className="choice-card selected"><span className="choice-icon">↓</span><div><strong>Import files manually</strong><small>Choose PDFs, documents, slides, or notes whenever you receive them from the + button.</small></div><b>Available</b></div><div className="choice-card"><span className="choice-icon">◫</span><div><strong>Run a one-shot folder scan</strong><small>Ask Academia OS or an authorized external agent to scan a configured folder when you choose.</small></div><b>Optional</b></div></div><p className="setup-note">No persistent monitoring is enabled here. External agents, browser sessions, and recurring schedules are not configured in this app.</p></div>
 }
 
-function Agents() {
-  return <div className="setup-content"><h1>No AI connection is required</h1><p>Academia OS works on its own. The assistant you choose later owns its model, credentials, browser session, and schedule. If you authorize an assistant to work with this computer, it can use the neutral local Academia interface.</p><div className="agent-choice"><div><strong>Local Academia interface</strong><span>Available to Codex, Hermes, Claude, ChatGPT/Work, or another authorized tool through the CLI/API and AGENTS.md.</span></div><em>Available</em></div><div className="agent-choice"><div><strong>Browser and automation</strong><span>Off by default. Optional adapters and schedulers require their own authorization; this workspace does not start them.</span></div><em>Optional</em></div><div className="agent-choice muted"><div><strong>Nothing is connected here</strong><span>No agent credentials, browser session, or recurring job is created during onboarding.</span></div><em>Safe default</em></div></div>
+function InterfaceNote() {
+  return <div className="setup-content"><h1>Use your own tools when you choose</h1><p>Academia OS is the local workspace and safety layer. It does not connect an AI model, browser session, or scheduler here.</p><div className="agent-choice"><div><strong>Neutral local interface</strong><span>Codex, Hermes, Claude, ChatGPT/Work, or another authorized tool can use the CLI/API and AGENTS.md.</span></div><em>Available</em></div><div className="agent-choice muted"><div><strong>Nothing is connected by this setup</strong><span>No agent credentials, browser session, or recurring job is created during onboarding.</span></div><em>Safe default</em></div></div>
 }
 
 function ReviewSetup({ form, mode, inspection, preview, onRefresh, busy }: { form: SetupForm; mode: 'new' | 'existing'; inspection: WorkspaceInspection | null; preview: SetupPreview | null; onRefresh: () => void; busy: boolean }) {
-  return <div className="setup-content"><h1>Review your setup</h1><p>Nothing is changed until you confirm. Review the location and the safety boundary first.</p><div className="setup-summary"><SummaryRow label="Workspace" value={form.workspacePath} /><SummaryRow label="Mode" value={mode === 'new' ? 'Create a new workspace' : 'Attach existing workspace'} /><SummaryRow label="Semester" value={form.semester} /><SummaryRow label="Profile" value={`${form.name} · ${form.institution}`} /><SummaryRow label="Browser access" value="Off by default" /></div>{inspection && <InspectionSummary inspection={inspection} />}{preview && <div className="preview-banner"><strong>{preview.applied ? 'Setup applied' : 'Ready for your confirmation'}</strong><span>{preview.academic_files_changed ? 'The workspace was initialized from the reusable template.' : 'Academic files will not be moved, renamed, or rewritten.'}</span></div>}{!preview && <button className="secondary-button" onClick={onRefresh} disabled={busy}>{busy ? 'Preparing…' : 'Prepare setup summary'}</button>}</div>
+  return <div className="setup-content"><h1>Review your setup</h1><p>Nothing is changed until you confirm. Review the location and the safety boundary first.</p><div className="setup-summary"><SummaryRow label="Workspace" value={form.workspacePath} /><SummaryRow label="Mode" value={mode === 'new' ? 'Create a new workspace' : 'Attach existing workspace'} /><SummaryRow label="Semester" value={form.semester} /><SummaryRow label="Profile" value={`${form.name} · ${form.institution}`} /></div>{inspection && <InspectionSummary inspection={inspection} />}{preview && <div className="preview-banner"><strong>{preview.applied ? 'Setup applied' : 'Ready for your confirmation'}</strong><span>{preview.academic_files_changed ? 'The workspace was initialized from the reusable template.' : 'Academic files will not be moved, renamed, or rewritten.'}</span></div>}{!preview && <button className="secondary-button" onClick={onRefresh} disabled={busy}>{busy ? 'Preparing…' : 'Prepare setup summary'}</button>}</div>
 }
 
 function Ready({ form, mode, preview, onOpen, onMigration }: { form: SetupForm; mode: 'new' | 'existing'; preview: SetupPreview | null; onOpen: () => Promise<void>; onMigration?: () => Promise<void> }) {

@@ -41,7 +41,7 @@ academia workspace inspect /path/to/workspace --json
 academia semester --timezone America/Toronto --json
 academia workspace attach /path/to/workspace --name "Student" --institution "University" --timezone America/Toronto --json
 academia import /path/to/file.pdf --destination /path/to/workspace/SEMESTER/COURSE/00_INBOX --json
-academia courses --json
+academia courses --semester "Fall 2026" --json
 academia course "COURSE ID" --json
 academia today --json
 academia tasks --json
@@ -51,8 +51,9 @@ academia review execute REVIEW_ID --json
 academia extract syllabus /path/to/syllabus.pdf --course "COURSE ID" --json
 academia extract syllabus /path/to/syllabus.pdf --course "COURSE ID" --verified-current --apply --json
 academia domain --json
-academia library --json
-academia library --category imports --json
+academia library --semester "Fall 2026" --json
+academia library --semester "Fall 2026" --category imports --json
+academia file-preview /path/to/semester-file.pdf --semester "Fall 2026" --json
 academia settings show --json
 academia inbox --json
 academia activity --json

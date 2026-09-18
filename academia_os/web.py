@@ -3,6 +3,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import mimetypes
+import os
 import socket
 import subprocess
 import sys
@@ -14,6 +15,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from .config import SEMESTER_PATTERN, load_config
+from .file_preview import FilePreviewError, TEXT_EXTENSIONS, preview_file, resolve_library_file
+from .workspace import build_workspace_snapshot
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
@@ -24,6 +28,12 @@ UPLOAD_CHUNK_BYTES = 1024 * 1024
 MAX_ARGUMENTS = 32
 MAX_ARGUMENT_LENGTH = 1024
 COMMAND_TIMEOUT_SECONDS = 120.0
+
+
+def default_profile_path() -> Path:
+    """Return the same profile path used by the public CLI by default."""
+
+    return Path(os.environ.get("ACADEMIC_OS_CONFIG", str(Path.home() / ".academic-os" / "profile.json"))).expanduser().resolve()
 
 # Keep this in sync with the already-approved local Tauri command surface.  The
 # browser transport is intentionally narrower than a general CLI shell: the
@@ -44,6 +54,7 @@ SAFE_COMMANDS = frozenset(
         "import",
         "domain",
         "library",
+        "file-preview",
         "extract",
         "migration",
         "settings",
@@ -191,7 +202,10 @@ class DashboardServer:
             raise ValueError("dashboard port must be between 0 and 65535")
         if command_timeout <= 0:
             raise ValueError("dashboard command timeout must be positive")
-        self.profile = profile.expanduser() if profile is not None else None
+        # Direct routes such as file preview need the concrete profile path,
+        # while CLI-backed routes already resolve this default internally.
+        # Normalize it here so both transports read the same workspace.
+        self.profile = (profile or default_profile_path()).expanduser().resolve()
         self.dist_dir = (dist_dir or Path(__file__).resolve().parents[1] / "frontend" / "dist").expanduser()
         self.command_timeout = command_timeout
         self.runner = runner or self._default_runner
@@ -367,6 +381,10 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                     {"status": "ok", "service": "academia-dashboard", "commands": sorted(SAFE_COMMANDS)},
                     cors_origin=origin,
                 )
+            elif self.request_path == "/api/v1/file-preview":
+                self._handle_file_preview(origin)
+            elif self.request_path == "/api/v1/file":
+                self._handle_file(origin, head_only=False)
             else:
                 self._send_api_error(
                     DashboardRequestError(404, "NotFound", "API endpoint not found"),
@@ -383,6 +401,10 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             if self.request_path == "/api/v1/health":
                 body = (json.dumps({"status": "ok", "service": "academia-dashboard", "commands": sorted(SAFE_COMMANDS)}, separators=(",", ":")) + "\n").encode("utf-8")
                 self._send_bytes(200, body, "application/json; charset=utf-8", cors_origin=origin, head_only=True)
+            elif self.request_path == "/api/v1/file":
+                self._handle_file(origin, head_only=True)
+            elif self.request_path == "/api/v1/file-preview":
+                self._handle_file_preview(origin, head_only=True)
             else:
                 self._send_api_error(DashboardRequestError(404, "NotFound", "API endpoint not found"), cors_origin=origin)
             return
@@ -453,6 +475,92 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             self._send_api_error(DashboardRequestError(405, "MethodNotAllowed", "API method not allowed"), cors_origin=origin)
         else:
             self._send_bytes(405, b"Method Not Allowed\n", "text/plain; charset=utf-8", cors_origin=origin)
+
+    def _file_query_path(self) -> Path:
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query, keep_blank_values=True)
+        values = query.get("path")
+        if not values or len(values) != 1 or not values[0] or "\x00" in values[0]:
+            raise DashboardRequestError(400, "InvalidFilePath", "a single Library file path is required")
+        return Path(values[0]).expanduser()
+
+    def _active_workspace_for_file(self) -> tuple[Path, str]:
+        if self.dashboard.profile is None:
+            raise DashboardRequestError(503, "WorkspaceUnavailable", "file previews require an active local workspace profile")
+        try:
+            config = load_config(self.dashboard.profile)
+            snapshot = build_workspace_snapshot(config)
+            return Path(snapshot["academic_root"]), str(snapshot["semester"])
+        except (OSError, KeyError, ValueError) as exc:
+            raise DashboardRequestError(503, "WorkspaceUnavailable", "the active local workspace could not be loaded") from exc
+
+    def _file_query_semester(self, workspace_root: Path, default: str) -> str:
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query, keep_blank_values=True)
+        values = query.get("semester")
+        if not values:
+            return default
+        if len(values) != 1 or not values[0] or not SEMESTER_PATTERN.fullmatch(values[0]):
+            raise DashboardRequestError(400, "InvalidSemester", "a valid semester label is required")
+        semester = values[0]
+        if not (workspace_root / semester).is_dir():
+            raise DashboardRequestError(404, "SemesterNotFound", "the requested semester is not present in the local workspace")
+        return semester
+
+    @staticmethod
+    def _file_preview_error(exc: FilePreviewError) -> DashboardRequestError:
+        message = str(exc)
+        if "not part of the active semester" in message or "absolute local file path" in message or "regular file" in message:
+            status, error_type = 403, "FileNotAllowed"
+        elif "not available" in message:
+            status, error_type = 415, "UnsupportedFileType"
+        else:
+            status, error_type = 422, "FilePreviewError"
+        return DashboardRequestError(status, error_type, message)
+
+    def _handle_file_preview(self, origin: str | None, *, head_only: bool = False) -> None:
+        try:
+            path = self._file_query_path()
+            workspace_root, active_semester = self._active_workspace_for_file()
+            semester = self._file_query_semester(workspace_root, active_semester)
+            value = preview_file(path, workspace_root=workspace_root, semester=semester)
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+            return
+        except FilePreviewError as exc:
+            self._send_api_error(self._file_preview_error(exc), cors_origin=origin)
+            return
+        body = (json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+        self._send_bytes(200, body, "application/json; charset=utf-8", cors_origin=origin, head_only=head_only)
+
+    def _handle_file(self, origin: str | None, *, head_only: bool) -> None:
+        try:
+            path = self._file_query_path()
+            workspace_root, active_semester = self._active_workspace_for_file()
+            semester = self._file_query_semester(workspace_root, active_semester)
+            resolved, item = resolve_library_file(path, workspace_root=workspace_root, semester=semester)
+            extension = str(item.get("extension", "")).casefold()
+            if extension != ".pdf" and extension not in TEXT_EXTENSIONS:
+                raise DashboardRequestError(415, "UnsupportedFileType", "the raw file endpoint is limited to readable Library files")
+            if resolved.stat().st_size > MAX_UPLOAD_BYTES:
+                raise DashboardRequestError(413, "FileTooLarge", "the selected file is too large to preview")
+            body = resolved.read_bytes()
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+            return
+        except FilePreviewError as exc:
+            self._send_api_error(self._file_preview_error(exc), cors_origin=origin)
+            return
+        except OSError:
+            self._send_api_error(DashboardRequestError(422, "FileReadError", "the selected file could not be read"), cors_origin=origin)
+            return
+        content_type = "application/pdf" if extension == ".pdf" else ("text/markdown; charset=utf-8" if extension in {".md", ".markdown"} else "text/plain; charset=utf-8")
+        self._send_bytes(
+            200,
+            body,
+            content_type,
+            cors_origin=origin,
+            extra_headers={"Content-Disposition": f'inline; filename="{resolved.name.replace(chr(34), "")}"'},
+            head_only=head_only,
+        )
 
     def _handle_upload(self, origin: str | None) -> None:
         try:

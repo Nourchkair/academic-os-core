@@ -6,7 +6,6 @@ import type { MigrationExecuteResult, MigrationItem, MigrationPlanResult, Migrat
 type MigrationViewProps = {
   status: StatusPayload
   onApplied: () => Promise<void>
-  onReview: () => void
   onBusyChange: (busy: boolean) => void
 }
 
@@ -14,7 +13,7 @@ type MigrationStage = 'choose' | 'scanning' | 'preview' | 'executing' | 'complet
 
 type GroupedItems = [string, Array<{ item: MigrationItem; index: number }>]
 
-export function MigrationView({ status, onApplied, onReview, onBusyChange }: MigrationViewProps) {
+export function MigrationView({ status, onApplied, onBusyChange }: MigrationViewProps) {
   const [stage, setStage] = useState<MigrationStage>('choose')
   const [sourcePath, setSourcePath] = useState('')
   const [plan, setPlan] = useState<MigrationPlanResult | null>(null)
@@ -227,7 +226,7 @@ export function MigrationView({ status, onApplied, onReview, onBusyChange }: Mig
 
     {stage === 'executing' && <section className="migration-loading-card migration-execution-card" role="status" aria-live="polite"><span className="migration-spinner" aria-hidden="true" /><div><strong>Applying your selection…</strong><p>{selectedCount} selected file{selectedCount === 1 ? '' : 's'} are being copied{moveEnabled ? ' or moved after hash verification' : ''}. Do not close the app until the result appears.</p></div></section>}
 
-    {stage === 'complete' && result && <MigrationResult result={result} busy={busy} onReview={onReview} onStartAnother={startAnotherScan} />}
+    {stage === 'complete' && result && <MigrationResult result={result} busy={busy} onStartAnother={startAnotherScan} />}
 
     {error && <section className="migration-error-card" role="alert"><span className="migration-error-icon" aria-hidden="true">!</span><div><strong>Migration needs your attention</strong><p>{error}</p><button className="quiet-button" onClick={() => setError(null)}>Dismiss</button></div></section>}
 
@@ -289,7 +288,7 @@ function MigrationItemRow({ item, index, selected, disabled, onToggle }: { item:
   </article>
 }
 
-function MigrationResult({ result, busy, onReview, onStartAnother }: { result: MigrationExecuteResult; busy: boolean; onReview: () => void; onStartAnother: () => void }) {
+function MigrationResult({ result, busy, onStartAnother }: { result: MigrationExecuteResult; busy: boolean; onStartAnother: () => void }) {
   const complete = result.status === 'completed'
   const confirmationRequired = result.status === 'confirmation_required'
   const selected = safeCount(result.selected)
@@ -306,7 +305,7 @@ function MigrationResult({ result, busy, onReview, onStartAnother }: { result: M
     <p className="migration-result-summary">{copiedOrMoved} file{copiedOrMoved === 1 ? '' : 's'} reached a proposed destination. The CLI report records this {result.mode} operation.</p>
     <div className="migration-result-columns"><div><h4>Destinations</h4>{destinations.length ? <ul className="migration-result-list">{destinations.map((destination, index) => <li key={`${index}-${destination}`}><code>{destination}</code></li>)}</ul> : <p className="migration-muted">No destination was written.</p>}</div>{failures.length > 0 && <div><h4>Failure details</h4><ul className="migration-failure-list">{failures.map((failure, index) => <li key={`${index}-${failure}`}>{failure}</li>)}</ul></div>}</div>
     <div className="migration-result-artifact"><span>Report</span><code>{result.report_path || 'Report path unavailable'}</code></div>
-    <div className="migration-result-actions"><button className="primary-button" onClick={onStartAnother} disabled={busy}>Start another scan</button><button className="secondary-button" onClick={onReview} disabled={busy}>Open Review queue</button></div>
+    <div className="migration-result-actions"><button className="primary-button" onClick={onStartAnother} disabled={busy}>Start another scan</button></div>
   </section>
 }
 

@@ -12,6 +12,7 @@ from typing import Any, Iterator
 import pytest
 
 from academia_os import cli, web
+from academia_os.config import save_config
 from academia_os.web import (
     COMMAND_TIMEOUT_SECONDS,
     MAX_BODY_BYTES,
@@ -20,6 +21,7 @@ from academia_os.web import (
     DashboardServer,
     validate_loopback_host,
 )
+from tests.test_agent_neutral_core import minimal_config
 
 
 @contextmanager
@@ -548,3 +550,47 @@ def test_serve_dashboard_prints_bound_url_before_opening_browser(monkeypatch: py
     assert isinstance(result, FakeServer)
     assert [event[0] for event in events] == ["bind", "print", "open", "serve", "close"]
     assert events[1][1] == (("Academia dashboard listening at http://127.0.0.1:45678/",), {"flush": True})
+
+
+def test_file_preview_endpoint_reads_active_library_file_and_rejects_outside_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = minimal_config(tmp_path)
+    profile = Path(config["runtime"]["install_directory"]) / "profile.json"
+    save_config(profile, config)
+    monkeypatch.setenv("ACADEMIC_OS_CONFIG", str(profile))
+    root = Path(config["academic"]["root_directory"])
+    source = root / "Fall 2026" / "HIS 101 - History" / "00_INBOX" / "week-4.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("# Week 4\n\nRead locally.", encoding="utf-8")
+    old_source = root / "Spring 2025" / "HIS 101 - History" / "05_REFERENCE" / "old-reading.md"
+    old_source.parent.mkdir(parents=True)
+    old_source.write_text("# Older reading", encoding="utf-8")
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<html></html>", encoding="utf-8")
+    server = DashboardServer(port=0, dist_dir=dist)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        encoded = urllib.parse.quote(str(source), safe="")
+        status, headers, payload = request(server, "GET", f"/api/v1/file-preview?path={encoded}")
+        raw_status, raw_headers, raw_payload = request(server, "GET", f"/api/v1/file?path={encoded}")
+        old_encoded = urllib.parse.quote(str(old_source), safe="")
+        old_status, _old_headers, old_payload = request(server, "GET", f"/api/v1/file-preview?path={old_encoded}&semester={urllib.parse.quote('Spring 2025')}")
+        outside_path = tmp_path / "private.md"
+        outside_path.write_text("do not serve", encoding="utf-8")
+        outside = urllib.parse.quote(str(outside_path), safe="")
+        outside_status, _outside_headers, _outside_payload = request(server, "GET", f"/api/v1/file-preview?path={outside}")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert status == 200
+    assert headers["content-type"].startswith("application/json")
+    assert json.loads(payload)["content"] == "# Week 4\n\nRead locally."
+    assert raw_status == 200
+    assert raw_headers["content-type"].startswith("text/markdown")
+    assert raw_payload == source.read_bytes()
+    assert old_status == 200
+    assert json.loads(old_payload)["content"] == "# Older reading"
+    assert outside_status == 403

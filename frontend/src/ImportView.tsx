@@ -8,11 +8,11 @@ import type { Course, ExtractionPreview, ImportResult, StatusPayload } from './t
 type ImportViewProps = {
   status: StatusPayload
   courses: Course[]
+  semester?: string
   onImported: () => Promise<void>
-  onReview: () => void
 }
 
-export function ImportView({ status, courses, onImported, onReview }: ImportViewProps) {
+export function ImportView({ status, courses, semester, onImported }: ImportViewProps) {
   const [paths, setPaths] = useState<string[]>([])
   const [browserFiles, setBrowserFiles] = useState<File[]>([])
   const [destination, setDestination] = useState('general')
@@ -69,7 +69,8 @@ export function ImportView({ status, courses, onImported, onReview }: ImportView
   }, [tauriEnvironment])
 
   const selectedCourse = courses.find((course) => course.id === destination)
-  const destinationPath = selectedCourse ? `${selectedCourse.path}/00_INBOX` : `${status.workspace.academic_root}/${status.workspace.semester}/00_INBOX`
+  const targetSemester = semester || status.workspace.semester
+  const destinationPath = selectedCourse ? `${selectedCourse.path}/00_INBOX` : `${status.workspace.academic_root}/${targetSemester}/00_INBOX`
   const requiresReview = uncertain || !selectedCourse
   const suggestions = useMemo(() => paths.map((path) => ({ path, course: suggestCourse(path, courses) })), [paths, courses])
   const selectedCount = paths.length + browserFiles.length
@@ -180,7 +181,7 @@ export function ImportView({ status, courses, onImported, onReview }: ImportView
   }
 
   return <div className="page-stack">
-    <section className="page-intro"><p className="eyebrow">Safe intake</p><h2>Import material</h2><p>Bring in school files without moving the originals. Choose a course when you know it; otherwise send the copy to general intake and let Review help you decide.</p></section>
+    <section className="page-intro"><p className="eyebrow">Safe intake</p><h2>Import material</h2><p>Bring in school files without moving the originals. Choose a course when you know it; otherwise send the copy to general intake for an authorized external agent to process later.</p></section>
     <section className={`drop-zone ${dragging ? 'dragging' : ''}`} onDragOver={tauriEnvironment ? undefined : handleDragOver} onDragEnter={tauriEnvironment ? undefined : handleDragEnter} onDragLeave={tauriEnvironment ? undefined : handleDragLeave} onDrop={tauriEnvironment ? undefined : handleDrop}><div className="drop-icon">↓</div><h3>Drop files here</h3><p>PDFs, documents, slides, notes, or other local academic material.</p><button className="primary-button" onClick={() => void chooseFiles()}>Choose files</button>{!tauriEnvironment && <input ref={fileInputRef} className="browser-file-input" type="file" multiple onChange={handleBrowserFileChange} aria-label="Choose academic material from this computer" />}{!tauriEnvironment ? <small>Files remain on this computer and are passed to the local dashboard only.</small> : <small>Files are copied into the workspace. The original stays where it is.</small>}</section>
     {selectedCount > 0 && <section className="import-panel">
       <div className="section-heading"><div><p className="eyebrow">Selected material</p><h3>{selectedCount} file{selectedCount === 1 ? '' : 's'} ready</h3></div><button className="quiet-button" onClick={clearSelected}>Clear</button></div>
@@ -197,20 +198,20 @@ export function ImportView({ status, courses, onImported, onReview }: ImportView
           </article>
         ))}
       </div>
-      <div className="import-options"><label className="setup-field"><span>Destination</span><select value={destination} onChange={(event) => { setDestination(event.target.value); setUncertain(event.target.value === 'general'); setSyllabusPreview(null) }}><option value="general">General intake — I’m not sure where this belongs</option>{courses.map((course) => <option value={course.id} key={course.id}>{course.code} · {course.name.split(' - ').slice(1).join(' - ') || course.name}</option>)}</select></label><label className="check-row"><input type="checkbox" checked={uncertain} onChange={(event) => setUncertain(event.target.checked)} /><span>Keep classification uncertain and send a Review item</span></label></div>
-      {canPreviewSyllabus && <section className="extraction-preview"><p className="eyebrow">Controlled extraction</p><h3>Syllabus preview</h3>{!syllabusPreview ? <><p>Analyze this syllabus locally before adding anything. The original file will not be changed.</p><label className="check-row"><input type="checkbox" checked={verifiedCurrent} onChange={(event) => setVerifiedCurrent(event.target.checked)} /><span>I verified this is the current syllabus</span></label><button className="secondary-button" onClick={() => void previewSyllabus()} disabled={busy}>{busy ? 'Analyzing…' : 'Preview syllabus'}</button></> : <SyllabusSummary preview={syllabusPreview} onApply={() => void applySyllabus()} onReview={onReview} busy={busy} />}</section>}
+      <div className="import-options"><label className="setup-field"><span>Destination</span><select value={destination} onChange={(event) => { setDestination(event.target.value); setUncertain(event.target.value === 'general'); setSyllabusPreview(null) }}><option value="general">General intake — I’m not sure where this belongs</option>{courses.map((course) => <option value={course.id} key={course.id}>{course.code} · {course.name.split(' - ').slice(1).join(' - ') || course.name}</option>)}</select></label><label className="check-row"><input type="checkbox" checked={uncertain} onChange={(event) => setUncertain(event.target.checked)} /><span>Keep classification uncertain for an authorized external agent</span></label></div>
+      {canPreviewSyllabus && <section className="extraction-preview"><p className="eyebrow">Controlled extraction</p><h3>Syllabus preview</h3>{!syllabusPreview ? <><p>Analyze this syllabus locally before adding anything. The original file will not be changed.</p><label className="check-row"><input type="checkbox" checked={verifiedCurrent} onChange={(event) => setVerifiedCurrent(event.target.checked)} /><span>I verified this is the current syllabus</span></label><button className="secondary-button" onClick={() => void previewSyllabus()} disabled={busy}>{busy ? 'Analyzing…' : 'Preview syllabus'}</button></> : <SyllabusSummary preview={syllabusPreview} onApply={() => void applySyllabus()} busy={busy} />}</section>}
       <div className="import-actions"><button className="quiet-button" onClick={clearSelected}>Cancel</button><button className="primary-button" onClick={() => void importSelected()} disabled={busy}>{busy ? 'Copying…' : 'Copy into workspace'}</button></div>
     </section>}
-    {results.length > 0 && <section className="success-panel"><strong>{results.length} file{results.length === 1 ? '' : 's'} copied safely.</strong><span>Originals remain in their original locations. {results.some((result) => result.review_item_id) ? 'Uncertain items are waiting in Review.' : 'The copies are now in local intake.'}</span></section>}
+    {results.length > 0 && <section className="success-panel"><strong>{results.length} file{results.length === 1 ? '' : 's'} copied safely.</strong><span>Originals remain in their original locations. {results.some((result) => result.review_item_id) ? 'The uncertain copies remain available for an authorized external agent.' : 'The copies are now in local intake.'}</span></section>}
     {error && <p className="setup-error" role="alert">{error}</p>}
   </div>
 }
 
-function SyllabusSummary({ preview, onApply, onReview, busy }: { preview: ExtractionPreview; onApply: () => void; onReview: () => void; busy: boolean }) {
+function SyllabusSummary({ preview, onApply, busy }: { preview: ExtractionPreview; onApply: () => void; busy: boolean }) {
   const candidates = preview.extraction.candidates
   const count = (kind: string) => candidates.filter((candidate) => candidate.kind === kind).length
-  const needsReview = preview.extraction.warnings.length + preview.reconciliation.conflict_count
-  return <div className="extraction-summary"><p className="evidence-line"><span>Source · {basename(preview.extraction.source.path)}</span><b>{preview.extraction.source.extraction_method}</b></p><div className="extraction-counts"><span><strong>{count('assignment')}</strong> assignments</span><span><strong>{count('deadline')}</strong> deadlines</span><span><strong>{count('required_reading')}</strong> required readings</span><span><strong>{count('course_meeting')}</strong> weekly meeting times</span></div>{needsReview > 0 && <p className="review-callout">Needs review: {needsReview} finding{needsReview === 1 ? '' : 's'}</p>}{preview.extraction.warnings.length > 0 && <ul className="extraction-warnings">{preview.extraction.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}<p className="extraction-safe-note">{preview.applied ? 'Supported information was added to derived local state. The source file remains untouched.' : 'Nothing has been changed yet.'}</p><div className="decision-row">{needsReview > 0 && <button className="secondary-button" onClick={onReview}>Review findings</button>}{!preview.applied && <button className="primary-button" onClick={onApply} disabled={busy}>{busy ? 'Adding…' : 'Add supported information'}</button>}</div></div>
+  const needsExternalAttention = preview.extraction.warnings.length + preview.reconciliation.conflict_count
+  return <div className="extraction-summary"><p className="evidence-line"><span>Source · {basename(preview.extraction.source.path)}</span><b>{preview.extraction.source.extraction_method}</b></p><div className="extraction-counts"><span><strong>{count('assignment')}</strong> assignments</span><span><strong>{count('deadline')}</strong> deadlines</span><span><strong>{count('required_reading')}</strong> required readings</span><span><strong>{count('course_meeting')}</strong> weekly meeting times</span></div>{needsExternalAttention > 0 && <p className="review-callout">External-agent attention: {needsExternalAttention} finding{needsExternalAttention === 1 ? '' : 's'} were preserved with the source.</p>}{preview.extraction.warnings.length > 0 && <ul className="extraction-warnings">{preview.extraction.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}<p className="extraction-safe-note">{preview.applied ? 'Supported information was added to derived local state. The source file remains untouched.' : 'Nothing has been changed yet.'}</p><div className="decision-row">{!preview.applied && <button className="primary-button" onClick={onApply} disabled={busy}>{busy ? 'Adding…' : 'Add supported information'}</button>}</div></div>
 }
 
 function isSyllabusPath(path: string) { return /\.(pdf|md|markdown|txt)$/i.test(path) }

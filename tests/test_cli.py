@@ -48,6 +48,50 @@ def test_library_command_lists_material_in_the_active_semester(tmp_path: Path) -
     assert any(item["name"] == "announcement.pdf" and item["category"] == "imports" for item in items)
 
 
+def test_courses_and_library_can_read_a_selected_semester(tmp_path: Path) -> None:
+    config = minimal_config(tmp_path)
+    root = Path(config["academic"]["root_directory"])
+    course = root / "Spring 2025" / "HIS 101 - History"
+    (course / "01_COURSE").mkdir(parents=True)
+    (course / "05_REFERENCE").mkdir()
+    source = course / "05_REFERENCE" / "reading.md"
+    source.write_text("# Historical reading", encoding="utf-8")
+    profile = Path(config["runtime"]["install_directory"]) / "profile.json"
+    save_config(profile, config)
+    env = os.environ.copy(); env["PYTHONPATH"] = str(ROOT)
+
+    courses = subprocess.run([sys.executable, "-m", "academia_os", "--profile", str(profile), "courses", "--semester", "Spring 2025", "--json"], cwd=ROOT, env=env, text=True, capture_output=True)
+    library = subprocess.run([sys.executable, "-m", "academia_os", "--profile", str(profile), "library", "--semester", "Spring 2025", "--json"], cwd=ROOT, env=env, text=True, capture_output=True)
+
+    assert courses.returncode == 0, courses.stderr
+    assert json.loads(courses.stdout)[0]["id"] == "HIS 101 - History"
+    assert library.returncode == 0, library.stderr
+    assert json.loads(library.stdout)[0]["semester"] == "Spring 2025"
+    assert json.loads(library.stdout)[0]["category"] == "readings"
+
+
+def test_file_preview_command_returns_readable_local_content(tmp_path: Path) -> None:
+    config = minimal_config(tmp_path)
+    root = Path(config["academic"]["root_directory"])
+    source = root / "Fall 2026" / "POL 2103 - Politics" / "00_INBOX" / "notes.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("# Local notes", encoding="utf-8")
+    profile = Path(config["runtime"]["install_directory"]) / "profile.json"
+    save_config(profile, config)
+    env = os.environ.copy(); env["PYTHONPATH"] = str(ROOT)
+
+    result = subprocess.run(
+        [sys.executable, "-m", "academia_os", "--profile", str(profile), "file-preview", str(source), "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["content"] == "# Local notes"
+
+
 def test_inbox_command_detects_preexisting_inbox_files(tmp_path: Path) -> None:
     result = run_cli(tmp_path, "inbox", "--json")
     assert result.returncode == 0, result.stderr

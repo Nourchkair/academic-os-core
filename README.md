@@ -125,6 +125,7 @@ academia domain --json
 academia library --json
 academia library --category syllabi --json
 academia library --course "POL 2103 - Politics" --json
+academia file-preview /path/to/active-semester-file.pdf --json
 academia extract syllabus /path/to/syllabus.pdf --course "POL 2103 - Politics" --json
 academia extract syllabus /path/to/syllabus.md --course "POL 2103 - Politics" --verified-current --apply --json
 academia settings show --json
@@ -194,6 +195,8 @@ DETECTED → PENDING → PROCESSING → VERIFIED → ACKNOWLEDGED
 - **Tasks** come from Markdown checkboxes in a course’s `01_COURSE/Course_Status.md` and from structured `assignment`/`deadline` entities in `.academia/domain.json`. Structured entities are normally created through syllabus extraction/reconciliation with evidence and confidence. Academia OS does not turn arbitrary filenames or prose into tasks.
 - **Inbox / intake** contains files present in course or semester `00_INBOX/` folders. Running `academia inbox` detects pre-existing files into the retryable processing state machine. Detection alone does not classify, move, or delete a file.
 - **Review** contains only explicit `.academia/review.json` items, such as uncertain imports, source conflicts, or approval-required actions. An unprocessed inbox file is shown as intake until a deliberate Review item is created.
+- **Activity** is the append-only audit view of changes Academia OS actually completed. Reads, scans, and external agent conversations do not appear as changes unless the core performed a recorded action.
+- **File previews** are read-only and active-semester scoped. Markdown/text/CSV/JSON/YAML are shown as text; DOCX/PPTX text is extracted locally; PDFs open in an in-app browser frame with a text fallback in the desktop shell. Originals are never rewritten.
 
 ### Ownership of AI, browser, and automation
 
@@ -281,7 +284,7 @@ An email address or local path can be normal in a private workspace; it should b
 
 ## Review and activity
 
-Uncertain source matches, deadline conflicts, and approval-required changes are durable structured Review items under `.academia/review.json`. Action-linked Review items contain the exact `action_proposal_id`; approving the Review item approves that proposal, and the item resolves only after the proposal is executed and verified. Activity events are append-only JSON lines under `.academia/activity.jsonl`, with human-readable fields such as title, course, source, confidence, authority, and action. The desktop Home/Review views consume these models rather than hardcoded notice text.
+Uncertain source matches, deadline conflicts, and approval-required changes remain durable structured Review records under `.academia/review.json` for external agents and CLI workflows. Action-linked records contain the exact `action_proposal_id`; approving one approves that proposal, and it resolves only after execution and verification. Activity events are append-only JSON lines under `.academia/activity.jsonl`, with human-readable fields such as title, course, source, confidence, authority, and action. The browser/desktop dashboard does not present a built-in Review queue because Academia OS does not contain its own AI agent; third-party agents may use these records when they need a human decision. Activity remains the user-facing audit trail of changes the core actually made.
 
 ## Desktop application
 
@@ -295,7 +298,7 @@ npm run build
 npm run dev
 ```
 
-It is a React + TypeScript application with a Tauri 2 shell and a typed bridge to the `academia` CLI. It now includes profile-free first-run onboarding, existing-workspace inspection/attachment, fresh-workspace setup, Home, Courses, Tasks, Library, Import, **Migrate older material**, Review, and Settings views with local-data/error/empty states. The migration view scans an explicitly selected legacy folder, previews every destination, supports selected copy by default, and gates destructive Move behind an additional confirmation. Import uses the native Tauri file picker and drag/drop paths but delegates copying, processing, provenance, Activity, and uncertainty Review items to the existing CLI/core. The Tauri bundle is currently a development foundation (`bundle.active` is false); macOS signing, notarization, and sidecar packaging remain release work. The old Tkinter app remains as a compatibility fallback while the new shell matures.
+It is a React + TypeScript application with a Tauri 2 shell and a typed bridge to the `academia` CLI. It includes profile-free first-run onboarding, existing-workspace inspection/attachment, fresh-workspace setup, Home, semester-scoped **Courses**, Tasks, Activity, and local Settings views. Courses is also the academic library: choose a semester, open a class, then browse Syllabi & guides, Readings & references, Notes & study aids, Imported material, and other files with bounded read-only previews for supported text, PDF, DOCX, and PPTX files. The top-right profile badge opens a panel for Import material or **Migrate older material** instead of adding separate navigation sections. Review records remain available to external agents and CLI workflows, but there is no built-in Review page because Academia OS does not contain its own AI agent. Settings only edits local profile, workspace, and import preferences; AI models, browser sessions, and schedules are owned outside Academia OS. The migration view scans an explicitly selected legacy folder, previews every destination, supports selected copy by default, and gates destructive Move behind an additional confirmation. Import uses the native Tauri file picker and drag/drop paths while delegating copying, processing, provenance, Activity, and uncertainty records to the existing CLI/core. The Tauri bundle is currently a development foundation (`bundle.active` is false); macOS signing, notarization, and sidecar packaging remain release work. The old Tkinter app remains as a compatibility fallback while the new shell matures.
 
 ## Optional agents
 

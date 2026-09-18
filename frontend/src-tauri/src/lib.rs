@@ -54,6 +54,7 @@ fn academia_command(command: String, args: Vec<String>) -> Result<String, String
         "import",
         "domain",
         "library",
+        "file-preview",
         "extract",
         "migration",
     ];

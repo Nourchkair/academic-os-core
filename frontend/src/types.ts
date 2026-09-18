@@ -47,6 +47,16 @@ export type LibraryItem = {
   modified_at: string
 }
 
+export type FilePreview = {
+  id: string
+  name: string
+  extension: string
+  kind: 'text' | 'pdf'
+  size: number
+  content: string
+  truncated: boolean
+}
+
 export type WorkspaceSnapshot = {
   academic_root: string
   semester: string
