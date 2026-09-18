@@ -31,7 +31,17 @@ For each recognized semester, the reusable template includes a semester-level `0
 
 ## Agent-first operating model
 
-Academia OS is an AI-native academic operating layer. The student’s authorized AI agent owns conversation, reading, reasoning, teaching, synthesis, and repetitive maintenance; Academia OS owns academic state, evidence, provenance, permissions, safe actions, generated artifacts, and the audit trail. The dashboard is observational: it provides visibility, browsing, status, Activity, import/migration, and local configuration. It is not a chatbot or reasoning engine.
+Academia OS is an AI-native academic operating layer. The student’s authorized AI agent owns conversation, reading, reasoning, teaching, synthesis, and repetitive maintenance; Academia OS owns academic state, evidence, provenance, permissions, safe actions, generated artifacts, and the audit trail. The dashboard is observational: it provides visibility, browsing, status, Activity, import/migration, local configuration, and optional workflow guidance. It is not a chatbot or reasoning engine.
+
+Keep these product layers separate:
+
+- **Capabilities:** what Academia OS itself actually implements and can report through `academia agent capabilities --json`.
+- **Recommendations:** optional external workflows that may improve the student's setup.
+- **Recipes:** Academia's safe reference implementation pattern for a recommendation; an agent may adapt mechanics to its own tools while preserving outcomes, authorization, provenance, authority, safety, and verification.
+- **External agent:** checks its own available tools and implements an approved recipe.
+- **Student:** remains the final authority and must approve optional external access or automation.
+
+Academia must not claim Gmail, calendar, Brightspace, Canvas, Moodle, Blackboard, Omni, browser, scheduler, Reddit, web-search, or other external access merely because a recipe mentions it. It must not store external connection state or configure those systems itself.
 
 Agents must use the structured interface first and retrieve source content only when the context bundle identifies a relevant source. The bounded `sources.library_items` catalog includes metadata for syllabi, readings, notes, generated artifacts, and relevant imports; it includes `id`, name, workspace-relative path, course ownership, category, provenance, source type, and artifact metadata, never file bodies by default. Do not recursively inspect the Markdown tree or read `.academia` files directly to reconstruct state.
 
@@ -48,6 +58,23 @@ Recommended request loop:
 9. Poll `academia agent changes --since CURSOR --json` on the next agent session instead of rereading everything.
 
 Academia does not store agent chat transcripts, prompts, model messages, credentials, or conversation history.
+
+## Optional workflow recommendations and recipes
+
+After Academia is installed and configured successfully, an authorized external agent should:
+
+1. verify the local Academia interface;
+2. inspect `academia agent recommendations --json`;
+3. compare the recommendations with its actual capabilities;
+4. tell the student which optional workflows may improve the setup and which tools appear available in the agent environment;
+5. offer guidance only for workflows the student wants, without repeatedly presenting every recommendation;
+6. obtain explicit authorization before external service access or automation is created;
+7. retrieve the selected recipe with `academia agent recipe WORKFLOW_ID --json`;
+8. adapt the recipe to its own scheduler, browser, research, mail, calendar, or community tools while preserving the recipe's outcome and safety boundaries;
+9. verify the setup through the recipe's verification steps;
+10. report exactly what the external agent configured and what remains outside its capabilities.
+
+The recommendation and recipe commands are read-only. They do not create schedules, connect accounts, grant permissions, read external systems, or store integration status. A recipe is guidance, not a mandatory implementation.
 
 ## Stable interface
 
@@ -79,6 +106,9 @@ academia inbox --json
 academia activity --json
 academia capabilities --json
 academia agent capabilities --json
+academia agent recommendations --json
+academia agent recipe daily_academic_brief --json
+academia agent recipe course_source_sync --json
 academia agent context --scope today --detail compact --json
 academia agent context --scope course --course "COURSE ID" --detail standard --json
 academia agent attention --json

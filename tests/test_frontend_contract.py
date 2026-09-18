@@ -72,3 +72,15 @@ def test_onboarding_does_not_present_browser_or_agent_configuration() -> None:
     assert "<strong>Browser access</strong>" not in source
     assert '<SummaryRow label="Browser access"' not in source
     assert "function Agents" not in source
+
+
+def test_settings_discover_recommended_workflows_without_external_connection_controls() -> None:
+    source = (FRONTEND / "SettingsView.tsx").read_text(encoding="utf-8")
+    assert "Enhance your setup" in source
+    assert "EnhanceSetup" in source
+    assert "Ask your AI agent" in source
+    assert "api.recommendations" in source
+    assert "Connect Gmail" not in source
+    assert "Connect Brightspace" not in source
+    assert "Connect Calendar" not in source
+    assert "Automation enabled" not in source

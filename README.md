@@ -138,6 +138,9 @@ academia activity --json
 academia agents --json
 academia capabilities --json
 academia agent capabilities --json
+academia agent recommendations --json
+academia agent recipe daily_academic_brief --json
+academia agent recipe course_source_sync --json
 academia agent context --scope today --detail compact --json
 academia agent context --scope semester --detail standard --json
 academia agent context --scope course --course "POL 2103 - Politics" --detail compact --json
@@ -150,6 +153,24 @@ academia watch --json  # one-shot scan of configured folders
 ```
 
 Use `--profile /path/to/profile.json` when the profile is not at `~/.academic-os/profile.json`.
+
+### Recommendations and setup recipes
+
+Academia OS keeps optional setup guidance separate from capabilities. `academia agent capabilities --json` describes what Academia itself implements. `academia agent recommendations --json` lists optional workflows that may improve the experience, and `academia agent recipe WORKFLOW_ID --json` returns a machine-readable reference recipe.
+
+The shipped recipes are:
+
+- Daily Academic Brief
+- Course Source Sync
+- Academic Library / Scholarly Research
+- Calendar Awareness
+- Academic Email Awareness
+- General Web Research
+- Community Research
+- Practice Material Discovery
+- Visual / Media Learning Sources
+
+These are not integrations, connection checks, or automations. They do not read Gmail, calendars, course portals, browsers, libraries, communities, or the web. An authorized external agent compares each recipe with its own tools, asks the student, adapts the implementation, and verifies what it configured. The student remains in control; Academia OS does not store external service status or configure those systems.
 
 ### Agent Context and safe secondary material
 

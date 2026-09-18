@@ -22,6 +22,7 @@ from .domain import ENTITY_TYPES, DomainProjection
 from .file_preview import preview_file
 from .library import filter_material, list_material
 from .provenance import verify_source_metadata
+from .recommendations import get_recipe, list_recommendations
 from .review import ReviewQueue
 from .semester import resolve_current_semester
 from .settings import preview_config, update_config
@@ -361,6 +362,11 @@ def build_parser() -> argparse.ArgumentParser:
     agent_changes.add_argument("--json", action="store_true")
     agent_capabilities = agent_sub.add_parser("capabilities", help="Return categorized agent capability boundaries")
     agent_capabilities.add_argument("--json", action="store_true")
+    agent_recommendations = agent_sub.add_parser("recommendations", help="List optional recommended external-agent workflows")
+    agent_recommendations.add_argument("--json", action="store_true")
+    agent_recipe = agent_sub.add_parser("recipe", help="Read one optional external-agent workflow recipe")
+    agent_recipe.add_argument("workflow_id")
+    agent_recipe.add_argument("--json", action="store_true")
     artifact = sub.add_parser("artifact", help="Create safe AI-generated secondary academic material")
     artifact_sub = artifact.add_subparsers(dest="artifact_command", required=True)
     artifact_create = artifact_sub.add_parser("create", help="Create a new Markdown artifact in Academia's generated-material location")
@@ -498,6 +504,12 @@ def dispatch(args: argparse.Namespace) -> int:
     if args.command == "agent":
         if args.agent_command == "capabilities":
             _emit(build_agent_capabilities(), as_json=args.json)
+            return 0
+        if args.agent_command == "recommendations":
+            _emit(list_recommendations(), as_json=args.json)
+            return 0
+        if args.agent_command == "recipe":
+            _emit(get_recipe(args.workflow_id), as_json=args.json)
             return 0
         if args.agent_command == "changes":
             config = load_config(_profile_path(args))

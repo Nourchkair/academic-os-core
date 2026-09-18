@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { api } from './lib/api'
-import type { SettingsPreview, StatusPayload } from './types'
+import type { SettingsPreview, StatusPayload, WorkflowRecipe } from './types'
 
 type SettingsViewProps = { status: StatusPayload | null; onSaved: () => Promise<void> }
 type Draft = {
@@ -21,6 +21,7 @@ export function SettingsView({ status, onSaved }: SettingsViewProps) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [recommendations, setRecommendations] = useState<WorkflowRecipe[]>([])
 
   const loadSettings = useCallback(async () => {
     try {
@@ -32,10 +33,24 @@ export function SettingsView({ status, onSaved }: SettingsViewProps) {
     }
   }, [status])
 
+  const loadRecommendations = useCallback(async () => {
+    try {
+      const value = await api.recommendations()
+      setRecommendations(value.workflows)
+    } catch (reason) {
+      setError(`Optional workflow recommendations could not be loaded: ${String(reason)}`)
+    }
+  }, [])
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadSettings()
   }, [loadSettings])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadRecommendations()
+  }, [loadRecommendations])
 
   const update = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((current) => current ? { ...current, [key]: value } : current)
   const updates = useMemo(() => draft ? toUpdates(draft) : {}, [draft])
@@ -89,9 +104,26 @@ export function SettingsView({ status, onSaved }: SettingsViewProps) {
       <section className="settings-actions"><button className="secondary-button" onClick={() => void previewChanges()} disabled={busy}>{busy ? 'Preparing…' : 'Preview changes'}</button>{preview && <button className="primary-button" onClick={() => void applyChanges()} disabled={busy}>{structuralPreview ? 'Approve and apply structural changes' : 'Apply settings'}</button>}</section>
       {preview && <SettingsPreviewCard preview={preview} />}
     </> : <div className="loading-card">Loading your local settings…</div>}
+    <EnhanceSetup workflows={recommendations} />
     <details className="advanced-card"><summary><span className="eyebrow">Advanced</span><strong>Technical details</strong></summary><p>Most users do not need these controls.</p><div className="advanced-grid"><Info label="Profile path" value={status?.profile || 'Unavailable'} /><Info label="Runtime path" value={stringAt(config, ['runtime', 'install_directory']) || 'Unavailable'} /><Info label="CLI version" value={status?.version || 'Unavailable'} /></div></details>
   </div>
 }
+
+function EnhanceSetup({ workflows }: { workflows: WorkflowRecipe[] }) {
+  return <section className="setup-recommendations">
+    <div className="setup-recommendations-heading"><div><p className="eyebrow">Optional guidance</p><h3>Enhance your setup</h3><p>Academia OS can describe useful workflows, but your authorized AI agent owns external tools and automation. None of these are required.</p></div><span className="setup-boundary-note">Student approval stays required</span></div>
+    {workflows.length ? <div className="workflow-card-grid">{workflows.map((workflow) => <article className="workflow-card" key={workflow.id}>
+      <div className="workflow-card-top"><span className={`workflow-level ${workflow.level}`}>{workflow.level}</span><span className="workflow-id">{workflow.id}</span></div>
+      <h4>{workflow.title}</h4>
+      <p>{workflow.summary}</p>
+      <div className="workflow-detail"><span>Needs</span><strong>{workflow.requires.map(capabilityLabel).join(' · ')}</strong></div>
+      <div className="workflow-safety"><span>Safety boundary</span><p>{workflow.safety_rules[0]}</p></div>
+      <div className="workflow-prompt"><span>Ask your AI agent</span><code>Set up Academia's recommended {workflow.title} workflow.</code></div>
+    </article>)}</div> : <p className="muted-copy">Loading optional workflow guidance…</p>}
+  </section>
+}
+
+function capabilityLabel(value: string): string { return value.replaceAll('_', ' ').replace(/\\b\\w/g, (letter) => letter.toUpperCase()) }
 
 function SettingsPreviewCard({ preview }: { preview: SettingsPreview }) { return <section className="settings-preview"><p className="eyebrow">Review before saving</p><h3>{preview.changes.length} change{preview.changes.length === 1 ? '' : 's'} found</h3>{preview.changes.map((change) => <div className="settings-change" key={change.key}><div><strong>{change.key}</strong>{change.structural && <span className="structural-badge">Structural</span>}</div><span>{format(change.before)} → {format(change.after)}</span><small>{change.structural ? 'May affect workspace paths or projections; explicit approval is required.' : 'Local profile setting only.'}</small></div>)}{preview.changes.length === 0 && <p className="muted-copy">No settings would change.</p>}</section> }
 function SettingsSection({ title, description, children }: { title: string; description: string; children: ReactNode }) { return <section className="settings-section"><div><p className="eyebrow">Local settings</p><h3>{title}</h3><p>{description}</p></div><div className="settings-section-content">{children}</div></section> }

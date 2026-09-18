@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActivityEvent, AttachmentResult, Course, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, ProcessingRecord, ReviewItem, SettingsPreview, StatusPayload, Task, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
+import type { ActivityEvent, AttachmentResult, Course, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
@@ -179,5 +179,7 @@ export const api = {
     return command<SettingsPreview>('settings', args)
   },
   capabilities: () => command<Record<string, unknown>>('capabilities'),
+  recommendations: () => command<RecommendationsPayload>('agent', ['recommendations']),
+  recipe: (workflowId: string) => command<Record<string, unknown>>('agent', ['recipe', workflowId]),
   semester: (timezone: string) => command<{ semester: string; timezone: string }>('semester', ['--timezone', timezone]),
 }

@@ -104,6 +104,31 @@ export type ActivityEvent = {
   created_at: string
 }
 
+export type WorkflowRecipe = {
+  id: string
+  title: string
+  summary: string
+  why_useful: string
+  level: 'recommended' | 'optional' | 'advanced'
+  requires: string[]
+  optional_capabilities: string[]
+  student_choices: string[]
+  suggested_defaults: Record<string, unknown>
+  setup_steps: Array<{ id: string; instruction: string; student_approval_required: boolean; owner: string }>
+  safety_rules: string[]
+  verification_steps: string[]
+  maintenance: string[]
+  academia_interfaces: string[]
+  adaptation_notes: string[]
+  authority_notes?: Record<string, unknown>
+}
+
+export type RecommendationsPayload = {
+  schema_version: number
+  ownership: Record<'academia' | 'external_agent' | 'student', string>
+  workflows: WorkflowRecipe[]
+}
+
 export type SettingsPreview = {
   applied: boolean
   requires_approval: boolean

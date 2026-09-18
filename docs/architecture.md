@@ -13,6 +13,7 @@ academia_os/                       agent-neutral core and CLI
 ├── workspace.py                   rebuildable index/projection
 ├── library.py                     safe current-semester material inventory
 ├── agent.py                        bounded Agent Context, attention, changes, capabilities
+├── recommendations.py              validated optional workflow recipes
 ├── artifacts.py                    create-only AI-generated secondary material + registry
 ├── provenance.py                  labels + source verification
 ├── review.py                      durable Review Queue
@@ -60,6 +61,8 @@ Files · Settings · import/migration
 
 The agent interface is the primary product interface for authorized automation. `academia agent context`, `attention`, `changes`, and `capabilities` compose existing services; they do not create a parallel database or expose `.academia` internals. Context is deliberately bounded by scope (`workspace`, `semester`, `course`, or `today`) and detail (`compact`, `standard`, or `deep`). It returns identifiers, workspace-relative paths, evidence references, and safe-write locations rather than dumping source contents. The `sources.library_items` catalog is metadata-only and covers syllabi, readings, notes, generated material, and relevant imports within the bounded scope.
 
+`academia agent recommendations --json` and `academia agent recipe WORKFLOW_ID --json` expose the static `recommendations.py` product registry. This registry separates Academia capabilities from optional external workflows and adaptable reference recipes. Reading it is side-effect free: it does not inspect Gmail, calendars, course portals, browsers, research services, communities, or schedulers; it does not create integrations or store their state. External agents own implementation mechanics, and students authorize any external access or automation.
+
 `attention.items` is the conversation-facing representation of unresolved Review decisions and retryable or advisory issues. `choices[]` is reserved for stable executable decisions and contains a structured Review action descriptor; `recommended_next_actions[]` is explicitly non-executable guidance. A supported linked domain-change decision can advertise the two-stage `review_decide` then `review_execute` flow. Processing retry and source verification are advisory until a backend executor exists. The agent asks the student in its own conversation and then uses the existing Review/Action/Verification workflow. Academia does not store the conversation.
 
 `agent changes` reads append-only Activity oldest-first after an Activity ID or ISO timestamp cursor and returns a new cursor. Reusing the returned cursor is idempotent. Activity remains a record of changes the core actually performed, not reads or chat messages.
@@ -85,6 +88,10 @@ Core acquisition normalizes manual files, watched-folder candidates, and browser
 The core does not contain a model or require an AI agent. It owns the local workspace, structured state, provenance, processing lifecycle, Review Queue, activity, and safety policy. External agents use the neutral CLI/API and own their own model, credentials, operating-system permissions, browser session, and schedule.
 
 The browser flag is a defense-in-depth core guard: an adapter must still be explicitly allowed by the local policy before requesting read-only browser access. It does not launch a browser, log into a school account, or grant an agent credentials. The core has no independent recurring daemon; automation is adapter/scheduler-owned and any resulting changes still pass through core action and approval rules.
+
+## Recommended workflow ownership
+
+The nine shipped recipes are product definitions, not integrations: Daily Academic Brief, Course Source Sync, Academic Library / Scholarly Research, Calendar Awareness, Academic Email Awareness, General Web Research, Community Research, Practice Material Discovery, and Visual / Media Learning Sources. They state desired outcomes, optional capability requirements, authorization choices, safety boundaries, provenance/authority expectations, and verification steps. An external agent decides whether it has the required tools, asks the student, adapts the mechanics, and reports what it actually configured. Academia OS never infers or stores external service status.
 
 ## Action safety
 
