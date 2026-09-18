@@ -58,6 +58,7 @@ fn academia_command(command: String, args: Vec<String>) -> Result<String, String
         "extract",
         "migration",
         "agent",
+        "workflow",
         "artifact",
     ];
     if !allowed.contains(&command.as_str()) {

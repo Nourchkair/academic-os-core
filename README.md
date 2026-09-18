@@ -22,7 +22,7 @@ Student ↔ authorized AI agent
 Dashboard: observability · browsing · status · Activity · settings
 ```
 
-The core composes existing workspace, courses, tasks, Library, domain projections, Review, Activity, processing, provenance, and capabilities into bounded `academia agent ... --json` views. It does not create a second database, import model SDKs, or store AI conversations.
+The core composes existing workspace, courses, tasks, Library, domain projections, Review, Activity, processing, provenance, capabilities, and student workflow preferences into bounded `academia agent ... --json` and `academia workflow ... --json` views. It does not create a second database, import model SDKs, or store AI conversations.
 
 ## Install the core locally
 
@@ -141,6 +141,9 @@ academia agent capabilities --json
 academia agent recommendations --json
 academia agent recipe daily_academic_brief --json
 academia agent recipe course_source_sync --json
+academia workflow preferences --json
+academia workflow show daily_academic_brief --json
+academia workflow set daily_academic_brief --set time=08:30 --set cadence=weekdays --set include_calendar=true --updated-by user --json
 academia agent context --scope today --detail compact --json
 academia agent context --scope semester --detail standard --json
 academia agent context --scope course --course "POL 2103 - Politics" --detail compact --json
@@ -171,6 +174,34 @@ The shipped recipes are:
 - Visual / Media Learning Sources
 
 These are not integrations, connection checks, or automations. They do not read Gmail, calendars, course portals, browsers, libraries, communities, or the web. An authorized external agent compares each recipe with its own tools, asks the student, adapts the implementation, and verifies what it configured. The student remains in control; Academia OS does not store external service status or configure those systems.
+
+### My setup / workflow preferences
+
+The student can save desired workflow configuration locally without configuring any external service. The dashboard Settings → Enhance your setup cards expose the human-readable Recommended setup and an expandable My setup editor. The editor starts with the recipe defaults and can save structured overrides, custom instructions, optional external setup notes, and audit attribution.
+
+For example:
+
+```bash
+academia workflow set daily_academic_brief \
+  --set time=08:30 \
+  --set cadence=weekdays \
+  --set detail=compact \
+  --set include_calendar=true \
+  --set include_academic_email=true \
+  --set check_course_sources_first=true \
+  --custom-instructions "Keep the briefing short unless something important changed. Prioritize anything due in the next 3 days." \
+  --external-setup-notes "Managed by my external AI agent." \
+  --updated-by user --json
+```
+
+Read the saved configuration together with its recipe:
+
+```bash
+academia workflow preferences --json
+academia workflow show daily_academic_brief --json
+```
+
+The show response contains `recommended_recipe`, `saved_preferences`, and `effective_preferences`. The saved file is `<academic_root>/.academia/workflow_preferences.json`. It is local preference data, not an account-connection record: it never proves that Gmail, Calendar, a course portal, a browser, a scheduler, or any other external service is available or running. A new connection or automation still requires the agent to explain and obtain the required student authorization. Credentials, MFA codes, tokens, cookies, passwords, and API keys are rejected from preference values and notes.
 
 ### Agent Context and safe secondary material
 
@@ -357,7 +388,7 @@ npm run build
 npm run dev
 ```
 
-It is a React + TypeScript application with a Tauri 2 shell and a typed bridge to the `academia` CLI. It includes profile-free first-run onboarding, existing-workspace inspection/attachment, fresh-workspace setup, Home, semester-scoped **Courses**, Tasks, Activity, and local Settings views. Courses is also the academic library: choose a semester, open a class, then browse Syllabi & guides, Readings & references, Notes & study aids, Imported material, and other files with bounded read-only previews for supported text, PDF, DOCX, and PPTX files. The top-right profile badge opens a panel for Import material or **Migrate older material** instead of adding separate navigation sections. Review records remain available to external agents and CLI workflows, but there is no built-in Review page because Academia OS does not contain its own AI agent. Settings only edits local profile, workspace, and import preferences; AI models, browser sessions, and schedules are owned outside Academia OS. The migration view scans an explicitly selected legacy folder, previews every destination, supports selected copy by default, and gates destructive Move behind an additional confirmation. Import uses the native Tauri file picker and drag/drop paths while delegating copying, processing, provenance, Activity, and uncertainty records to the existing CLI/core. The Tauri bundle is currently a development foundation (`bundle.active` is false); macOS signing, notarization, and sidecar packaging remain release work. The old Tkinter app remains as a compatibility fallback while the new shell matures.
+It is a React + TypeScript application with a Tauri 2 shell and a typed bridge to the `academia` CLI. It includes profile-free first-run onboarding, existing-workspace inspection/attachment, fresh-workspace setup, Home, semester-scoped **Courses**, Tasks, Activity, and local Settings views. Courses is also the academic library: choose a semester, open a class, then browse Syllabi & guides, Readings & references, Notes & study aids, Imported material, and other files with bounded read-only previews for supported text, PDF, DOCX, and PPTX files. The top-right profile badge opens a panel for Import material or **Migrate older material** instead of adding separate navigation sections. Review records remain available to external agents and CLI workflows, but there is no built-in Review page because Academia OS does not contain its own AI agent. Settings edits the local profile, workspace, and import preferences, and its Enhance your setup cards expand into Recommended setup plus editable My setup workflow preferences that use the same local CLI state as agents. AI models, browser sessions, external permissions, and schedules are owned outside Academia OS; the cards never offer provider-connect controls. The migration view scans an explicitly selected legacy folder, previews every destination, supports selected copy by default, and gates destructive Move behind an additional confirmation. Import uses the native Tauri file picker and drag/drop paths while delegating copying, processing, provenance, Activity, and uncertainty records to the existing CLI/core. The Tauri bundle is currently a development foundation (`bundle.active` is false); macOS signing, notarization, and sidecar packaging remain release work. The old Tkinter app remains as a compatibility fallback while the new shell matures.
 
 ## Optional agents
 

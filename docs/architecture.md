@@ -14,6 +14,7 @@ academia_os/                       agent-neutral core and CLI
 ├── library.py                     safe current-semester material inventory
 ├── agent.py                        bounded Agent Context, attention, changes, capabilities
 ├── recommendations.py              validated optional workflow recipes
+├── workflow_preferences.py          validated local student workflow overrides
 ├── artifacts.py                    create-only AI-generated secondary material + registry
 ├── provenance.py                  labels + source verification
 ├── review.py                      durable Review Queue
@@ -63,6 +64,8 @@ The agent interface is the primary product interface for authorized automation. 
 
 `academia agent recommendations --json` and `academia agent recipe WORKFLOW_ID --json` expose the static `recommendations.py` product registry. This registry separates Academia capabilities from optional external workflows and adaptable reference recipes. Reading it is side-effect free: it does not inspect Gmail, calendars, course portals, browsers, research services, communities, or schedulers; it does not create integrations or store their state. External agents own implementation mechanics, and students authorize any external access or automation.
 
+`academia workflow preferences --json`, `workflow show WORKFLOW_ID --json`, and `workflow set WORKFLOW_ID ... --json` expose the separate student-owned preference layer. `workflow_preferences.py` stores validated overrides, custom instructions, optional maintenance notes, timestamps, and audit attribution under `<academic_root>/.academia/workflow_preferences.json` through `JsonStateStore`. Reads do not create missing state; writes are atomic and locked. A show response includes the immutable recommended recipe, saved overrides, and merged effective preferences. The store rejects unknown recipe IDs, unknown preference keys, type mismatches, invalid times/timezones, unsupported attribution, and credential-like fields or notes. It does not contain fields such as provider-connected, account-connected, or automation-running, and saved preferences never authorize external access.
+
 `attention.items` is the conversation-facing representation of unresolved Review decisions and retryable or advisory issues. `choices[]` is reserved for stable executable decisions and contains a structured Review action descriptor; `recommended_next_actions[]` is explicitly non-executable guidance. A supported linked domain-change decision can advertise the two-stage `review_decide` then `review_execute` flow. Processing retry and source verification are advisory until a backend executor exists. The agent asks the student in its own conversation and then uses the existing Review/Action/Verification workflow. Academia does not store the conversation.
 
 `agent changes` reads append-only Activity oldest-first after an Activity ID or ISO timestamp cursor and returns a new cursor. Reusing the returned cursor is idempotent. Activity remains a record of changes the core actually performed, not reads or chat messages.
@@ -92,6 +95,8 @@ The browser flag is a defense-in-depth core guard: an adapter must still be expl
 ## Recommended workflow ownership
 
 The nine shipped recipes are product definitions, not integrations: Daily Academic Brief, Course Source Sync, Academic Library / Scholarly Research, Calendar Awareness, Academic Email Awareness, General Web Research, Community Research, Practice Material Discovery, and Visual / Media Learning Sources. They state desired outcomes, optional capability requirements, authorization choices, safety boundaries, provenance/authority expectations, and verification steps. An external agent decides whether it has the required tools, asks the student, adapts the mechanics, and reports what it actually configured. Academia OS never infers or stores external service status.
+
+The Settings dashboard renders each recipe as an expandable Recommended setup plus a reusable My setup editor. The editor starts from `suggested_defaults`, supports common string, boolean, numeric, and array values, accepts custom instructions and optional external setup notes, and saves through the same `workflow set` command used by agents. It has no provider-connect or automation controls; the displayed prompt tells the student to ask an agent to use the saved preferences.
 
 ## Action safety
 

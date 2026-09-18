@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActivityEvent, AttachmentResult, Course, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
+import type { ActivityEvent, AttachmentResult, Course, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, WorkflowPreferencesPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
@@ -181,5 +181,13 @@ export const api = {
   capabilities: () => command<Record<string, unknown>>('capabilities'),
   recommendations: () => command<RecommendationsPayload>('agent', ['recommendations']),
   recipe: (workflowId: string) => command<Record<string, unknown>>('agent', ['recipe', workflowId]),
+  workflowPreferences: () => command<WorkflowPreferencesPayload>('workflow', ['preferences']),
+  workflowShow: (workflowId: string) => command<WorkflowShowPayload>('workflow', ['show', workflowId]),
+  workflowSet: (workflowId: string, preferences: Record<string, unknown>, customInstructions: string, externalSetupNotes: string, updatedBy = 'user') => {
+    const args = ['set', workflowId]
+    for (const [key, value] of Object.entries(preferences)) args.push('--set', `${key}=${JSON.stringify(value)}`)
+    args.push('--custom-instructions', customInstructions, '--external-setup-notes', externalSetupNotes, '--updated-by', updatedBy)
+    return command<WorkflowSetPayload>('workflow', args)
+  },
   semester: (timezone: string) => command<{ semester: string; timezone: string }>('semester', ['--timezone', timezone]),
 }

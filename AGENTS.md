@@ -22,6 +22,7 @@ An agent must explain these effects and obtain user approval before running the 
 
 - Human-readable academic material lives under the configured `academic.root_directory`.
 - Rebuildable local indexes and workflow state live under `<academic.root_directory>/.academia/`.
+- Student-owned workflow preferences live at `<academic.root_directory>/.academia/workflow_preferences.json`; they describe desired external workflow configuration, not connection or automation state.
 - The canonical profile is the configured `runtime.install_directory/profile.json`.
 - `profile.json` is local configuration. Never copy it to a public repository or share it without a safe-to-share audit.
 
@@ -76,6 +77,33 @@ After Academia is installed and configured successfully, an authorized external 
 
 The recommendation and recipe commands are read-only. They do not create schedules, connect accounts, grant permissions, read external systems, or store integration status. A recipe is guidance, not a mandatory implementation.
 
+Saved workflow preferences are a separate, local student-owned layer. They are not external integration state and do not authorize a new external connection. The dashboard and an authorized agent read and write the same `<academic_root>/.academia/workflow_preferences.json` file through the workflow preference interface:
+
+```bash
+academia workflow preferences --json
+academia workflow show daily_academic_brief --json
+academia workflow set daily_academic_brief \
+  --set time=08:30 \
+  --set cadence=weekdays \
+  --set include_calendar=true \
+  --set include_academic_email=true \
+  --set check_course_sources_first=true \
+  --custom-instructions "Keep it short and prioritize the next three days." \
+  --updated-by agent:codex --json
+```
+
+`workflow preferences` lists saved records without creating missing state. `workflow show` returns `recommended_recipe`, `saved_preferences`, and merged `effective_preferences`. `workflow set` validates overrides against the selected recipe, preserves unrelated existing overrides, writes atomically, and records `updated_at` plus an audit-only `updated_by` such as `user` or `agent:codex`. It never edits the static recipe. Agents must:
+
+1. read the recipe;
+2. read the saved workflow preferences;
+3. treat them as the student's desired configuration;
+4. explain any external authorization still required;
+5. configure external tools only after the student's approval;
+6. optionally update preference notes to describe maintenance choices; and
+7. report what was actually configured, without claiming that saved preferences prove it is running.
+
+Preference values and notes must not contain passwords, MFA codes, tokens, cookies, API keys, or other credentials. The workflow preference file is not an authentication mechanism.
+
 ## Stable interface
 
 Use the installed CLI or its equivalent local API:
@@ -109,6 +137,9 @@ academia agent capabilities --json
 academia agent recommendations --json
 academia agent recipe daily_academic_brief --json
 academia agent recipe course_source_sync --json
+academia workflow preferences --json
+academia workflow show daily_academic_brief --json
+academia workflow set daily_academic_brief --set time=08:30 --set cadence=weekdays --updated-by user --json
 academia agent context --scope today --detail compact --json
 academia agent context --scope course --course "COURSE ID" --detail standard --json
 academia agent attention --json

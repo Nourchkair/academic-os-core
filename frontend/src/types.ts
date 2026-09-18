@@ -123,6 +123,30 @@ export type WorkflowRecipe = {
   authority_notes?: Record<string, unknown>
 }
 
+export type WorkflowPreferenceRecord = {
+  workflow_id: string
+  preferences: Record<string, unknown>
+  custom_instructions: string
+  external_setup_notes: string
+  updated_at: string
+  updated_by: string
+}
+
+export type WorkflowPreferencesPayload = {
+  schema_version: number
+  workflows: WorkflowPreferenceRecord[]
+}
+
+export type WorkflowShowPayload = {
+  workflow_id: string
+  recommended_recipe: WorkflowRecipe
+  saved_preferences: WorkflowPreferenceRecord | null
+  effective_preferences: Record<string, unknown>
+  preference_semantics: string
+}
+
+export type WorkflowSetPayload = WorkflowShowPayload & { saved: boolean }
+
 export type RecommendationsPayload = {
   schema_version: number
   ownership: Record<'academia' | 'external_agent' | 'student', string>

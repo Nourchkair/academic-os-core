@@ -64,6 +64,7 @@ SAFE_COMMANDS = frozenset(
         "verify-source",
         "agents",
         "agent",
+        "workflow",
         "artifact",
     }
 )

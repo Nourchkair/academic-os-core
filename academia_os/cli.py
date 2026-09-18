@@ -28,6 +28,7 @@ from .semester import resolve_current_semester
 from .settings import preview_config, update_config
 from .workspace import build_workspace_snapshot
 from .workflow import ApprovalWorkflow
+from .workflow_preferences import WorkflowPreferencesStore
 from .web import DEFAULT_HOST, DEFAULT_PORT, serve_dashboard, validate_loopback_host
 from installer.core import initialize_installation
 from installer.migration import MigrationPlan, build_migration_plan, ensure_safe_text_target, execute_migration_plan, load_migration_plan, safe_atomic_write_text, validate_migration_source, write_migration_plan
@@ -191,6 +192,44 @@ def _create_workspace(args: argparse.Namespace) -> dict[str, Any]:
 
 def _active_academic_root(config: dict[str, Any]) -> Path:
     return Path(config["academic"]["root_directory"]).expanduser().resolve()
+
+
+def _workflow_store(args: argparse.Namespace) -> WorkflowPreferencesStore:
+    config = load_config(_profile_path(args))
+    return WorkflowPreferencesStore(_active_academic_root(config))
+
+
+def _workflow_preferences(args: argparse.Namespace) -> dict[str, Any] | list[dict[str, Any]]:
+    store = _workflow_store(args)
+    if args.workflow_command == "preferences":
+        return {"schema_version": 1, "workflows": store.list()}
+    if args.workflow_command == "show":
+        return store.show(args.workflow_id)
+    if args.workflow_command == "set":
+        preferences: dict[str, Any] = {}
+        if args.preferences_json is not None:
+            parsed = json.loads(args.preferences_json)
+            if not isinstance(parsed, dict):
+                raise ValueError("--preferences-json must contain a JSON object")
+            preferences.update(parsed)
+        for expression in args.set:
+            if "=" not in expression:
+                raise ValueError(f"workflow set expects KEY=VALUE: {expression}")
+            key, value = expression.split("=", 1)
+            if not key.strip():
+                raise ValueError("workflow preference key must not be empty")
+            preferences[key.strip()] = _json_value(value)
+        options: dict[str, Any] = {"preferences": preferences or None, "updated_by": args.updated_by}
+        if hasattr(args, "custom_instructions"):
+            options["custom_instructions"] = args.custom_instructions
+        if hasattr(args, "external_setup_notes"):
+            options["external_setup_notes"] = args.external_setup_notes
+        saved = store.set(args.workflow_id, **options)
+        result = store.show(args.workflow_id)
+        result["saved"] = True
+        result["saved_preferences"] = saved
+        return result
+    raise ValueError(f"unsupported workflow command: {args.workflow_command}")
 
 
 def _lexical_migration_path(path: Path) -> Path:
@@ -367,6 +406,21 @@ def build_parser() -> argparse.ArgumentParser:
     agent_recipe = agent_sub.add_parser("recipe", help="Read one optional external-agent workflow recipe")
     agent_recipe.add_argument("workflow_id")
     agent_recipe.add_argument("--json", action="store_true")
+    workflow = sub.add_parser("workflow", help="Read or save local student workflow preferences")
+    workflow_sub = workflow.add_subparsers(dest="workflow_command", required=True)
+    workflow_preferences = workflow_sub.add_parser("preferences", help="List saved workflow preferences")
+    workflow_preferences.add_argument("--json", action="store_true")
+    workflow_show = workflow_sub.add_parser("show", help="Show one recipe and its saved preferences")
+    workflow_show.add_argument("workflow_id")
+    workflow_show.add_argument("--json", action="store_true")
+    workflow_set = workflow_sub.add_parser("set", help="Save local preference overrides for one workflow")
+    workflow_set.add_argument("workflow_id")
+    workflow_set.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="Preference override; JSON booleans, numbers, and arrays are accepted")
+    workflow_set.add_argument("--preferences-json", help="JSON object of preference overrides")
+    workflow_set.add_argument("--custom-instructions", default=argparse.SUPPRESS)
+    workflow_set.add_argument("--external-setup-notes", default=argparse.SUPPRESS)
+    workflow_set.add_argument("--updated-by", default="user", help="Audit attribution: user or agent:<name>")
+    workflow_set.add_argument("--json", action="store_true")
     artifact = sub.add_parser("artifact", help="Create safe AI-generated secondary academic material")
     artifact_sub = artifact.add_subparsers(dest="artifact_command", required=True)
     artifact_create = artifact_sub.add_parser("create", help="Create a new Markdown artifact in Academia's generated-material location")
@@ -482,7 +536,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"courses", "today", "tasks", "course", "domain", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "artifact", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
+        if args.command in {"courses", "today", "tasks", "course", "domain", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "workflow", "artifact", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -523,6 +577,9 @@ def dispatch(args: argparse.Namespace) -> int:
         else:
             raise ValueError(f"unsupported agent command: {args.agent_command}")
         _emit(value, as_json=args.json)
+        return 0
+    if args.command == "workflow":
+        _emit(_workflow_preferences(args), as_json=args.json)
         return 0
     if args.command == "artifact":
         if args.artifact_command != "create":
