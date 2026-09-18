@@ -45,6 +45,22 @@ academia
 
 After the one-time setup, `academia` works from any folder and opens the local dashboard. This setup does not require Hermes, an Apple-signed application, or a cloud service. Dependency installation requires the normal Python package and npm registries; the dashboard and academic data remain local after installation.
 
+### For AI agents
+
+When a user authorizes Codex, Hermes, Claude, ChatGPT/Work, or another local agent to set up this repository, the agent should read `AGENTS.md` and this README before acting. On macOS, the supported setup command is:
+
+```bash
+sh install-mac.sh
+```
+
+The agent should explain that this creates the repository-local `.venv`, installs the package and locked frontend dependencies, builds `frontend/dist`, creates `~/.local/bin/academia`, and may update `~/.zshrc` to expose the launcher. The agent should ask for the user’s approval before executing those system and dependency changes, then verify with:
+
+```bash
+academia --help
+```
+
+After setup, `academia` opens the dashboard. Agents should use the stable JSON CLI for workspace operations, preserve the user’s academic files, and follow the approval and prohibited-action rules in `AGENTS.md`. The installer does not choose, create, attach, or migrate a personal academic workspace on the user’s behalf.
+
 ### Manual/development setup
 
 For a development environment without the launcher setup:

@@ -6,6 +6,18 @@ Academia OS is a local-first academic operating system. It is the product and ow
 
 Compatible agents may include Hermes, Codex, ChatGPT/Work, Claude, or future tools. An agent must use the documented Academia OS interface instead of reverse-engineering the workspace Markdown tree.
 
+## Installation and launch
+
+For a fresh macOS checkout, the supported one-time setup is:
+
+```bash
+sh install-mac.sh
+```
+
+The installer creates the repository-local `.venv`, installs the Python package, installs locked frontend dependencies, builds `frontend/dist`, creates `~/.local/bin/academia`, and adds that directory to zsh’s `PATH` when needed. It may use the Python package and npm registries during installation, but the dashboard and academic workspace remain local afterward. It does not select, create, attach, migrate, or reorganize a personal academic workspace.
+
+An agent must explain these effects and obtain user approval before running the installer. After setup, verify the launcher with `academia --help`; `academia` then starts the local server and opens the browser dashboard. Use `academia dashboard --no-open` when a browser should not be opened. If Python 3.11+ or Node.js/npm is unavailable, stop and report the prerequisite instead of installing system software without approval.
+
 ## Where state lives
 
 - Human-readable academic material lives under the configured `academic.root_directory`.
