@@ -4,6 +4,7 @@ export type Course = {
   name: string
   path: string
   inbox_count: number
+  material_count: number
   review_required: boolean
 }
 
@@ -13,17 +14,50 @@ export type Task = {
   completed: boolean
   course?: string
   source: string
+  source_location?: string | null
   confidence: string
+  kind?: string
+  due_date?: string | null
+}
+
+export type ProcessingRecord = {
+  id: string
+  source_path: string
+  signature: string
+  status: string
+  detected_at: string
+  updated_at: string
+  retry_count: number
+  lease_until?: string | null
+  failure_reason?: string | null
+  verification?: Record<string, unknown> | null
+  acknowledged_at?: string | null
+}
+
+export type LibraryItem = {
+  id: string
+  name: string
+  path: string
+  relative_path: string
+  semester: string
+  course_id?: string | null
+  category: 'syllabi' | 'readings' | 'notes' | 'imports' | 'other'
+  extension: string
+  size: number
+  modified_at: string
 }
 
 export type WorkspaceSnapshot = {
   academic_root: string
   semester: string
+  available_semesters: string[]
   timezone: string
   student: { name: string; institution: string; program?: string }
   courses: Course[]
   tasks: Task[]
   today: { exists: boolean; lines: string[]; path: string }
+  material_count: number
+  inbox_count: number
   review_count: number
   workspace_exists: boolean
 }
@@ -162,6 +196,7 @@ export type AgentStatus = {
   message?: string
   configured?: boolean
   detected?: boolean
+  dedicated_adapter?: string
 }
 
 export type StatusPayload = {

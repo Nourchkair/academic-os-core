@@ -16,6 +16,7 @@ from .attachment import assess_profile, attach_workspace, backup_profile, inspec
 from .config import load_config, save_config, runtime_directory, validate_config
 from .discovery import discover_academic_folders
 from .domain import ENTITY_TYPES, DomainProjection
+from .library import filter_material, list_material
 from .provenance import verify_source_metadata
 from .review import ReviewQueue
 from .semester import resolve_current_semester
@@ -333,6 +334,11 @@ def build_parser() -> argparse.ArgumentParser:
     domain = sub.add_parser("domain")
     domain.add_argument("entity_type", choices=ENTITY_TYPES, nargs="?")
     domain.add_argument("--json", action="store_true")
+    library = sub.add_parser("library", help="List visible material in the active semester")
+    library.add_argument("--category", choices=("all", "syllabi", "readings", "notes", "imports", "other"), default="all")
+    library.add_argument("--course", dest="course_id")
+    library.add_argument("--query", default="")
+    library.add_argument("--json", action="store_true")
     extract = sub.add_parser("extract", help="Extract supported facts from an authoritative local source")
     extract_sub = extract.add_subparsers(dest="extract_type", required=True)
     syllabus = extract_sub.add_parser("syllabus", help="Preview or reconcile a local syllabus")
@@ -412,7 +418,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"courses", "today", "tasks", "course", "domain", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
+        if args.command in {"courses", "today", "tasks", "course", "domain", "library", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -452,6 +458,10 @@ def dispatch(args: argparse.Namespace) -> int:
         _, snapshot, _ = _context(args)
         projection = DomainProjection(Path(snapshot["academic_root"]) / ".academia" / "domain.json")
         _emit(projection.list(args.entity_type), as_json=args.json); return 0
+    if args.command == "library":
+        _, snapshot, _ = _context(args)
+        items = list_material(Path(snapshot["academic_root"]), snapshot["semester"])
+        _emit(filter_material(items, category=args.category, course_id=args.course_id, query=args.query), as_json=args.json); return 0
     if args.command == "extract":
         if args.extract_type != "syllabus":
             raise ValueError(f"unsupported extraction source type: {args.extract_type}")
@@ -545,7 +555,18 @@ def dispatch(args: argparse.Namespace) -> int:
     if args.command == "inbox":
         _, snapshot, _ = _context(args)
         from .processing import ProcessingStore
-        value = [asdict(item) for item in ProcessingStore(Path(snapshot["academic_root"]) / ".academia" / "processing.json").pending()]
+        workspace_root = Path(snapshot["academic_root"])
+        processing = ProcessingStore(workspace_root / ".academia" / "processing.json")
+        for item in list_material(workspace_root, snapshot["semester"]):
+            if item.get("category") != "imports":
+                continue
+            source = Path(str(item["path"]))
+            try:
+                signature = f"{source.stat().st_size}:{source.stat().st_mtime_ns}"
+            except OSError:
+                continue
+            processing.detect(source, signature=signature)
+        value = [asdict(item) for item in processing.pending()]
         _emit(value, as_json=args.json); return 0
     if args.command == "activity":
         _, snapshot, _ = _context(args)

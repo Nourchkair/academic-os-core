@@ -19,7 +19,7 @@ type SetupForm = {
 
 type SetupPreview = AttachmentResult | WorkspaceCreationResult
 
-const steps = ['Welcome', 'Profile', 'Workspace', 'Semester', 'Sources', 'AI & agents', 'Review setup', 'Ready']
+const steps = ['Welcome', 'Profile', 'Workspace', 'Semester', 'Sources', 'Optional agents', 'Review setup', 'Ready']
 
 export function Onboarding({ candidates, onComplete, onMigration }: SetupProps) {
   const [step, setStep] = useState(0)
@@ -177,7 +177,7 @@ function Sources() {
 }
 
 function Agents() {
-  return <div className="setup-content"><h1>AI is optional</h1><p>Academia OS works on its own. If you choose to give an assistant local access later, it can use the documented Academia interface instead of guessing how your files are organized.</p><div className="agent-choice"><div><strong>Generic local interface</strong><span>Available to compatible assistants through the local Academia CLI/API and AGENTS.md.</span></div><em>Available</em></div><div className="agent-choice"><div><strong>Hermes</strong><span>Optional adapter only. It is not required for your workspace.</span></div><em>Optional</em></div><div className="agent-choice muted"><div><strong>Codex, Claude, ChatGPT/Work</strong><span>No fake dedicated connection is created. Use generic compatibility when you choose.</span></div><em>Generic</em></div></div>
+  return <div className="setup-content"><h1>No AI connection is required</h1><p>Academia OS works on its own. The assistant you choose later owns its model, credentials, browser session, and schedule. If you authorize an assistant to work with this computer, it can use the neutral local Academia interface.</p><div className="agent-choice"><div><strong>Local Academia interface</strong><span>Available to Codex, Hermes, Claude, ChatGPT/Work, or another authorized tool through the CLI/API and AGENTS.md.</span></div><em>Available</em></div><div className="agent-choice"><div><strong>Browser and automation</strong><span>Off by default. Optional adapters and schedulers require their own authorization; this workspace does not start them.</span></div><em>Optional</em></div><div className="agent-choice muted"><div><strong>Nothing is connected here</strong><span>No agent credentials, browser session, or recurring job is created during onboarding.</span></div><em>Safe default</em></div></div>
 }
 
 function ReviewSetup({ form, mode, inspection, preview, onRefresh, busy }: { form: SetupForm; mode: 'new' | 'existing'; inspection: WorkspaceInspection | null; preview: SetupPreview | null; onRefresh: () => void; busy: boolean }) {

@@ -122,6 +122,9 @@ academia review --json
 academia review decide REVIEW_ID use_new --json
 academia review execute REVIEW_ID --json
 academia domain --json
+academia library --json
+academia library --category syllabi --json
+academia library --course "POL 2103 - Politics" --json
 academia extract syllabus /path/to/syllabus.pdf --course "POL 2103 - Politics" --json
 academia extract syllabus /path/to/syllabus.md --course "POL 2103 - Politics" --verified-current --apply --json
 academia settings show --json
@@ -183,6 +186,20 @@ The processing lifecycle is explicit:
 DETECTED → PENDING → PROCESSING → VERIFIED → ACKNOWLEDGED
                                   └→ FAILED → retry → PENDING
 ```
+
+### How dashboard data is calculated
+
+- **Courses** are recognized folders in the configured active-semester directory that contain `01_COURSE/`. A course card also reports visible material counted from that course.
+- **Library** lists visible files in the active semester while excluding `.academia/`, hidden files, and known workspace control files. Syllabi, readings, notes, and imports are navigation categories based on explicit folder/name signals; they are not authority claims.
+- **Tasks** come from Markdown checkboxes in a course’s `01_COURSE/Course_Status.md` and from structured `assignment`/`deadline` entities in `.academia/domain.json`. Structured entities are normally created through syllabus extraction/reconciliation with evidence and confidence. Academia OS does not turn arbitrary filenames or prose into tasks.
+- **Inbox / intake** contains files present in course or semester `00_INBOX/` folders. Running `academia inbox` detects pre-existing files into the retryable processing state machine. Detection alone does not classify, move, or delete a file.
+- **Review** contains only explicit `.academia/review.json` items, such as uncertain imports, source conflicts, or approval-required actions. An unprocessed inbox file is shown as intake until a deliberate Review item is created.
+
+### Ownership of AI, browser, and automation
+
+Academia OS has no built-in AI requirement. The user’s chosen agent owns its model, credentials, local operating-system permissions, browser session, and schedule. The core exposes the same local CLI/API to Codex, Hermes, Claude, ChatGPT/Work, or another authorized tool.
+
+The core retains an off-by-default browser policy because it must be able to deny an adapter’s request even when an agent asks for it. This is a safety guard, not a browser connection. Browser authentication remains user-controlled, and the current browser capability is read-only visible Chromium handoff. Academia OS also does not run a background automation daemon; recurring work belongs to an explicitly configured external agent or scheduler.
 
 A scan never acknowledges work. Stale processing leases return to retryable state. Only verified work can be acknowledged.
 

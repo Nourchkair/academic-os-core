@@ -43,6 +43,7 @@ SAFE_COMMANDS = frozenset(
         "inbox",
         "import",
         "domain",
+        "library",
         "extract",
         "migration",
         "settings",

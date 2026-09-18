@@ -11,6 +11,7 @@ academia_os/                       agent-neutral core and CLI
 ├── semester.py                    calendar-aware resolution
 ├── discovery.py                   workspace discovery
 ├── workspace.py                   rebuildable index/projection
+├── library.py                     safe current-semester material inventory
 ├── provenance.py                  labels + source verification
 ├── review.py                      durable Review Queue
 ├── activity.py                    durable append-only activity
@@ -50,6 +51,12 @@ Structural settings use `academia_os.settings.update_config()`, which returns a 
 ## Acquisition
 
 Core acquisition normalizes manual files, watched-folder candidates, and browser metadata. Browser implementations are adapters. Current supported browser behavior is limited to optional visible Chromium handoff; Firefox, Safari, and a companion extension remain planned. Browser access defaults off and should not read credentials or browser secrets.
+
+## Agent, browser, and automation ownership
+
+The core does not contain a model or require an AI agent. It owns the local workspace, structured state, provenance, processing lifecycle, Review Queue, activity, and safety policy. External agents use the neutral CLI/API and own their own model, credentials, operating-system permissions, browser session, and schedule.
+
+The browser flag is a defense-in-depth core guard: an adapter must still be explicitly allowed by the local policy before requesting read-only browser access. It does not launch a browser, log into a school account, or grant an agent credentials. The core has no independent recurring daemon; automation is adapter/scheduler-owned and any resulting changes still pass through core action and approval rules.
 
 ## Action safety
 

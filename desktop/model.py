@@ -74,7 +74,7 @@ def load_dashboard(profile_path: Path) -> dict[str, Any]:
         "install_root": str(runtime),
         "course_count": len(courses),
         "courses": courses,
-        "inbox_count": sum(int(course["inbox_count"]) for course in snapshot["courses"]),
+        "inbox_count": int(snapshot.get("inbox_count", sum(int(course["inbox_count"]) for course in snapshot["courses"]))),
         "today_preview": today_preview,
         "root_exists": root.is_dir(),
         "semester_exists": (root / snapshot["semester"]).is_dir(),

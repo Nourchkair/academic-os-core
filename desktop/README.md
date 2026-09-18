@@ -44,6 +44,6 @@ This is a lightweight development bundle around the local Python compatibility a
 - **Home** — today’s academic focus, open tasks, attention queue, courses, and recent activity.
 - **Courses** — course state and intake/review signals rather than a raw folder tree.
 - **Tasks** — structured work with source and confidence labels.
-- **Library** — readings, syllabi, notes, references, and imported material entry points.
+- **Library** — live, local inventory of readings, syllabi, notes, references, and imported material, with clickable category filters.
 - **Review** — durable uncertain/approval-required items plus activity history.
-- **Settings** — workspace, browser/acquisition, and optional agent connection summaries; raw paths and runtime details remain advanced concepts.
+- **Settings** — workspace, import policy, external-access guard, and agent/scheduler ownership summaries; raw paths and runtime details remain advanced concepts.

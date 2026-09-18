@@ -5,7 +5,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .config import validate_config
+from .config import SEMESTER_PATTERN, validate_config
+from .domain import DomainProjection
+from .library import list_material
 from .state import JsonStateStore
 
 
@@ -16,7 +18,7 @@ def state_root(config: dict[str, Any]) -> Path:
     return root
 
 
-def _course_summary(path: Path) -> dict[str, Any]:
+def _course_summary(path: Path, *, material_count: int = 0) -> dict[str, Any]:
     name = path.name
     code = name.split(" - ", 1)[0].strip() if " - " in name else name.split()[0]
     inbox = path / "00_INBOX"
@@ -28,6 +30,7 @@ def _course_summary(path: Path) -> dict[str, Any]:
         "name": name,
         "path": str(path),
         "inbox_count": inbox_count,
+        "material_count": material_count,
         "status_file": str(status_file) if status_file.is_file() else None,
         "review_required": inbox_count > 0,
     }
@@ -45,18 +48,59 @@ def _extract_tasks(path: Path, course: str | None = None) -> list[dict[str, Any]
     return tasks
 
 
+def _domain_tasks(root: Path, course_ids: set[str]) -> list[dict[str, Any]]:
+    projection = DomainProjection(root / ".academia" / "domain.json")
+    tasks: list[dict[str, Any]] = []
+    for entity in projection.list():
+        entity_type = str(entity.get("entity_type", ""))
+        if entity_type not in {"deadline", "assignment"}:
+            continue
+        course = str(entity.get("course_id", "")).strip()
+        title = str(entity.get("title", "")).strip()
+        evidence = entity.get("evidence")
+        if not course or course not in course_ids or not title or not isinstance(evidence, dict):
+            continue
+        status = str(entity.get("status", "")).casefold()
+        tasks.append(
+            {
+                "id": f"domain:{entity_type}:{entity.get('id', title)}",
+                "title": title,
+                "completed": status in {"complete", "completed", "submitted", "graded"},
+                "course": course,
+                "source": str(evidence.get("source_path", "")),
+                "source_location": evidence.get("source_location"),
+                "confidence": str(evidence.get("confidence", "unverified")),
+                "kind": entity_type,
+                "due_date": entity.get("date") or entity.get("deadline"),
+            }
+        )
+    return tasks
+
+
 def build_workspace_snapshot(config: dict[str, Any], *, persist: bool = True) -> dict[str, Any]:
     normalized = validate_config(config)
     root = Path(normalized["academic"]["root_directory"]).expanduser().resolve()
     semester = normalized["academic"]["semester"]
     semester_root = root / semester
+    available_semesters = sorted(
+        candidate.name
+        for candidate in root.iterdir()
+        if candidate.is_dir() and SEMESTER_PATTERN.fullmatch(candidate.name)
+    ) if root.is_dir() else []
     courses = []
     tasks: list[dict[str, Any]] = []
+    materials = list_material(root, semester)
+    material_counts: dict[str, int] = {}
+    for item in materials:
+        course_id = item.get("course_id")
+        if isinstance(course_id, str):
+            material_counts[course_id] = material_counts.get(course_id, 0) + 1
     if semester_root.is_dir():
         for candidate in sorted(semester_root.iterdir()):
             if candidate.is_dir() and (candidate / "01_COURSE").is_dir():
-                courses.append(_course_summary(candidate))
+                courses.append(_course_summary(candidate, material_count=material_counts.get(candidate.name, 0)))
                 tasks.extend(_extract_tasks(candidate / "01_COURSE" / "Course_Status.md", candidate.name))
+    tasks.extend(_domain_tasks(root, {course["id"] for course in courses}))
     # The template checklist is onboarding guidance, not academic workload. Actual
     # tasks should come from course evidence or a structured task file.
     today_path = semester_root / "TODAY.md"
@@ -65,11 +109,14 @@ def build_workspace_snapshot(config: dict[str, Any], *, persist: bool = True) ->
         "schema_version": 1,
         "academic_root": str(root),
         "semester": semester,
+        "available_semesters": available_semesters,
         "timezone": normalized["academic"]["timezone"],
         "student": normalized["student"],
         "courses": courses,
         "tasks": tasks,
         "today": {"path": str(today_path), "exists": today_path.is_file(), "lines": today_lines[:80]},
+        "material_count": len(materials),
+        "inbox_count": sum(1 for item in materials if item.get("category") == "imports"),
         "review_count": sum(1 for item in courses if item["review_required"]),
         "workspace_exists": root.is_dir(),
     }

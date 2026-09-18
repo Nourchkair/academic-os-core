@@ -51,6 +51,8 @@ academia review execute REVIEW_ID --json
 academia extract syllabus /path/to/syllabus.pdf --course "COURSE ID" --json
 academia extract syllabus /path/to/syllabus.pdf --course "COURSE ID" --verified-current --apply --json
 academia domain --json
+academia library --json
+academia library --category imports --json
 academia settings show --json
 academia inbox --json
 academia activity --json
@@ -64,7 +66,7 @@ JSON output is the preferred agent context format. Human-readable output is for 
 
 An agent may, when operating through the user-approved local interface:
 
-- read structured workspace status, courses, tasks, review items, activity, and source metadata;
+- read structured workspace status, courses, tasks, library material, review items, activity, and source metadata;
 - stage user-selected files through manual import or configured watched folders;
 - create a plan or action proposal;
 - create user-authored or AI-generated secondary material with explicit provenance;

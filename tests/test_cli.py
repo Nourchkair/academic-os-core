@@ -41,6 +41,22 @@ def test_status_and_courses_json_are_machine_readable(tmp_path: Path) -> None:
     assert json.loads(courses.stdout)[0]["code"] == "POL 2103"
 
 
+def test_library_command_lists_material_in_the_active_semester(tmp_path: Path) -> None:
+    result = run_cli(tmp_path, "library", "--json")
+    assert result.returncode == 0, result.stderr
+    items = json.loads(result.stdout)
+    assert any(item["name"] == "announcement.pdf" and item["category"] == "imports" for item in items)
+
+
+def test_inbox_command_detects_preexisting_inbox_files(tmp_path: Path) -> None:
+    result = run_cli(tmp_path, "inbox", "--json")
+    assert result.returncode == 0, result.stderr
+    records = json.loads(result.stdout)
+    assert len(records) == 1
+    assert records[0]["status"] == "PENDING"
+    assert records[0]["source_path"].endswith("announcement.pdf")
+
+
 def test_review_and_activity_commands_read_persisted_state(tmp_path: Path) -> None:
     config = minimal_config(tmp_path)
     profile = Path(config["runtime"]["install_directory"]) / "profile.json"

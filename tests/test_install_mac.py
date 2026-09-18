@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -69,6 +70,12 @@ exit 1
 
 
 def _run_installer(tmp_path: Path, *, launcher_content: str | None = None) -> subprocess.CompletedProcess[str]:
+    fixture_repository = tmp_path / "repository"
+    (fixture_repository / "frontend").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(INSTALLER, fixture_repository / INSTALLER.name)
+    shutil.copy2(REPOSITORY_ROOT / "pyproject.toml", fixture_repository / "pyproject.toml")
+    shutil.copy2(REPOSITORY_ROOT / "frontend" / "package-lock.json", fixture_repository / "frontend" / "package-lock.json")
+
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     bin_dir = home / ".local" / "bin"
@@ -89,8 +96,8 @@ def _run_installer(tmp_path: Path, *, launcher_content: str | None = None) -> su
         }
     )
     return subprocess.run(
-        ["sh", str(INSTALLER)],
-        cwd=REPOSITORY_ROOT,
+        ["sh", str(fixture_repository / INSTALLER.name)],
+        cwd=fixture_repository,
         env=env,
         text=True,
         capture_output=True,

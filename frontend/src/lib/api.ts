@@ -1,9 +1,9 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActivityEvent, AttachmentResult, Course, DomainEntity, ExtractionPreview, ImportResult, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, ReviewItem, SettingsPreview, StatusPayload, Task, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
+import type { ActivityEvent, AttachmentResult, Course, DomainEntity, ExtractionPreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, ProcessingRecord, ReviewItem, SettingsPreview, StatusPayload, Task, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
-    super('The Academia OS local dashboard is unavailable. Start `academia dashboard --open` in a terminal, or launch the packaged app.')
+    super('The Academia OS local dashboard is unavailable. Start `academia` in a terminal, or launch the packaged app.')
     this.name = 'BridgeUnavailableError'
   }
 }
@@ -102,6 +102,14 @@ export const api = {
   reviewExecute: (itemId: string) => command<Record<string, unknown>>('review', ['execute', itemId]),
   activity: () => command<ActivityEvent[]>('activity'),
   domain: (entityType?: string) => command<DomainEntity[]>('domain', entityType ? [entityType] : []),
+  library: (options: { category?: string; courseId?: string; query?: string } = {}) => {
+    const args = []
+    if (options.category && options.category !== 'all') args.push('--category', options.category)
+    if (options.courseId) args.push('--course', options.courseId)
+    if (options.query) args.push('--query', options.query)
+    return command<LibraryItem[]>('library', args)
+  },
+  inbox: () => command<ProcessingRecord[]>('inbox'),
   workspace: () => command<WorkspaceSnapshot>('workspace'),
   workspaceDiscover: () => command<WorkspaceCandidate[]>('workspace', ['discover']),
   workspaceInspect: (path: string) => command<WorkspaceInspection>('workspace', ['inspect', path]),
