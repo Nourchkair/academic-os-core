@@ -1,10 +1,12 @@
 # Academia OS
 
+[Visit the Academia OS website](https://academia-os.nearbykestrel1.chatgpt.site) · [Check GitHub Releases for app downloads](https://github.com/Nourchkair/academic-os-core/releases)
+
 Academia OS is a **local-first academic operating layer** for a student’s computer. It supports external agents such as Codex and Hermes, and its dashboard Study chat currently uses the user's signed-in Codex CLI. Academia OS owns the human-readable workspace, academic state, evidence, provenance, permissions, safe actions, generated secondary material, and audit trail. The in-app chat does not yet call external MCP tools such as browser, Gmail, or calendar.
 
 It is **not** a Hermes product. Hermes is one optional adapter. Academia OS works without Hermes, Codex, ChatGPT/Work, Claude, browser automation, or a school account connection.
 
-> **Status: Early public alpha / pre-1.0.** The current version is `0.4.x`. Source-based macOS installation is the main supported release path; the Tauri bundle is still a development foundation rather than the primary installer. APIs, schemas, and adapter contracts may evolve before 1.0. Academic data remains local to the student's computer.
+> **Status: Early public alpha / pre-1.0.** The current version is `0.4.x`. A signed macOS beta bundle and in-app updater are being prepared; app downloads will appear on GitHub Releases after the release workflow completes. Until then, source-based macOS installation is available. APIs, schemas, and adapter contracts may evolve before 1.0. Academic data remains local to the student's computer.
 
 ## Shared core, multiple assistant hosts
 
