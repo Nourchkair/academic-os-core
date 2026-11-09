@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterator, TypeVar
@@ -15,6 +16,20 @@ except ImportError:  # pragma: no cover - Windows fallback keeps atomic replacem
 
 T = TypeVar("T")
 
+_PROCESS_LOCKS: dict[str, threading.Lock] = {}
+_PROCESS_LOCKS_GUARD = threading.Lock()
+
+
+def _thread_lock_for(path: Path) -> threading.Lock:
+    """Return the in-process lock shared by stores targeting the same file."""
+    key = str(path.expanduser().resolve())
+    with _PROCESS_LOCKS_GUARD:
+        lock = _PROCESS_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _PROCESS_LOCKS[key] = lock
+        return lock
+
 
 class JsonStateStore:
     """Human-readable JSON state with atomic replacement and process locking."""
@@ -22,18 +37,23 @@ class JsonStateStore:
     def __init__(self, path: Path) -> None:
         self.path = Path(path).expanduser()
         self.lock_path = self.path.with_name(f".{self.path.name}.lock")
+        self._thread_lock = _thread_lock_for(self.lock_path)
 
     @contextmanager
     def locked(self) -> Iterator[None]:
-        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.lock_path.open("a+", encoding="utf-8") as lock_handle:
-            if fcntl is not None:
-                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
+        # flock coordinates separate processes. A separate mutex is needed
+        # for threads: on macOS, competing flock calls from threads in one
+        # process can fail with EDEADLK instead of waiting for the lock holder.
+        with self._thread_lock:
+            self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.lock_path.open("a+", encoding="utf-8") as lock_handle:
                 if fcntl is not None:
-                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    if fcntl is not None:
+                        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 
     def _read_unlocked(self, default: Any) -> Any:
         try:

@@ -24,7 +24,7 @@ for candidate in (
         if resolved not in sys.path:
             sys.path.insert(0, resolved)
 
-from academia_os.processing import ProcessingStatus, ProcessingStore  # noqa: E402
+from academia_os.processing import ProcessingStatus, ProcessingStore, source_signature  # noqa: E402
 
 IGNORED_NAMES = {".DS_Store", ".gitkeep"}
 
@@ -101,16 +101,32 @@ def scan(config_path: Path | None = None) -> dict[str, Any]:
     changed: list[dict[str, Any]] = []
     recovered_sources = {record.source_path for record in recovered}
     for path, signature_data in current.items():
-        signature = json.dumps(signature_data, sort_keys=True, separators=(",", ":"))
+        signature = source_signature(Path(path))
         record = store.detect(Path(path), signature=signature)
         newly_detected = store.last_detection_changed
         retryable_failure = record.status is ProcessingStatus.FAILED
         stale_recovery = path in recovered_sources
-        if newly_detected or retryable_failure or stale_recovery:
+        # A scan can run before the scheduler wakes the worker. Keep unclaimed
+        # work visible on later scans, and also wake for verified records whose
+        # worker may have exited before acknowledgement. Active leases remain
+        # quiet so overlapping cron ticks do not duplicate work.
+        unclaimed = record.status is ProcessingStatus.PENDING
+        awaiting_acknowledgement = record.status is ProcessingStatus.VERIFIED
+        if newly_detected or retryable_failure or stale_recovery or unclaimed or awaiting_acknowledgement:
+            if newly_detected and record.retry_count == 0:
+                change = "new"
+            elif awaiting_acknowledgement:
+                change = "acknowledge"
+            elif stale_recovery:
+                change = "retry"
+            elif retryable_failure:
+                change = "retry"
+            else:
+                change = "pending"
             changed.append(
                 {
                     "path": path,
-                    "change": "new" if newly_detected and record.retry_count == 0 else "retry",
+                    "change": change,
                     "signature": signature_data,
                     "record_id": record.id,
                     "status": record.status.value,

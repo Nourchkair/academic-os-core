@@ -101,6 +101,28 @@ def test_health_endpoint_advertises_agent_transport_command(tmp_path: Path) -> N
     assert status == 200
     assert "agent" in json.loads(payload)["commands"]
     assert "artifact" in json.loads(payload)["commands"]
+    assert "history" in json.loads(payload)["commands"]
+
+
+def test_history_command_is_allowed_by_local_transport_without_shell_interpretation(tmp_path: Path) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    def runner(command: str, args: list[str]) -> CommandResult:
+        calls.append((command, args))
+        return CommandResult(0, "[]", "")
+
+    with running_server(tmp_path, runner=runner) as server:
+        status, _headers, payload = request(
+            server,
+            "POST",
+            "/api/v1/command",
+            body=command_body("history", ["list", "--course", "POL 2103 - Politics", "--semester", "Fall 2026"]),
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert status == 200
+    assert json.loads(payload) == []
+    assert calls == [("history", ["list", "--course", "POL 2103 - Politics", "--semester", "Fall 2026", "--json"])]
 
 
 def test_agent_command_is_allowed_by_local_transport_without_shell_interpretation(tmp_path: Path) -> None:

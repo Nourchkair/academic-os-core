@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .acquisition import browser_access_policy, capability_report, configured_watched_folders, import_file, scan_watched_folder, validate_import_destination
-from .agent import build_agent_attention, build_agent_capabilities, build_agent_changes, build_agent_context
+from .assignment_history import add_assignment_history, apply_history_to_tasks, list_assignment_history, update_assignment_history
+from .agent import _sanitize_value, build_agent_attention, build_agent_capabilities, build_agent_changes, build_agent_context
 from .artifacts import create_generated_artifact
 from .actions import ActionStore
 from .activity import ActivityLog
@@ -50,6 +51,12 @@ def _profile_path(args: argparse.Namespace) -> Path:
     return Path(args.profile).expanduser().resolve() if args.profile else default_profile().resolve()
 
 
+def _application_root() -> Path:
+    """Return the repository root or PyInstaller's bundled resource root."""
+    bundled_root = getattr(sys, "_MEIPASS", None)
+    return Path(bundled_root).resolve() if bundled_root else Path(__file__).resolve().parents[1]
+
+
 def _context(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any], Path]:
     profile_path = _profile_path(args)
     config = load_config(profile_path)
@@ -73,6 +80,15 @@ def _agent_semester_context(args: argparse.Namespace) -> tuple[dict[str, Any], d
     return config, snapshot, profile_path
 
 
+def _coursework_tasks(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    root = Path(snapshot["academic_root"]).expanduser().resolve()
+    tasks = list(snapshot.get("tasks", []))
+    for course in snapshot.get("courses", []):
+        records = list_assignment_history(root, str(snapshot["semester"]), str(course["id"]))
+        tasks = apply_history_to_tasks(tasks, records, course_name=str(course.get("name", "")))
+    return tasks
+
+
 def _emit(value: Any, *, as_json: bool, human: Callable[[Any], str] | None = None) -> None:
     if as_json:
         print(json.dumps(value, indent=2, ensure_ascii=False, default=str))
@@ -88,6 +104,7 @@ def _emit(value: Any, *, as_json: bool, human: Callable[[Any], str] | None = Non
 
 def _status(args: argparse.Namespace) -> dict[str, Any]:
     config, snapshot, profile_path = _context(args)
+    snapshot["tasks"] = _coursework_tasks(snapshot)
     state_root = Path(snapshot["academic_root"]) / ".academia"
     reviews = ReviewQueue(state_root / "review.json").list()
     activities = ActivityLog(state_root / "activity.jsonl").list(limit=5)
@@ -128,7 +145,7 @@ def _hermes_status(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _template_root() -> Path:
-    candidate = Path(__file__).resolve().parents[1] / "templates" / "University"
+    candidate = _application_root() / "templates" / "University"
     if not candidate.is_dir():
         raise ValueError("the reusable University workspace template is not available in this installation")
     return candidate
@@ -177,7 +194,7 @@ def _create_workspace(args: argparse.Namespace) -> dict[str, Any]:
         initialized = initialize_installation(
             manifest,
             template_root=_template_root(),
-            repo_root=Path(__file__).resolve().parents[1],
+            repo_root=_application_root(),
             allow_existing=False,
         )
     except Exception:
@@ -391,8 +408,24 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("status", "courses", "today", "tasks", "inbox", "activity", "agents", "capabilities"):
         command = sub.add_parser(name)
         command.add_argument("--json", action="store_true")
-        if name == "courses":
+        if name in {"courses", "tasks"}:
             command.add_argument("--semester", help="Read courses from a specific semester folder")
+    process = sub.add_parser("process", help="Manage local background text extraction")
+    process_sub = process.add_subparsers(dest="process_command", required=True)
+    process_status = process_sub.add_parser("status", help="Show processing records without refreshing source signatures")
+    process_status.add_argument("--json", action="store_true")
+    process_start = process_sub.add_parser("start", help="Start background extraction for a pending inbox file")
+    process_start.add_argument("record_id")
+    process_start.add_argument("--json", action="store_true")
+    process_batch = process_sub.add_parser("batch", help="Process pending and retry failed inbox files with bounded concurrency")
+    process_batch.add_argument("--max-workers", type=int, default=3, help="Maximum simultaneous local extractions (1-3)")
+    process_batch.add_argument("--json", action="store_true")
+    process_forget = process_sub.add_parser("forget", help="Forget a failed processing record for a missing inbox file")
+    process_forget.add_argument("record_id")
+    process_forget.add_argument("--json", action="store_true")
+    process_run = process_sub.add_parser("run", help=argparse.SUPPRESS)
+    process_run.add_argument("record_id")
+    process_run.add_argument("--json", action="store_true")
     agent = sub.add_parser("agent", help="Stable bounded context and change-feed interface for authorized agents")
     agent_sub = agent.add_subparsers(dest="agent_command", required=True)
     agent_context = agent_sub.add_parser("context", help="Build bounded structured academic context")
@@ -457,9 +490,11 @@ def build_parser() -> argparse.ArgumentParser:
     semester.add_argument("--timezone", default="UTC")
     semester.add_argument("--json", action="store_true")
     review = sub.add_parser("review")
-    review.add_argument("action", choices=["list", "approve", "reject", "resolve", "decide", "execute"], nargs="?", default="list")
+    review.add_argument("action", choices=["list", "show", "approve", "reject", "resolve", "decide", "execute"], nargs="?", default="list")
     review.add_argument("item_id", nargs="?")
     review.add_argument("decision", nargs="?", help="Typed decision such as use_new or choose_course:...")
+    review.add_argument("--actor", choices=("user", "agent:mcp"), default="user", help="Audit attribution for a user-authorized review action")
+    review.add_argument("--semester", help="Resolve course choices against a specific recognized semester")
     review.add_argument("--json", action="store_true")
     course = sub.add_parser("course")
     course.add_argument("course_id", nargs="?")
@@ -467,6 +502,42 @@ def build_parser() -> argparse.ArgumentParser:
     domain = sub.add_parser("domain")
     domain.add_argument("entity_type", choices=ENTITY_TYPES, nargs="?")
     domain.add_argument("--json", action="store_true")
+    history = sub.add_parser("history", help="Read or update a course's assignment and project history")
+    history_sub = history.add_subparsers(dest="history_command", required=True)
+    history_list = history_sub.add_parser("list", help="List coursework records for one course")
+    history_list.add_argument("--course", dest="course_id", required=True)
+    history_list.add_argument("--semester", help="Semester containing the course; defaults to the active semester")
+    history_list.add_argument("--json", action="store_true")
+    history_add = history_sub.add_parser("add", help="Add a user-confirmed coursework history record")
+    history_add.add_argument("--course", dest="course_id", required=True)
+    history_add.add_argument("--semester", help="Semester containing the course; defaults to the active semester")
+    history_add.add_argument("--kind", required=True, choices=("assignment", "essay", "project", "exam", "presentation", "quiz", "other"))
+    history_add.add_argument("--title", required=True)
+    history_add.add_argument("--status", required=True, choices=("planned", "in_progress", "submitted", "graded", "completed"))
+    history_add.add_argument("--due-date")
+    history_add.add_argument("--submitted-on")
+    history_add.add_argument("--grade")
+    history_add.add_argument("--task-title", help="Exact course task title to associate with this record")
+    history_add.add_argument("--artifact", action="append", dest="artifact_paths", help="Course-relative file path; may be repeated")
+    history_add.add_argument("--notes")
+    history_add.add_argument("--actor", default="user")
+    history_add.add_argument("--json", action="store_true")
+    history_update = history_sub.add_parser("update", help="Update a coursework record without deleting its status history")
+    history_update.add_argument("--course", dest="course_id", required=True)
+    history_update.add_argument("--semester", help="Semester containing the course; defaults to the active semester")
+    history_update.add_argument("--id", dest="record_id", required=True)
+    history_update.add_argument("--kind", choices=("assignment", "project", "essay", "exam", "presentation", "quiz", "other"))
+    history_update.add_argument("--title")
+    history_update.add_argument("--status", choices=("planned", "in_progress", "submitted", "graded", "completed"))
+    history_update.add_argument("--due-date")
+    history_update.add_argument("--submitted-on")
+    history_update.add_argument("--grade")
+    history_update.add_argument("--task-title")
+    history_update.add_argument("--artifact", action="append", dest="artifact_paths")
+    history_update.add_argument("--clear-artifacts", action="store_true")
+    history_update.add_argument("--notes")
+    history_update.add_argument("--actor", default="user")
+    history_update.add_argument("--json", action="store_true")
     library = sub.add_parser("library", help="List visible material in the active semester")
     library.add_argument("--category", choices=("all", "syllabi", "readings", "notes", "generated", "imports", "other"), default="all")
     library.add_argument("--course", dest="course_id")
@@ -476,6 +547,7 @@ def build_parser() -> argparse.ArgumentParser:
     file_preview_command = sub.add_parser("file-preview", help="Read a bounded preview of one active-semester Library file")
     file_preview_command.add_argument("source", type=Path)
     file_preview_command.add_argument("--semester", help="Read the file from a specific semester folder")
+    file_preview_command.add_argument("--include-image-data", action="store_true", help="Include bounded image bytes for the desktop reader")
     file_preview_command.add_argument("--json", action="store_true")
     extract = sub.add_parser("extract", help="Extract supported facts from an authoritative local source")
     extract_sub = extract.add_subparsers(dest="extract_type", required=True)
@@ -522,6 +594,7 @@ def build_parser() -> argparse.ArgumentParser:
     imported.add_argument("--destination", type=Path, required=True, help="Workspace inbox directory; source files are never moved")
     imported.add_argument("--source-label", help="Truthful provenance label for a staged source, instead of recording its temporary path")
     imported.add_argument("--uncertain", action="store_true", help="Keep the file in general intake and create a Review item")
+    imported.add_argument("--actor", choices=("user", "agent:mcp"), default="user", help="Audit attribution for an explicitly requested import")
     imported.add_argument("--json", action="store_true")
     migration = sub.add_parser("migration", help="Plan and execute safe legacy material migration")
     migration_sub = migration.add_subparsers(dest="migration_command", required=True)
@@ -538,6 +611,13 @@ def build_parser() -> argparse.ArgumentParser:
     migration_execute.add_argument("--apply", action="store_true")
     migration_execute.add_argument("--confirm-move", action="store_true")
     migration_execute.add_argument("--json", action="store_true")
+    mcp = sub.add_parser("mcp", help="Expose bounded local Academia tools over MCP stdio")
+    mcp_sub = mcp.add_subparsers(dest="mcp_command", required=True)
+    mcp_sub.add_parser("serve", help="Run an MCP stdio server for an authorized local agent")
+    from .study.cli import add_parser as add_study_parser
+    add_study_parser(sub)
+    dashboard_chat = sub.add_parser("chat", help=argparse.SUPPRESS)
+    dashboard_chat.add_argument("--input-file", required=True)
     return parser
 
 
@@ -554,9 +634,12 @@ def main(argv: list[str] | None = None) -> int:
         args.port = DEFAULT_PORT
         args.open = True
     try:
+        if args.command == "mcp":
+            from .mcp_server import serve
+            return serve(profile=args.profile)
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"courses", "today", "tasks", "course", "domain", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "workflow", "artifact", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
+        if args.command in {"process", "study", "chat", "courses", "today", "tasks", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "workflow", "artifact", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -568,6 +651,159 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def dispatch(args: argparse.Namespace) -> int:
+    if args.command == "process":
+        config = load_config(_profile_path(args))
+        if args.process_command == "status":
+            from .processing import ProcessingStore
+            root = Path(config["academic"]["root_directory"]).expanduser().resolve()
+            value = [asdict(record) for record in ProcessingStore(root / ".academia" / "processing.json").list()]
+        elif args.process_command == "start":
+            from .processing import ProcessingStatus, ProcessingStore
+            from .processing_worker import AUTOMATIC_EXTRACTION_EXTENSIONS, launch_processing_worker
+            root = Path(config["academic"]["root_directory"]).expanduser().resolve()
+            processing = ProcessingStore(root / ".academia" / "processing.json")
+            record = processing.get(args.record_id)
+            if record.status is not ProcessingStatus.PENDING:
+                raise ValueError(f"processing record is {record.status.value.lower()}, not pending")
+            if Path(record.source_path).suffix.casefold() not in AUTOMATIC_EXTRACTION_EXTENSIONS:
+                raise ValueError("automatic extraction is not available for this file type")
+            worker = launch_processing_worker(_profile_path(args), record.id)
+            value = {"record_id": record.id, "status": "started", "pid": worker.pid}
+        elif args.process_command == "batch":
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            from .processing import ProcessingStatus, ProcessingStore
+            from .processing_worker import MAX_CONCURRENT_EXTRACTION_WORKERS, AUTOMATIC_EXTRACTION_EXTENSIONS, process_record
+
+            if args.max_workers < 1 or args.max_workers > MAX_CONCURRENT_EXTRACTION_WORKERS:
+                raise ValueError(f"--max-workers must be between 1 and {MAX_CONCURRENT_EXTRACTION_WORKERS}")
+            root = Path(config["academic"]["root_directory"]).expanduser().resolve()
+            processing = ProcessingStore(root / ".academia" / "processing.json")
+            all_records = processing.list()
+            queue = [
+                record for record in all_records
+                if record.status in {ProcessingStatus.PENDING, ProcessingStatus.FAILED}
+                or (
+                    record.status is ProcessingStatus.ACKNOWLEDGED
+                    and (record.verification or {}).get("extraction_status") == "unsupported_without_ocr"
+                    and Path(record.source_path).suffix.casefold() in AUTOMATIC_EXTRACTION_EXTENSIONS
+                )
+            ]
+            pending: list[Any] = []
+            for record in queue:
+                if record.status is ProcessingStatus.FAILED:
+                    try:
+                        record = processing.retry(record.id)
+                    except ValueError:
+                        continue
+                elif record.status is ProcessingStatus.ACKNOWLEDGED:
+                    try:
+                        record = processing.requeue_unsupported_ocr(record.id)
+                    except ValueError:
+                        continue
+                pending.append(record)
+            runnable = [record for record in pending if Path(record.source_path).suffix.casefold() in AUTOMATIC_EXTRACTION_EXTENSIONS]
+            final_outcomes: dict[str, dict[str, Any]] = {
+                record.id: {
+                    "record_id": record.id,
+                    "name": Path(record.source_path).name,
+                    "status": "unsupported_format",
+                    "reason": f"automatic extraction is not available for {Path(record.source_path).suffix or 'this file type'}",
+                }
+                for record in pending if record not in runnable
+            }
+            todo = list(runnable)
+            attempt_rounds = 0
+            for _ in range(3):
+                if not todo:
+                    break
+                attempt_rounds += 1
+                retry_ids: set[str] = set()
+                with ThreadPoolExecutor(max_workers=args.max_workers, thread_name_prefix="academia-process") as pool:
+                    futures = {pool.submit(process_record, root, record.id): record for record in todo}
+                    for future in as_completed(futures):
+                        record = futures[future]
+                        try:
+                            result = future.result()
+                            result.setdefault("name", Path(record.source_path).name)
+                            result.setdefault("status", "processed")
+                            final_outcomes[record.id] = result
+                            if result["status"] == "requeued":
+                                retry_ids.add(record.id)
+                        except Exception as exc:
+                            try:
+                                current = processing.get(record.id)
+                                status = current.status.value.lower()
+                                reason = current.failure_reason or str(exc)
+                                # A lifecycle collision that leaves the record
+                                # queued is transient; give it another bounded
+                                # attempt after the active worker releases its slot.
+                                if current.status is ProcessingStatus.PENDING:
+                                    status = "requeued"
+                                    retry_ids.add(record.id)
+                            except (KeyError, OSError):
+                                status, reason = "unknown", str(exc)
+                            final_outcomes[record.id] = {
+                                "record_id": record.id,
+                                "name": Path(record.source_path).name,
+                                "status": status,
+                                "reason": reason[:500],
+                            }
+                todo = []
+                for record_id in retry_ids:
+                    try:
+                        current = processing.get(record_id)
+                    except (KeyError, OSError):
+                        continue
+                    if current.status is ProcessingStatus.PENDING:
+                        todo.append(current)
+            outcomes = list(final_outcomes.values())
+            counts: dict[str, int] = {}
+            for outcome in outcomes:
+                state = str(outcome.get("status", "unknown"))
+                counts[state] = counts.get(state, 0) + 1
+            value = {
+                "status": "complete",
+                "max_workers": args.max_workers,
+                "already_in_progress": sum(record.status is ProcessingStatus.PROCESSING for record in all_records),
+                "queued": len(runnable),
+                "attempt_rounds": attempt_rounds,
+                "unsupported": len(pending) - len(runnable),
+                "counts": counts,
+                "outcomes": outcomes,
+            }
+        elif args.process_command == "run":
+            from .processing_worker import process_record
+            value = process_record(Path(config["academic"]["root_directory"]), args.record_id)
+        elif args.process_command == "forget":
+            from .processing import ProcessingStore
+            root = Path(config["academic"]["root_directory"]).expanduser().resolve()
+            processing = ProcessingStore(root / ".academia" / "processing.json")
+            record = processing.forget_missing_failed(args.record_id, workspace_root=root)
+            ActivityLog(root / ".academia" / "activity.jsonl").append(
+                event_type="processing.forgotten",
+                title=f"Forgot failed processing record for missing source: {Path(record.source_path).name}",
+                details={"record_id": record.id, "previous_status": record.status.value, "failure_reason": record.failure_reason},
+                source=record.source_path,
+                actor="user",
+            )
+            value = {"record_id": record.id, "status": "forgotten", "previous_status": record.status.value, "source_path": record.source_path}
+        else:
+            raise ValueError("unsupported process command")
+        _emit(value, as_json=args.json)
+        return 0
+    if args.command == "study":
+        from .study.cli import dispatch as dispatch_study
+        _emit(dispatch_study(args, _profile_path(args)), as_json=args.json)
+        return 0
+    if args.command == "chat":
+        try:
+            payload = json.loads(Path(args.input_file).read_text(encoding="utf-8"))
+            from .dashboard_chat import respond
+            _emit(respond(payload), as_json=True)
+            return 0
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            _emit({"error": str(exc)}, as_json=True)
+            return 2
     if args.command == "dashboard":
         validate_loopback_host(args.host)
         serve_dashboard(host=args.host, port=args.port, open_browser=args.open, profile=args.profile)
@@ -640,7 +876,7 @@ def dispatch(args: argparse.Namespace) -> int:
     if args.command == "today":
         _, snapshot, _ = _context(args); _emit(snapshot["today"], as_json=args.json); return 0
     if args.command == "tasks":
-        _, snapshot, _ = _context(args); _emit(snapshot["tasks"], as_json=args.json); return 0
+        _, snapshot, _ = _semester_context(args); _emit(_coursework_tasks(snapshot), as_json=args.json); return 0
     if args.command == "course":
         _, snapshot, _ = _context(args)
         if not args.course_id:
@@ -650,13 +886,56 @@ def dispatch(args: argparse.Namespace) -> int:
         _, snapshot, _ = _context(args)
         projection = DomainProjection(Path(snapshot["academic_root"]) / ".academia" / "domain.json")
         _emit(projection.list(args.entity_type), as_json=args.json); return 0
+    if args.command == "history":
+        _, snapshot, _ = _semester_context(args)
+        root = Path(snapshot["academic_root"]).expanduser().resolve()
+        semester = args.semester or snapshot["semester"]
+        if args.history_command == "list":
+            value = list_assignment_history(root, semester, args.course_id)
+        elif args.history_command == "add":
+            fields = {"kind": args.kind, "title": args.title, "status": args.status}
+            for source, target in (("due_date", "due_date"), ("submitted_on", "submitted_on"), ("grade", "grade"), ("task_title", "task_title"), ("artifact_paths", "artifact_paths"), ("notes", "notes")):
+                raw = getattr(args, source)
+                if raw is not None:
+                    fields[target] = raw
+            value = add_assignment_history(root, semester, args.course_id, fields, actor=args.actor)
+            ActivityLog(root / ".academia" / "activity.jsonl").append(
+                event_type="coursework.history_added",
+                title=f"Recorded {value['title']} as {value['status'].replace('_', ' ')}",
+                course=value["course_id"],
+                source=f"{semester}/{value['course_id']}/03_ASSIGNMENTS/Assignment_History.json",
+                confidence="user-confirmed",
+                details={"record_id": value["id"], "kind": value["kind"], "status": value["status"]},
+                actor=args.actor,
+            )
+        elif args.history_command == "update":
+            fields = {}
+            for source in ("kind", "title", "status", "due_date", "submitted_on", "grade", "task_title", "artifact_paths", "notes"):
+                raw = getattr(args, source)
+                if raw is not None:
+                    fields[source] = raw
+            if args.clear_artifacts:
+                fields["artifact_paths"] = []
+            value = update_assignment_history(root, semester, args.course_id, args.record_id, fields, actor=args.actor)
+            ActivityLog(root / ".academia" / "activity.jsonl").append(
+                event_type="coursework.history_updated",
+                title=f"Updated {value['title']} history",
+                course=value["course_id"],
+                source=f"{semester}/{value['course_id']}/03_ASSIGNMENTS/Assignment_History.json",
+                confidence="user-confirmed",
+                details={"record_id": value["id"], "kind": value["kind"], "status": value["status"]},
+                actor=args.actor,
+            )
+        else:
+            raise ValueError(f"unsupported history command: {args.history_command}")
+        _emit(value, as_json=args.json); return 0
     if args.command == "library":
         _, snapshot, _ = _semester_context(args)
         items = list_material(Path(snapshot["academic_root"]), snapshot["semester"])
         _emit(filter_material(items, category=args.category, course_id=args.course_id, query=args.query), as_json=args.json); return 0
     if args.command == "file-preview":
         _, snapshot, _ = _semester_context(args)
-        value = preview_file(args.source, workspace_root=Path(snapshot["academic_root"]), semester=snapshot["semester"])
+        value = preview_file(args.source, workspace_root=Path(snapshot["academic_root"]), semester=snapshot["semester"], include_image_data=args.include_image_data)
         _emit(value, as_json=args.json); return 0
     if args.command == "extract":
         if args.extract_type != "syllabus":
@@ -717,9 +996,28 @@ def dispatch(args: argparse.Namespace) -> int:
                 value = {"academic_root": snapshot["academic_root"], "semester": snapshot["semester"], "exists": snapshot["workspace_exists"]}
         _emit(value, as_json=args.json); return 0
     if args.command == "review":
-        _, snapshot, _ = _context(args)
+        _, snapshot, _ = _semester_context(args)
         state_root = Path(snapshot["academic_root"]) / ".academia"
         queue = ReviewQueue(state_root / "review.json")
+        if args.action == "show":
+            if not args.item_id:
+                raise ValueError("review show requires a review item id")
+            review_item = queue.get(args.item_id)
+            details = review_item.details if isinstance(review_item.details, dict) else {}
+            proposal_details = details.get("proposal_details") if isinstance(details.get("proposal_details"), dict) else {}
+            value = {
+                "id": review_item.id,
+                "kind": review_item.kind,
+                "title": _sanitize_value(review_item.title, Path(snapshot["academic_root"])),
+                "course": _sanitize_value(review_item.course, Path(snapshot["academic_root"])),
+                "status": review_item.status.value,
+                "action_proposal_id": review_item.action_proposal_id,
+                "action_type": _sanitize_value(details.get("action_type") or proposal_details.get("action_type"), Path(snapshot["academic_root"]), key="action_type"),
+                "created_at": review_item.created_at,
+                "updated_at": review_item.updated_at,
+            }
+            _emit(value, as_json=args.json)
+            return 0
         workflow = ApprovalWorkflow(
             actions=ActionStore(state_root / "actions.json"),
             reviews=queue,
@@ -732,18 +1030,18 @@ def dispatch(args: argparse.Namespace) -> int:
             if args.action == "decide":
                 if not args.decision:
                     raise ValueError("review decide requires a decision")
-                value = asdict(workflow.decide_review(args.item_id, args.decision))
+                value = asdict(workflow.decide_review(args.item_id, args.decision, actor=args.actor))
             elif args.action == "execute":
                 from .extraction.reconcile import execute_domain_change
                 review_item = queue.get(args.item_id)
                 if not review_item.action_proposal_id:
                     raise ValueError("review execute requires an action-linked Review item")
                 projection = DomainProjection(state_root / "domain.json")
-                value = asdict(workflow.execute_approved(review_item.action_proposal_id, lambda proposal: execute_domain_change(proposal, projection)))
+                value = asdict(workflow.execute_approved(review_item.action_proposal_id, lambda proposal: execute_domain_change(proposal, projection), actor=args.actor if args.actor != "user" else "system"))
             elif args.action == "approve":
-                value = asdict(workflow.approve_review(args.item_id))
+                value = asdict(workflow.approve_review(args.item_id, actor=args.actor))
             elif args.action == "reject":
-                value = asdict(workflow.reject_review(args.item_id))
+                value = asdict(workflow.reject_review(args.item_id, actor=args.actor))
             else:
                 value = asdict(workflow.resolve_review(args.item_id))
         else:
@@ -751,23 +1049,64 @@ def dispatch(args: argparse.Namespace) -> int:
         _emit(value, as_json=args.json); return 0
     if args.command == "inbox":
         _, snapshot, _ = _context(args)
-        from .processing import ProcessingStore
+        from .processing import ProcessingStatus, ProcessingStore, cache_signature, source_signature
+        from .state import JsonStateStore
         workspace_root = Path(snapshot["academic_root"])
         processing = ProcessingStore(workspace_root / ".academia" / "processing.json")
+        cache_state = JsonStateStore(workspace_root / ".academia" / "extracted_sources.json").read({"records": {}})
+        cache_records = cache_state.get("records", {}) if isinstance(cache_state, dict) else {}
+        restored_count = 0
         for item in list_material(workspace_root, snapshot["semester"]):
-            if item.get("category") != "imports":
+            if item.get("intake_status") != "inbox":
                 continue
             source = Path(str(item["path"]))
             try:
-                signature = f"{source.stat().st_size}:{source.stat().st_mtime_ns}"
+                signature = source_signature(source)
             except OSError:
                 continue
-            processing.detect(source, signature=signature)
+            record = processing.detect(source, signature=signature)
+            relative_key = source.relative_to(workspace_root).as_posix()
+            cached = cache_records.get(relative_key) if isinstance(cache_records, dict) else None
+            document = cached.get("document") if isinstance(cached, dict) else None
+            if not isinstance(cached, dict) or not isinstance(document, dict) or str(document.get("status", "")).casefold() == "failed":
+                continue
+            try:
+                cache_matches = cached.get("signature") == cache_signature(source)
+            except OSError:
+                cache_matches = False
+            if not cache_matches or record.status is ProcessingStatus.ACKNOWLEDGED:
+                continue
+            restored = processing.restore_acknowledged(
+                record.id,
+                signature=signature,
+                verification={
+                    "source_signature": signature,
+                    "content_hash": document.get("content_hash"),
+                    "extraction_status": document.get("status"),
+                    "extraction_method": document.get("extraction_method"),
+                    "segment_count": len(document.get("segments", [])) if isinstance(document.get("segments"), list) else 0,
+                    "warning_count": len(document.get("warnings", [])) if isinstance(document.get("warnings"), list) else 0,
+                    "cache_key": relative_key,
+                },
+            )
+            if restored.status is ProcessingStatus.ACKNOWLEDGED and restored.verification and restored.verification.get("recovered_from_cache"):
+                restored_count += 1
+        if restored_count:
+            ActivityLog(workspace_root / ".academia" / "activity.jsonl").append(
+                event_type="processing.state_restored",
+                title=f"Restored completed processing status for {restored_count} cached source(s)",
+                details={"status": ProcessingStatus.ACKNOWLEDGED.value, "restored_count": restored_count},
+                confidence="verified",
+                actor="academia:local-index",
+            )
         value = [asdict(item) for item in processing.pending()]
         _emit(value, as_json=args.json); return 0
     if args.command == "activity":
         _, snapshot, _ = _context(args)
-        value = [asdict(item) for item in ActivityLog(Path(snapshot["academic_root"]) / ".academia" / "activity.jsonl").list()]
+        # The dashboard applies its own recent/archive retention view. Return a
+        # larger bounded window than the general CLI default so resolved events
+        # remain available to that view after the recent list grows past 100.
+        value = [asdict(item) for item in ActivityLog(Path(snapshot["academic_root"]) / ".academia" / "activity.jsonl").list(limit=1000)]
         _emit(value, as_json=args.json); return 0
     if args.command == "agents":
         _emit(_status(args)["agents"], as_json=args.json); return 0
@@ -796,8 +1135,22 @@ def dispatch(args: argparse.Namespace) -> int:
             details=value,
             source=value.get("source_label", str(args.source.expanduser().resolve())),
             confidence="unverified",
-            actor="user",
+            actor=args.actor,
         )
+        from .processing_worker import AUTOMATIC_EXTRACTION_EXTENSIONS, launch_processing_worker
+        if (
+            Path(value["destination"]).suffix.casefold() in AUTOMATIC_EXTRACTION_EXTENSIONS
+            and value.get("processing_status") == "PENDING"
+        ):
+            try:
+                worker = launch_processing_worker(_profile_path(args), str(value["processing_record_id"]))
+                value["processing_worker"] = {"status": "started", "pid": worker.pid}
+            except OSError as exc:
+                record = processing.get(str(value["processing_record_id"]))
+                if record.status.value == "PENDING":
+                    processing.begin(record.id)
+                    processing.fail(record.id, f"Could not start local processing worker: {exc}")
+                value["processing_worker"] = {"status": "failed_to_start", "reason": str(exc)}
         if args.uncertain:
             review_details = {
                 "filename": Path(value["destination"]).name,

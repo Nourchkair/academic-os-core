@@ -26,7 +26,7 @@ Each real course should be a direct child of the semester folder and should use 
 - `00_INBOX/` — temporary intake for files that still need classification.
 - `01_COURSE/` — course context, status, preferences, grading, schedule, questions, weaknesses, and logs.
 - `02_WEEKS/` — only weeks/topics established by reliable material.
-- `03_ASSIGNMENTS/` — one non-destructive workspace per confirmed assignment.
+- `03_ASSIGNMENTS/` — one non-destructive workspace per confirmed assignment plus a course-level `Assignment_History.json` for user-confirmed coursework status and attached course-relative files.
 - `04_EXAMS/` — confirmed midterm/final information and preparation.
 - `05_REFERENCE/` — course-wide reference material.
 - `06_KNOWLEDGE/` — source index, verification records, research, and history.
@@ -39,6 +39,8 @@ Each real course should be a direct child of the semester folder and should use 
 3. Put the syllabus and initial source files in `00_INBOX/`.
 4. Read the course `01_COURSE/README.md` before processing material.
 5. Populate facts from the actual source documents. Use `Not yet known`, `Unverified`, or an inbox uncertainty note when evidence is missing.
+
+Use `academia history list --course "COURSE ID" --semester "TERM" --json` or the dashboard's class-specific History section to review coursework records. The History record is separate from `06_KNOWLEDGE/Course_History.md`, which is reserved for historical syllabi and assessment patterns.
 
 ## Standard agent commands
 

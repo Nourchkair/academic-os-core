@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { api } from './lib/api'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { api, isTauriEnvironment } from './lib/api'
 import type { SettingsPreview, StatusPayload, WorkflowPreferenceRecord, AgentSetupPlaybook } from './types'
+import type { Update } from '@tauri-apps/plugin-updater'
 
 type SettingsViewProps = { status: StatusPayload | null; onSaved: () => Promise<void> }
 type Draft = {
@@ -30,6 +31,16 @@ export function SettingsView({ status, onSaved }: SettingsViewProps) {
   const [error, setError] = useState<string | null>(null)
   const [playbooks, setPlaybooks] = useState<AgentSetupPlaybook[]>([])
   const [savedPreferences, setSavedPreferences] = useState<SavedPreferences>({})
+  const [availableUpdate, setAvailableUpdate] = useState<Update | null>(null)
+  const updateRef = useRef<Update | null>(null)
+  const [updateBusy, setUpdateBusy] = useState(false)
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null)
+  const [updateError, setUpdateError] = useState<string | null>(null)
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null)
+
+  useEffect(() => () => {
+    if (updateRef.current) void updateRef.current.close()
+  }, [])
 
   const loadSettings = useCallback(async () => {
     try {
@@ -103,6 +114,55 @@ export function SettingsView({ status, onSaved }: SettingsViewProps) {
     } finally { setBusy(false) }
   }
 
+  const checkForUpdates = async () => {
+    setUpdateBusy(true); setUpdateMessage(null); setUpdateError(null)
+    try {
+      const { check } = await import('@tauri-apps/plugin-updater')
+      const update = await check()
+      if (updateRef.current) await updateRef.current.close()
+      updateRef.current = update
+      setAvailableUpdate(update)
+      if (!update) {
+        setUpdateProgress(null)
+        setUpdateMessage('Academia OS is up to date.')
+        return
+      }
+      setUpdateProgress(null)
+      setUpdateMessage(null)
+    } catch (reason) {
+      setUpdateError(`Update check failed: ${String(reason)}`)
+    } finally { setUpdateBusy(false) }
+  }
+
+  const installUpdate = async () => {
+    if (!availableUpdate) return
+    setUpdateBusy(true); setUpdateMessage('Preparing update…'); setUpdateError(null); setUpdateProgress(null)
+    try {
+      let downloadedBytes = 0
+      let contentLength = 0
+      await availableUpdate.downloadAndInstall((event) => {
+        if (event.event === 'Started') {
+          contentLength = event.data.contentLength ?? 0
+          setUpdateMessage('Downloading update…')
+          setUpdateProgress(contentLength > 0 ? 0 : null)
+        } else if (event.event === 'Progress') {
+          downloadedBytes += event.data.chunkLength
+          if (contentLength > 0) setUpdateProgress(Math.min(100, Math.round((downloadedBytes / contentLength) * 100)))
+        } else {
+          setUpdateProgress(100)
+          setUpdateMessage('Installing update…')
+        }
+      })
+      updateRef.current = null
+      setAvailableUpdate(null)
+      const { relaunch } = await import('@tauri-apps/plugin-process')
+      await relaunch()
+    } catch (reason) {
+      setUpdateError(`Update could not be installed: ${String(reason)}`)
+      setUpdateMessage(null)
+    } finally { setUpdateBusy(false) }
+  }
+
   return <div className="page-stack settings-page">
     <PageIntro eyebrow="Control" title="Settings" subtitle="Update the local profile and workspace that Academia OS reads. Importing files and migrating older material are available from the + button in the top-right corner." />
     {error && <p className="setup-error" role="alert">{error}</p>}
@@ -128,6 +188,30 @@ export function SettingsView({ status, onSaved }: SettingsViewProps) {
       <section className="settings-actions"><button className="secondary-button" onClick={() => void previewChanges()} disabled={busy}>{busy ? 'Preparing…' : 'Preview changes'}</button>{preview && <button className="primary-button" onClick={() => void applyChanges()} disabled={busy}>{structuralPreview ? 'Approve and apply structural changes' : 'Apply settings'}</button>}</section>
       {preview && <SettingsPreviewCard preview={preview} />}
     </> : <div className="loading-card">Loading your local settings…</div>}
+    <SettingsSection title="App updates" description="Check for signed Academia OS updates and install them on this device. Your academic workspace stays in place.">
+      {isTauriEnvironment() ? <>
+        <p className="settings-note">Installed version {status?.version || 'not available'}</p>
+        <div className="settings-actions update-settings-actions">
+          <button className="secondary-button" type="button" onClick={() => void checkForUpdates()} disabled={updateBusy}>{updateBusy ? 'Checking…' : 'Check for updates'}</button>
+        </div>
+        {availableUpdate && <div className="app-update-card" role="status" aria-live="polite">
+          <div className="app-update-copy">
+            <p className="eyebrow">Update available</p>
+            <h4>Academia OS {availableUpdate.version}</h4>
+            <p>Current version: {availableUpdate.currentVersion}</p>
+            {availableUpdate.date && <small>Released {formatUpdateDate(availableUpdate.date)}</small>}
+            {availableUpdate.body?.trim() && <p className="app-update-notes">{availableUpdate.body.trim()}</p>}
+          </div>
+          <button className="primary-button" type="button" onClick={() => void installUpdate()} disabled={updateBusy}>{updateBusy ? 'Installing…' : `Install ${availableUpdate.version} and restart`}</button>
+        </div>}
+        {updateProgress !== null && <progress className="app-update-progress" max={100} value={updateProgress} aria-label="Update download progress" />}
+        {updateMessage && <p className="settings-success" role="status" aria-live="polite">{updateMessage}{updateProgress !== null ? ` ${updateProgress}%` : ''}</p>}
+        {updateError && <p className="setup-error" role="alert">{updateError}</p>}
+      </> : <div className="app-update-browser-note">
+        <p>This browser dashboard can’t install desktop app updates. Open Academia OS from the installed desktop app to check for and install updates on this device.</p>
+        <button className="secondary-button" type="button" disabled>Available in the desktop app</button>
+      </div>}
+    </SettingsSection>
     <EnhanceSetup playbooks={playbooks} savedPreferences={savedPreferences} onSaved={(record) => setSavedPreferences((current) => ({ ...current, [record.workflow_id]: record }))} onReset={(workflowId) => setSavedPreferences((current) => { const next = { ...current }; delete next[workflowId]; return next })} />
     <details className="advanced-card"><summary><span className="eyebrow">Advanced</span><strong>Technical details</strong></summary><p>Most users do not need these controls.</p><div className="advanced-grid"><Info label="Profile path" value={status?.profile || 'Unavailable'} /><Info label="Runtime path" value={stringAt(config, ['runtime', 'install_directory']) || 'Unavailable'} /><Info label="CLI version" value={status?.version || 'Unavailable'} /></div></details>
   </div>
@@ -217,3 +301,5 @@ function toUpdates(draft: Draft): Record<string, unknown> { return { 'student.na
 function valueAt(config: ObjectValue, path: string[]): unknown { let current: unknown = config; for (const part of path) { if (!current || typeof current !== 'object') return undefined; current = (current as ObjectValue)[part] } return current }
 function stringAt(config: ObjectValue | null, path: string[]): string { const value = config ? valueAt(config, path) : undefined; return typeof value === 'string' ? value : '' }
 function format(value: unknown): string { if (value === undefined || value === null || value === '') return 'Unknown'; return typeof value === 'object' ? JSON.stringify(value) : String(value) }
+
+function formatUpdateDate(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) }

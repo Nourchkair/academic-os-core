@@ -1,0 +1,89 @@
+name: macOS app release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing version tag to package, for example v0.5.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package ${{ matrix.arch }} macOS app
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - arch: Apple Silicon
+            runner: macos-26
+          - arch: Intel
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install the local Academia runtime and bundler
+        run: python -m pip install -e ".[desktop-build]"
+      - name: Install locked frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Configure signed update verification
+        env:
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY || secrets.TAURI_UPDATER_PUBLIC_KEY }}
+        run: python scripts/configure_tauri_updater.py
+      - name: Check version metadata
+        run: python scripts/check_versions.py
+      - name: Require the tag to match the app version
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os
+          from academia_os.version import __version__
+          expected = f"v{__version__}"
+          actual = os.environ["RELEASE_TAG"]
+          if actual != expected:
+              raise SystemExit(f"Release tag {actual!r} does not match current app version {expected!r}.")
+          PY
+      - name: Import the Academia beta code-signing identity
+        id: beta-sign
+        env:
+          ACADEMIA_BETA_SIGNING_P12_B64: ${{ secrets.ACADEMIA_BETA_SIGNING_P12_B64 }}
+          ACADEMIA_BETA_SIGNING_P12_PASSWORD: ${{ secrets.ACADEMIA_BETA_SIGNING_P12_PASSWORD }}
+        run: bash scripts/install_beta_signing_identity.sh
+      - uses: tauri-apps/tauri-action@v0.5.24
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ steps.beta-sign.outputs.identity }}
+        with:
+          projectPath: frontend
+          tagName: ${{ inputs.release_tag || github.ref_name }}
+          releaseName: Academia OS ${{ inputs.release_tag || github.ref_name }}
+          releaseBody: Academia OS beta DMGs and signed in-app update artifacts. The app is not notarized; first launch may require a Gatekeeper approval.
+          releaseDraft: true
+          args: --bundles dmg
+      - name: Remove the temporary beta signing keychain
+        if: always() && steps.beta-sign.outputs.keychain-path != ''
+        env:
+          KEYCHAIN_PATH: ${{ steps.beta-sign.outputs.keychain-path }}
+        run: security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true

@@ -1,0 +1,92 @@
+.flashcard-experience { display: grid; gap: 14px; }
+.flashcard-counter { align-items: center; color: #7c7c7c; display: flex; font-size: 11px; justify-content: space-between; }
+.flashcard-kind { background: #f1f1f1; border: 1px solid #e8e8e8; border-radius: 999px; color: #747474; font-size: 9px; letter-spacing: .06em; padding: 5px 8px; text-transform: uppercase; }
+.flashcard-stage { perspective: 1200px; }
+.flashcard-flip-card { display: grid; transform-style: preserve-3d; transition: transform .58s cubic-bezier(.2,.75,.25,1); }
+.flashcard-flip-card.is-flipped { transform: rotateY(180deg); }
+.flashcard-face { backface-visibility: hidden; background: radial-gradient(ellipse at 15% 0%, #fafcff 0, #fff 55%); border: 1px solid #e3e7ec; border-radius: 18px; box-shadow: 0 14px 34px rgba(28, 42, 58, .08), 0 3px 8px rgba(28, 42, 58, .04); display: flex; flex-direction: column; grid-area: 1 / 1; min-height: 260px; overflow: hidden; padding: 21px; position: relative; }
+.flashcard-face::after { border: 1px solid rgba(255,255,255,.8); border-radius: 13px; content: ''; inset: 5px; pointer-events: none; position: absolute; }
+.flashcard-back { background: radial-gradient(ellipse at 85% 0%, #f0f7ff 0, #fff 58%); border-color: #d7e5f4; transform: rotateY(180deg); }
+.flashcard-face-top { align-items: center; color: #7c8793; display: flex; font-size: 10px; gap: 8px; min-width: 0; }
+.flashcard-face-top > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flashcard-mark { align-items: center; background: #e9f2fc; border-radius: 9px; color: #4f8dca; display: inline-flex; flex: 0 0 28px; font-size: 11px; font-weight: 750; height: 28px; justify-content: center; }
+.flashcard-side-label { color: #a0a7ae; font-size: 8px; font-weight: 700; letter-spacing: .1em; margin-left: auto; }
+.flashcard-face h3 { color: #252b33; font-size: 19px; font-weight: 650; line-height: 1.5; margin: auto 0; overflow-wrap: anywhere; padding: 18px 0; }
+.flashcard-recall { border-top: 1px solid #eceff2; margin-top: auto; padding-top: 11px; position: relative; z-index: 1; }
+.flashcard-recall summary { color: #687482; cursor: pointer; font-size: 10px; list-style: none; }
+.flashcard-recall summary::-webkit-details-marker { display: none; }
+.flashcard-recall summary::after { content: '＋'; float: right; }
+.flashcard-recall[open] summary::after { content: '−'; }
+.flashcard-recall summary span { color: #9aa2ab; margin-left: 4px; }
+.flashcard-recall textarea { background: rgba(255,255,255,.8); border: 1px solid #dfe5eb; border-radius: 9px; color: #303943; display: block; font: inherit; font-size: 11px; line-height: 1.5; margin-top: 9px; padding: 9px; resize: vertical; width: 100%; }
+.flashcard-recall textarea::placeholder { color: #9da5ad; }
+.flashcard-nudge { color: #9099a3; font-size: 10px; margin: auto 0 0; padding-top: 12px; }
+.flashcard-answer-copy { margin: auto 0; padding: 10px 0; }
+.flashcard-answer-copy h3 { font-size: 17px; line-height: 1.5; margin: 0; }
+.flashcard-answer-copy p { color: #606c78; font-size: 11px; line-height: 1.65; margin: 9px 0 0; white-space: pre-wrap; }
+.flashcard-evidence { border-top: 1px solid #dfe8f1; color: #66788b; font-size: 10px; margin-top: auto; padding-top: 10px; position: relative; z-index: 1; }
+.flashcard-evidence summary { cursor: pointer; }
+.flashcard-evidence blockquote { border-left: 2px solid #77aee2; margin: 9px 0 0; padding: 2px 0 2px 9px; }
+.flashcard-evidence blockquote strong { color: #53677b; font-size: 9px; }
+.flashcard-evidence blockquote p { font-size: 10px; line-height: 1.5; margin: 4px 0 0; white-space: pre-wrap; }
+.flashcard-saved-rating { align-items: center; background: rgba(235, 243, 251, .8); border-radius: 9px; color: #64778a; display: flex; font-size: 10px; gap: 7px; margin: 10px 0 0; padding: 8px 10px; position: relative; z-index: 1; }
+.flashcard-saved-rating > span { color: #548ac0; font-size: 15px; }
+.flashcard-saved-rating strong { color: #405d7b; }
+.flashcard-action-area { display: grid; gap: 8px; justify-items: center; }
+.flashcard-action-area > p { color: #7e8791; font-size: 10px; margin: 0; }
+.flashcard-reveal { align-items: center; background: #242a31; border: 1px solid #242a31; border-radius: 11px; color: #fff; cursor: pointer; display: inline-flex; font: inherit; font-size: 11px; font-weight: 650; gap: 12px; justify-content: center; min-height: 41px; padding: 0 17px; transition: transform .16s, background .16s; }
+.flashcard-reveal:hover:not(:disabled) { background: #3a424b; transform: translateY(-1px); }
+.flashcard-reveal:disabled { cursor: wait; opacity: .7; }
+.flashcard-button-spinner { animation: flashcard-spin .8s linear infinite; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; border-radius: 50%; height: 12px; width: 12px; }
+@keyframes flashcard-spin { to { transform: rotate(360deg); } }
+.flashcard-rating-area { display: grid; gap: 10px; }
+.flashcard-rating-area > div:first-child { display: grid; gap: 3px; }
+.flashcard-rating-area > div:first-child strong { color: #444d57; font-size: 11px; }
+.flashcard-rating-area > div:first-child small { color: #8a939c; font-size: 9px; line-height: 1.45; }
+.flashcard-ratings { display: grid; gap: 7px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.flashcard-rating { align-items: center; background: #fff; border: 1px solid #e3e7eb; border-radius: 11px; color: #535d67; cursor: pointer; display: flex; flex-direction: column; gap: 3px; justify-content: center; min-height: 68px; padding: 7px 3px; transition: transform .16s, border-color .16s, background .16s; }
+.flashcard-rating:hover:not(:disabled) { border-color: #b8c8d9; background: #f6f9fc; transform: translateY(-2px); }
+.flashcard-rating > span { font-size: 16px; font-weight: 700; line-height: 1; }
+.flashcard-rating > strong { font-size: 10px; }
+.flashcard-rating > small { color: #929ba4; font-size: 8px; white-space: nowrap; }
+.flashcard-rating-again > span { color: #c17658; }
+.flashcard-rating-hard > span { color: #c39943; }
+.flashcard-rating-good > span { color: #558bc1; }
+.flashcard-rating-easy > span { color: #668d71; }
+.flashcard-rating:disabled { cursor: wait; opacity: .55; }
+
+@media (prefers-color-scheme: dark) {
+  .flashcard-counter, .flashcard-face-top, .flashcard-recall summary, .flashcard-nudge, .flashcard-action-area > p { color: #a5adb6; }
+  .flashcard-kind { background: #2c2f33; border-color: #42464b; color: #c0c6cd; }
+  .flashcard-face { background: radial-gradient(ellipse at 15% 0%, #292e34 0, #222529 58%); border-color: #42474d; box-shadow: 0 14px 34px rgba(0,0,0,.22), 0 3px 8px rgba(0,0,0,.18); }
+  .flashcard-face::after { border-color: rgba(255,255,255,.04); }
+  .flashcard-back { background: radial-gradient(ellipse at 85% 0%, #27313d 0, #222529 58%); border-color: #425366; }
+  .flashcard-mark { background: #26384a; color: #8fc3f2; }
+  .flashcard-side-label { color: #89939e; }
+  .flashcard-face h3 { color: #f0f2f4; }
+  .flashcard-recall { border-color: #41474e; }
+  .flashcard-recall textarea { background: #292d32; border-color: #464d54; color: #f1f2f3; }
+  .flashcard-recall textarea::placeholder, .flashcard-recall summary span { color: #8e98a2; }
+  .flashcard-answer-copy p, .flashcard-evidence { color: #b4bec8; }
+  .flashcard-evidence { border-color: #414c58; }
+  .flashcard-evidence blockquote strong { color: #d4dce4; }
+  .flashcard-saved-rating { background: #2a3540; color: #b1c5d9; }
+  .flashcard-saved-rating strong { color: #d7e7f7; }
+  .flashcard-reveal { background: #e8eaed; border-color: #e8eaed; color: #1c2024; }
+  .flashcard-reveal:hover:not(:disabled) { background: #fff; }
+  .flashcard-rating-area > div:first-child strong { color: #e0e4e8; }
+  .flashcard-rating-area > div:first-child small, .flashcard-rating > small { color: #a1aab3; }
+  .flashcard-rating { background: #292d31; border-color: #444a50; color: #e1e5e8; }
+  .flashcard-rating:hover:not(:disabled) { background: #343a40; border-color: #5c6a78; }
+}
+
+@media (max-width: 500px) {
+  .flashcard-face { min-height: 235px; padding: 17px; }
+  .flashcard-face h3 { font-size: 17px; }
+  .flashcard-rating > small { font-size: 7px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flashcard-flip-card, .flashcard-rating, .flashcard-reveal { transition-duration: .01ms; }
+  .flashcard-button-spinner { animation-duration: 1.8s; }
+}

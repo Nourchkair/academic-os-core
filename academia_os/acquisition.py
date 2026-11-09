@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import SEMESTER_PATTERN, validate_config
-from .processing import ProcessingStore
+from .processing import ProcessingStore, source_signature
 from .state import JsonStateStore
 
 
@@ -58,8 +58,13 @@ def capability_report() -> dict[str, Any]:
             {"id": "inspect_review", "label": "Inspect unresolved Review decisions", "mode": "direct"},
             {"id": "create_ai_generated_artifact", "label": "Create clearly marked AI-generated secondary material", "mode": "create_only"},
             {"id": "create_non_destructive_index", "label": "Create or rebuild non-destructive local indexes", "mode": "direct"},
+            {"id": "study", "label": "Create cited study sets, run practice, record student answers and review progress through academia study", "mode": "shared_cli_api"},
             {"id": "read_activity_changes", "label": "Read append-only Activity changes with a cursor", "mode": "direct"},
+            {"id": "record_user_confirmed_coursework", "label": "Record and update user-confirmed assignment and project history", "mode": "user_confirmed_workspace_record"},
         ],
+        "study": {"status": "available", "interface": "academia study", "dashboard_required": False,
+                  "generation": ["external_agent", "codex_chatgpt_plan", "local_model"],
+                  "credentials_owned_by": "external provider", "practice_changes_course_grades": False},
         "approval_required": [
             {"id": "file_move", "label": "Move a file", "mode": "explicit_approval_and_verification"},
             {"id": "file_rename", "label": "Rename a file", "mode": "explicit_approval_and_verification"},
@@ -77,8 +82,15 @@ def capability_report() -> dict[str, Any]:
         ],
         "manual_import": {
             "status": "available",
-            "mode": "copy_to_selected_inbox",
-            "description": "academia import copies a user-selected local file into a selected workspace inbox and stages it for review.",
+            "mode": "copy_and_background_extract",
+            "description": "academia import and the local MCP import tool copy a student-confirmed file into a recognized direct workspace inbox and automatically extract supported local text formats in a background worker; originals are preserved and PDFs without extractable text are reported as needing OCR.",
+        },
+        "mcp": {
+            "status": "available",
+            "transport": "local_stdio",
+            "read_tools": ["workspace", "courses", "tasks", "agent_context", "attention", "review_item", "activity", "library", "file_preview", "processing_status", "import_targets"],
+            "write_tools": ["review_decide_after_student_confirmation", "review_execute_after_approval", "import_file_after_student_confirmation", "create_ai_generated_artifact"],
+            "external_connectors": "not_provided_by_core_mcp",
         },
         "watched_folders": {
             "status": "available",
@@ -186,7 +198,7 @@ def import_file(
         counter += 1
     shutil.copy2(source, destination)
     metadata = {
-        "source_type": "browser_upload" if source_label is not None else "manual_file",
+        "source_type": "browser_upload" if source_label is not None and source_label.startswith("browser-upload:") else "manual_file",
         "original_file": source_label if source_label is not None else str(source),
         "acquired_at": datetime.now(timezone.utc).isoformat(),
         "destination": str(destination),
@@ -197,5 +209,7 @@ def import_file(
         metadata["source_label"] = source_label
     _record_acquisition(workspace_root, destination, metadata)
     if processing is not None:
-        processing.detect(destination, signature=f"{destination.stat().st_size}:{destination.stat().st_mtime_ns}")
+        record = processing.detect(destination, signature=source_signature(destination))
+        metadata["processing_record_id"] = record.id
+        metadata["processing_status"] = record.status.value
     return metadata

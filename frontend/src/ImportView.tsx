@@ -9,14 +9,15 @@ type ImportViewProps = {
   status: StatusPayload
   courses: Course[]
   semester?: string
+  initialCourseId?: string
   onImported: () => Promise<void>
 }
 
-export function ImportView({ status, courses, semester, onImported }: ImportViewProps) {
+export function ImportView({ status, courses, semester, initialCourseId, onImported }: ImportViewProps) {
   const [paths, setPaths] = useState<string[]>([])
   const [browserFiles, setBrowserFiles] = useState<File[]>([])
-  const [destination, setDestination] = useState('general')
-  const [uncertain, setUncertain] = useState(true)
+  const [destination, setDestination] = useState(() => courses.some((course) => course.id === initialCourseId) ? initialCourseId as string : 'general')
+  const [uncertain, setUncertain] = useState(() => !courses.some((course) => course.id === initialCourseId))
   const [busy, setBusy] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)

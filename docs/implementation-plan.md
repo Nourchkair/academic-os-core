@@ -2,7 +2,7 @@
 
 ## Goal
 
-Turn the current Hermes-coupled Python/Tkinter system into a local-first, agent-agnostic academic operating system while preserving the existing academic safety, provenance, non-destructive migration, and read-only school-access principles.
+Build a local-first, agent-neutral academic operating system with shared academic contracts for an optional in-app assistant and external agents. Preserve academic safety, provenance, non-destructive migration, and read-only school-access principles.
 
 ## Historical baseline
 
@@ -27,10 +27,10 @@ The original architecture/refactor slices are implemented and verified. The curr
 - **Conversation-facing Review contract:** `agent attention` translates every unresolved Review item into a question, why human input is needed, current/proposed values, evidence, an explicit executable-choice list, advisory `recommended_next_actions`, action proposal, and status. Only backend-supported linked domain-change decisions advertise executable Review actions; processing retry and source verification remain advisory. The existing Review decision/execution/verification workflow remains authoritative and explicitly two-stage.
 - **Activity synchronization:** `agent changes --since CURSOR --json` reads the append-only Activity log oldest-first and returns an idempotent Activity-ID cursor; ISO timestamps are accepted as compatibility checkpoints.
 - **Safe generated artifacts:** `artifact create` is create-only, Markdown/text-first, source-linked for source-derived kinds, provenance-enforced as `AI-GENERATED`, and writes only to lazy `<semester>/<course>/06_KNOWLEDGE/AI_GENERATED/`. `.academia/artifacts.json` and Activity provide registry/audit visibility, and Library/dashboard identify these files as AI-created. Source references retain their structural course identity or `null` for semester-level intake; no filename-based attribution is used.
-- **Small observational dashboard update:** Home labels the existing Review count as “Open decisions”; Courses exposes an explicit AI-created material category/badge; Settings includes Agent Setup Playbooks and editable local playbook preferences with no external connection controls; no chatbot or major Review workflow was added.
+- **Dashboard assistant foundation:** Study chat preserves browser-local history, retrieves bounded course excerpts, and invokes the student's signed-in Codex CLI. Study Studio generation honors the selected Codex model. Claude subscription OAuth is unavailable inside Academia under Anthropic's current restrictions; Claude Code remains supported as a separate external agent. External tools are disabled in chat sessions; the dashboard does not yet connect to third-party MCP servers.
 - **Agent Setup Playbook registry:** `academia_os/recommendations.py` validates nine machine-readable playbooks exposed through read-only `academia agent playbooks` and `academia agent playbook`; the older `recommendations` and `recipe` commands remain compatibility aliases. Playbooks describe external-agent outcomes, ownership, authorization, safety, and verification without claiming integrations or storing their state.
 - **Student workflow preferences:** `academia_os/workflow_preferences.py` stores validated local overrides, custom instructions, optional notes for the implementing agent, and audit attribution under the academic workspace. `academia workflow preferences/show/set` and the Settings editor share this state; saved preferences never prove or authorize external connections.
-- **Still intentionally incomplete:** artifact updates/deletes, chat storage, model adapters, OCR, arbitrary-document semantic extraction, persistent background watchers, external source retrieval, execution of every possible action type, bundled sidecar packaging, signing, and notarization.
+- **Still intentionally incomplete:** artifact updates/deletes, in-app MCP client/tool orchestration, browser/Gmail/calendar connectors, arbitrary-document semantic extraction, persistent background watchers, external source retrieval, execution of every possible action type, Windows/Linux desktop packaging, and publishing a signed macOS release after updater credentials are configured.
 
 The live user workspace is never a repository fixture. Product tests use temporary sanitized workspaces only.
 
@@ -139,3 +139,27 @@ workspace files + rebuildable .academia/ state/index
 - Do not make AI content interpretation authoritative over source/provenance.
 - Do not rewrite stable academic templates into an opaque database.
 - Do not remove the Tkinter fallback before the new interface has compatibility coverage.
+
+## Assistant and MCP delivery plan
+
+This is the next product phase agreed with the student. The app remains local-first and does not host an Academia student database. The in-app assistant is an optional host/runtime; model providers and external MCP services are user-selected. Codex and other external agents remain supported against the same core interface.
+
+### Stage A — Shared assistant tool contracts
+
+**Partially implemented.** The local stdio MCP now exposes bounded context reads, exact valid import targets, a host-gated local-file import contract with processing handoff, executable-choice-validated Review decisions, a separate executor for already-approved supported domain changes, processing-status reads, and create-only AI-generated course artifacts. Activity attributes MCP-initiated Review actions as `agent:mcp`. Continue by adding host confirmation UI, duplicate handling where appropriate, and a visible Review/verification lifecycle. The MCP server cannot itself verify a human confirmation; compatible hosts must gate the call.
+
+### Stage B — In-app assistant host
+
+**Partially implemented.** Dashboard Study chat now invokes the installed Codex CLI with bounded context and browser-local chat persistence. Claude subscription routing is disabled because Anthropic does not permit a third-party app to route subscription OAuth for users; Claude Code remains usable as an external agent. Continue with the documented ChatGPT sign-in/app-server path for a downloadable first-party connection, provider-neutral MCP tool orchestration, explicit tool grants and confirmations, progress streaming, and shared write routing. Study chat cannot yet invoke arbitrary tools.
+
+### Stage C — Local provider and MCP connection management
+
+**Partially implemented.** The Study chat provider picker detects local Codex ChatGPT CLI sign-in and shows Claude as unavailable with the reason. The app does not own or store provider credentials. Still needed: the approved app-level ChatGPT sign-in flow and explicit provider setup guidance, plus an MCP connection manager for user-enabled services with local connection metadata, service identity, scopes, actual status, and disconnect/revoke controls. Do not interpret a playbook preference as a connection or authorization.
+
+### Stage D — External integrations and acquisition
+
+**Not implemented.** Add integrations one at a time. Begin with visible, read-only portal/browser acquisition and read-only Google services. The portal-to-Academia flow must confirm the exact downloaded file and inbox destination, preserve originals, record provenance, process locally, and verify the result. Calendar writes require duplicate detection and explicit approval. School submissions, school-account messages, credential access, and payments remain prohibited.
+
+### Stage E — Cross-host verification and release
+
+**Not implemented.** Verify the in-app assistant and external Codex/Claude paths against the same workflows, audit records, disconnect behavior, data-locality guarantees, and failure recovery. Update capability claims only after each integration works in the packaged application.

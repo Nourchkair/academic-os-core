@@ -90,6 +90,8 @@ Read the actual instructions and rubric before planning. Track prompt, deadline,
 
 Preserve sequential drafts and the exact final submitted version, receipt, feedback, and grade. Never overwrite a submitted file with a later revision. Mandatory submission requirements and academic-integrity restrictions remain visible even when personal study preferences differ.
 
+Each course may maintain `03_ASSIGNMENTS/Assignment_History.json` as the structured, user-confirmed history of assignments, essays, projects, exams, presentations, quizzes, and other work. Read/write it through `academia history list|add|update` or the per-class dashboard History section. This is academic coursework state, not AI conversation history. Mark work Submitted only from an explicit user report or authorized confirmation; this local record never submits work to a school portal. Preserve the original due-date evidence, and link files using paths inside the course folder. Do not repurpose `06_KNOWLEDGE/Course_History.md`, which is reserved for historical course information.
+
 Use the source-first workflow: instructions → rubric → overrides → original course sources → verified evidence/page numbers → permitted external scholarship → outline → draft → rubric/citation/submission review.
 
 Never fabricate authors, quotations, page numbers, publication details, URLs, DOIs, grades, deadlines, or course facts. Never cite a generated dashboard or internal path as the final academic source.

@@ -48,6 +48,8 @@ If the student approves an external agent's course-platform workflow, that agent
 
 Recognize: `Process inbox`, `Course review`, `Weekly review`, `Study Week X`, `Prepare for [exam]`, `Start [assignment]`, `Check [assignment]`, and `What should I work on today?`.
 
+Course-level assignment/project status history lives in `../03_ASSIGNMENTS/Assignment_History.json`. Read or update it through `academia history list|add|update` or the dashboard's per-class History section. Record status only from a student report or authorized source; this archive is academic state, not conversation history, and does not submit work to a school portal.
+
 ## Version safety
 
 Never casually overwrite personal notes, drafts, final submissions, graded work, or original professor material. Preserve sequential versions and use `99_ARCHIVE/` for clearly superseded operational material.

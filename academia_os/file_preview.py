@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
@@ -8,11 +9,18 @@ from zipfile import BadZipFile, ZipFile
 from pypdf import PdfReader
 
 from .library import list_material
+from .processing import cache_signature
+from .state import JsonStateStore
 
 MAX_PREVIEW_BYTES = 8 * 1024 * 1024
 MAX_PREVIEW_CHARS = 120_000
 TEXT_EXTENSIONS = frozenset({".csv", ".json", ".md", ".markdown", ".txt", ".text", ".yaml", ".yml"})
-PREVIEW_EXTENSIONS = TEXT_EXTENSIONS | {".docx", ".pdf", ".pptx"}
+IMAGE_MIME_TYPES = {".gif": "image/gif", ".jpeg": "image/jpeg", ".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+IMAGE_EXTENSIONS = frozenset(IMAGE_MIME_TYPES)
+MAX_IMAGE_PREVIEW_BYTES = 8 * 1024 * 1024
+MAX_OFFICE_XML_BYTES = 8 * 1024 * 1024
+MAX_OFFICE_TOTAL_XML_BYTES = 16 * 1024 * 1024
+PREVIEW_EXTENSIONS = TEXT_EXTENSIONS | IMAGE_EXTENSIONS | {".docx", ".pdf", ".pptx"}
 
 
 class FilePreviewError(ValueError):
@@ -43,7 +51,7 @@ def resolve_library_file(path: Path, *, workspace_root: Path, semester: str) -> 
     raise FilePreviewError("The selected file is not part of the active semester Library")
 
 
-def preview_file(path: Path, *, workspace_root: Path, semester: str) -> dict[str, Any]:
+def preview_file(path: Path, *, workspace_root: Path, semester: str, include_image_data: bool = False) -> dict[str, Any]:
     """Return a read-only, bounded preview for one indexed Library file."""
 
     resolved, item = resolve_library_file(path, workspace_root=workspace_root, semester=semester)
@@ -60,13 +68,18 @@ def preview_file(path: Path, *, workspace_root: Path, semester: str) -> dict[str
         content, truncated = _read_text(resolved)
         kind = "text"
     elif extension == ".pdf":
-        content, truncated = _read_pdf(resolved)
+        content, truncated = _read_cached_pdf(resolved, Path(workspace_root).expanduser().resolve()) or _read_pdf(resolved)
         kind = "pdf"
+    elif extension in IMAGE_EXTENSIONS:
+        if size > MAX_IMAGE_PREVIEW_BYTES:
+            raise FilePreviewError("Image preview is limited to 8 MB. Open the original file to view this image.")
+        content, truncated = "", False
+        kind = "image"
     else:
-        content, truncated = _read_office(resolved, extension)
+        content, truncated = read_office_text(resolved, extension)
         kind = "text"
 
-    return {
+    result = {
         "id": item["id"],
         "name": resolved.name,
         "extension": extension,
@@ -75,6 +88,13 @@ def preview_file(path: Path, *, workspace_root: Path, semester: str) -> dict[str
         "content": content,
         "truncated": truncated,
     }
+    if kind == "image" and include_image_data:
+        try:
+            encoded = base64.b64encode(resolved.read_bytes()).decode("ascii")
+        except OSError as exc:
+            raise FilePreviewError("The selected image could not be read") from exc
+        result["image_data_url"] = f"data:{IMAGE_MIME_TYPES[extension]};base64,{encoded}"
+    return result
 
 
 def _read_text(path: Path) -> tuple[str, bool]:
@@ -110,7 +130,28 @@ def _read_pdf(path: Path) -> tuple[str, bool]:
         return "", False
 
 
-def _read_office(path: Path, extension: str) -> tuple[str, bool]:
+def _read_cached_pdf(path: Path, workspace_root: Path) -> tuple[str, bool] | None:
+    try:
+        relative = path.resolve(strict=True).relative_to(workspace_root.resolve()).as_posix()
+        state = JsonStateStore(workspace_root / ".academia" / "extracted_sources.json").read({"records": {}})
+        records = state.get("records", {}) if isinstance(state, dict) else {}
+        record = records.get(relative) if isinstance(records, dict) else None
+        if not isinstance(record, dict) or record.get("signature") != cache_signature(path):
+            return None
+        document = record.get("document")
+        if not isinstance(document, dict) or document.get("status") != "supported":
+            return None
+        segments = document.get("segments")
+        if not isinstance(segments, list):
+            return None
+        pages = [str(segment.get("text", "")) for segment in segments if isinstance(segment, dict)]
+        return _bound_text("\n\n".join(pages).strip(), False)
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def read_office_text(path: Path, extension: str, *, max_chars: int = MAX_PREVIEW_CHARS) -> tuple[str, bool]:
+    """Extract visible text from a DOCX or PPTX file within explicit bounds."""
     prefix = "word/" if extension == ".docx" else "ppt/slides/"
     try:
         with ZipFile(path) as archive:
@@ -119,10 +160,27 @@ def _read_office(path: Path, extension: str) -> tuple[str, bool]:
                 names = [name for name in names if name == "word/document.xml" or "/header" in name or "/footer" in name]
             else:
                 names = [name for name in names if "/slide" in name]
-            text = "\n\n".join(_xml_visible_text(archive.read(name)) for name in names)
+            passages: list[str] = []
+            total_xml_bytes = 0
+            truncated = False
+            for name in names:
+                remaining = MAX_OFFICE_TOTAL_XML_BYTES - total_xml_bytes
+                if remaining <= 0:
+                    truncated = True
+                    break
+                with archive.open(name) as source:
+                    raw = source.read(min(MAX_OFFICE_XML_BYTES, remaining) + 1)
+                if len(raw) > min(MAX_OFFICE_XML_BYTES, remaining):
+                    truncated = True
+                    continue
+                total_xml_bytes += len(raw)
+                passages.append(_xml_visible_text(raw))
+            text = "\n\n".join(passages)
     except (OSError, BadZipFile, KeyError, ElementTree.ParseError) as exc:
         raise FilePreviewError(f"This {extension[1:].upper()} file could not be read as an office document") from exc
-    return _bound_text(text.strip(), False)
+    if len(text) > max_chars:
+        return text[:max_chars], True
+    return text.strip(), truncated
 
 
 def _xml_visible_text(raw: bytes) -> str:

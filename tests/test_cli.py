@@ -45,7 +45,12 @@ def test_library_command_lists_material_in_the_active_semester(tmp_path: Path) -
     result = run_cli(tmp_path, "library", "--json")
     assert result.returncode == 0, result.stderr
     items = json.loads(result.stdout)
-    assert any(item["name"] == "announcement.pdf" and item["category"] == "imports" for item in items)
+    announcement = next(item for item in items if item["name"] == "announcement.pdf")
+    assert announcement["category"] == "other"
+    assert announcement["intake_status"] == "inbox"
+    intake = run_cli(tmp_path, "library", "--category", "imports", "--json")
+    assert intake.returncode == 0, intake.stderr
+    assert any(item["name"] == "announcement.pdf" for item in json.loads(intake.stdout))
 
 
 def test_courses_and_library_can_read_a_selected_semester(tmp_path: Path) -> None:
