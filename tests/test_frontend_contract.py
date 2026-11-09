@@ -42,10 +42,10 @@ def test_dashboard_has_semester_courses_library_and_activity_surfaces() -> None:
     assert "AI-created material" in courses
     assert "AI-generated" in courses
     assert "api.filePreview(item.path, item.semester)" in courses
-    assert "Open decisions" in source
-    assert "Needs input" not in source
 
     home = (FRONTEND / "HomeView.tsx").read_text(encoding="utf-8")
+    assert "Open decisions" in home
+    assert "Needs input" not in home
     assert '<p className="eyebrow">Intake</p>' in home
     assert "onClick={() => onNavigate('activity')}" in home
 
