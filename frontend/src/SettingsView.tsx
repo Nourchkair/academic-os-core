@@ -218,20 +218,48 @@ export function SettingsView({ status, onSaved }: SettingsViewProps) {
 }
 
 function EnhanceSetup({ playbooks, savedPreferences, onSaved, onReset }: { playbooks: AgentSetupPlaybook[]; savedPreferences: SavedPreferences; onSaved: (record: WorkflowPreferenceRecord) => void; onReset: (workflowId: string) => void }) {
-  return <section className="agent-playbooks">
-    <div className="agent-playbooks-heading"><div><p className="eyebrow">Agent setup playbooks</p><h3>Use an authorized agent when you’re ready</h3><p>Academia OS provides portable playbooks for useful academic workflows. Your authorized agent chooses the tools and owns the external implementation; Academia OS does not connect accounts or run these automations.</p></div><span className="setup-boundary-note">Student authorization stays required</span></div>
-    {playbooks.length ? <div className="workflow-card-grid">{playbooks.map((playbook) => <WorkflowCard key={playbook.id} workflow={playbook} saved={savedPreferences[playbook.id] || null} onSaved={onSaved} onReset={onReset} />)}</div> : <p className="muted-copy">Loading Agent Setup Playbooks…</p>}
-  </section>
+  const [selectedPlaybook, setSelectedPlaybook] = useState<AgentSetupPlaybook | null>(null)
+  const selectedSaved = selectedPlaybook ? savedPreferences[selectedPlaybook.id] || null : null
+
+  return <>
+    <section className="agent-playbooks">
+      <div className="agent-playbooks-heading"><div><p className="eyebrow">Agent setup playbooks</p><h3>Use an authorized agent when you’re ready</h3><p>Academia OS provides portable playbooks for useful academic workflows. Your authorized agent chooses the tools and owns the external implementation; Academia OS does not connect accounts or run these automations.</p></div><span className="setup-boundary-note">Student authorization stays required</span></div>
+      {playbooks.length ? <div className="workflow-card-grid">{playbooks.map((playbook) => <WorkflowCard key={playbook.id} workflow={playbook} saved={savedPreferences[playbook.id] || null} onSaved={onSaved} onReset={onReset} onOpen={() => setSelectedPlaybook(playbook)} />)}</div> : <p className="muted-copy">Loading Agent Setup Playbooks…</p>}
+    </section>
+    {selectedPlaybook && <PlaybookPanel workflow={selectedPlaybook} saved={selectedSaved} onSaved={onSaved} onReset={onReset} onClose={() => setSelectedPlaybook(null)} />}
+  </>
 }
 
-function WorkflowCard({ workflow, saved, onSaved, onReset }: WorkflowCardProps) {
-  const [open, setOpen] = useState(false)
+function WorkflowCard({ workflow, onOpen }: WorkflowCardProps & { onOpen: () => void }) {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle')
+  const agentPrompt = buildAgentPrompt(workflow)
+
+  const copyPrompt = async () => {
+    try {
+      await copyText(agentPrompt)
+      setCopyState('copied')
+    } catch {
+      setCopyState('error')
+    }
+  }
+
+  return <article className="workflow-card">
+    <button className="workflow-card-open" type="button" aria-haspopup="dialog" aria-label={`Open ${workflow.title} playbook`} onClick={onOpen}>
+      <span className="workflow-card-open-copy"><span className={`workflow-level ${workflow.level}`}>{workflow.level}</span><strong>{workflow.title}</strong><small>{workflow.summary}</small></span><span className="workflow-card-open-link">View playbook <span aria-hidden="true">→</span></span>
+    </button>
+    <div className="workflow-card-meta"><span>Needs</span><strong>{workflow.requires.map(capabilityLabel).join(' · ')}</strong></div>
+    <div className="workflow-prompt"><div className="workflow-prompt-heading"><span>Ask your AI agent</span><button className="quiet-button workflow-copy-button" type="button" onClick={() => void copyPrompt()}>{copyState === 'copied' ? 'Copied' : copyState === 'error' ? 'Copy unavailable' : 'Copy prompt'}</button></div><code>{agentPrompt}</code></div>
+  </article>
+}
+
+function PlaybookPanel({ workflow, saved, onSaved, onReset, onClose }: WorkflowCardProps & { onClose: () => void }) {
   const [values, setValues] = useState<Record<string, unknown>>(() => mergePreferences(workflow, saved))
   const [customInstructions, setCustomInstructions] = useState(saved?.custom_instructions || '')
   const [externalSetupNotes, setExternalSetupNotes] = useState(saved?.external_setup_notes || '')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const titleId = `playbook-panel-title-${workflow.id}`
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -239,6 +267,12 @@ function WorkflowCard({ workflow, saved, onSaved, onReset }: WorkflowCardProps) 
     setCustomInstructions(saved?.custom_instructions || '')
     setExternalSetupNotes(saved?.external_setup_notes || '')
   }, [workflow, saved])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
 
   const save = async () => {
     try {
@@ -250,7 +284,6 @@ function WorkflowCard({ workflow, saved, onSaved, onReset }: WorkflowCardProps) 
       setError(`This setup was not saved: ${String(reason)}`)
     } finally { setBusy(false) }
   }
-
   const reset = async () => {
     try {
       setBusy(true); setError(null); setMessage(null)
@@ -261,23 +294,24 @@ function WorkflowCard({ workflow, saved, onSaved, onReset }: WorkflowCardProps) 
       setMessage(result.reset_applied ? 'Reset locally to the recommended defaults. No external service was changed.' : 'Already using the recommended defaults. Only Academia’s local preference record was checked.')
       onReset(workflow.id)
     } catch (reason) {
-      setError(`Preferences were not reset: ${String(reason)}`)
+      setError('Preferences were not reset: ' + String(reason))
     } finally { setBusy(false) }
   }
 
-  return <article className={`workflow-card ${open ? 'is-open' : ''}`}>
-    <button className="workflow-card-toggle" type="button" aria-expanded={open} onClick={() => setOpen((current) => !current)}>
-      <span className="workflow-card-toggle-copy"><span className={`workflow-level ${workflow.level}`}>{workflow.level}</span><strong>{workflow.title}</strong><small>{workflow.summary}</small></span><span className="workflow-card-chevron" aria-hidden="true">{open ? '−' : '+'}</span>
-    </button>
-    <div className="workflow-card-meta"><span>Needs</span><strong>{workflow.requires.map(capabilityLabel).join(' · ')}</strong></div>
-    <div className="workflow-prompt"><span>Ask your AI agent</span><code>Use the “{workflow.title}” Agent Setup Playbook with my saved Academia preferences. Check your own tools, ask for any required authorization, and report exactly what you can configure.</code></div>
-    {open && <div className="workflow-editor">
-      <section className="playbook-guide"><p className="eyebrow">Playbook guide</p><h5>Why it is useful</h5><p>{workflow.why_useful}</p><PlaybookList title="Suggested defaults" items={Object.entries(workflow.suggested_defaults).map(([key, value]) => `${labelFromKey(key)}: ${formatPreferenceValue(value)}`)} /><PlaybookList title="Agent implementation steps" items={workflow.setup_steps.map((step) => `${step.instruction}${step.student_approval_required ? ' (student approval required)' : ''}`)} /><PlaybookList title="Student choices" items={workflow.student_choices} /><PlaybookList title="Safety contract" items={workflow.safety_rules} /><PlaybookList title="Verification" items={workflow.verification_steps} /></section>
-      <section className="playbook-preferences"><p className="eyebrow">My playbook preferences</p><h5>Saved locally for your agent</h5><p className="workflow-helper">Start from the playbook defaults, then save only the choices you want your authorized AI agent to use. Saving here does not create an external connection or automation.</p><div className="workflow-preference-fields">{Object.entries(workflow.suggested_defaults).map(([key, defaultValue]) => <PreferenceField key={key} name={key} defaultValue={defaultValue} value={values[key]} onChange={(value) => setValues((current) => ({ ...current, [key]: value }))} />)}</div><label className="workflow-text-field"><span>Custom instructions</span><textarea value={customInstructions} onChange={(event) => setCustomInstructions(event.target.value)} placeholder="Tell your agent how you want this playbook to behave." /></label><label className="workflow-text-field"><span>Optional notes for the implementing agent</span><textarea value={externalSetupNotes} onChange={(event) => setExternalSetupNotes(event.target.value)} placeholder="Maintenance notes for the agent; do not enter credentials or secrets." /></label><div className="workflow-save-row"><button className="primary-button" type="button" onClick={() => void save()} disabled={busy}>{busy ? 'Saving…' : 'Save my playbook preferences'}</button>{message && <span className="workflow-save-message" role="status">{message}</span>}{error && <span className="workflow-save-error" role="alert">{error}</span>}</div><div className="workflow-reset-row"><button className="secondary-button" type="button" onClick={() => void reset()} disabled={busy}>Reset to recommended defaults</button><small>Only resets Academia’s local preference record. It does not change external services, calendars, email, or automations.</small></div></section>
-    </div>}
-  </article>
+
+  return <div className="playbook-panel-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <section className="playbook-panel" role="dialog" tabIndex={-1} aria-modal="true" aria-labelledby={titleId}>
+      <header className="playbook-panel-header"><div><p className="eyebrow">Agent Setup Playbook</p><h2 id={titleId}>{workflow.title}</h2><p>{workflow.summary}</p></div><button className="icon-button" type="button" aria-label="Close playbook panel" onClick={onClose}>×</button></header>
+      <div className="playbook-panel-body">
+        <section className="playbook-guide"><p className="eyebrow">Playbook guide</p><h5>Why it is useful</h5><p>{workflow.why_useful}</p><PlaybookList title="Suggested defaults" items={Object.entries(workflow.suggested_defaults).map(([key, value]) => `${labelFromKey(key)}: ${formatPreferenceValue(value)}`)} /><PlaybookList title="Agent implementation steps" items={workflow.setup_steps.map((step) => `${step.instruction}${step.student_approval_required ? ' (student approval required)' : ''}`)} /><PlaybookList title="Student choices" items={workflow.student_choices} /><PlaybookList title="Safety contract" items={workflow.safety_rules} /><PlaybookList title="Verification" items={workflow.verification_steps} /></section>
+        <section className="playbook-preferences"><p className="eyebrow">My playbook preferences</p><h5>Saved locally for your agent</h5><p className="workflow-helper">Start from the playbook defaults, then save only the choices you want your authorized AI agent to use. Saving here does not create an external connection or automation.</p><div className="workflow-preference-fields">{Object.entries(workflow.suggested_defaults).map(([key, defaultValue]) => <PreferenceField key={key} name={key} defaultValue={defaultValue} value={values[key]} onChange={(value) => setValues((current) => ({ ...current, [key]: value }))} />)}</div><label className="workflow-text-field"><span>Custom instructions</span><textarea value={customInstructions} onChange={(event) => setCustomInstructions(event.target.value)} placeholder="Tell your agent how you want this playbook to behave." /></label><label className="workflow-text-field"><span>Optional notes for the implementing agent</span><textarea value={externalSetupNotes} onChange={(event) => setExternalSetupNotes(event.target.value)} placeholder="Maintenance notes for the agent; do not enter credentials or secrets." /></label><div className="workflow-save-row"><button className="primary-button" type="button" onClick={() => void save()} disabled={busy}>{busy ? 'Saving…' : 'Save my playbook preferences'}</button>{message && <span className="workflow-save-message" role="status">{message}</span>}{error && <span className="workflow-save-error" role="alert">{error}</span>}</div><div className="workflow-reset-row"><button className="secondary-button" type="button" onClick={() => void reset()} disabled={busy}>Reset to recommended defaults</button><small>Only resets Academia’s local preference record. It does not change external services, calendars, email, or automations.</small></div></section>
+      </div>
+    </section>
+  </div>
 }
 
+function buildAgentPrompt(workflow: AgentSetupPlaybook): string { return `Use the “${workflow.title}” Agent Setup Playbook with my saved Academia preferences. Check your own tools, ask for any required authorization, and report exactly what you can configure.` }
+async function copyText(value: string): Promise<void> { if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') { await navigator.clipboard.writeText(value); return } const textarea = document.createElement('textarea'); textarea.value = value; textarea.setAttribute('readonly', ''); textarea.style.position = 'fixed'; textarea.style.opacity = '0'; document.body.appendChild(textarea); textarea.select(); const copied = document.execCommand('copy'); textarea.remove(); if (!copied) throw new Error('Clipboard access is unavailable.') }
 function PreferenceField({ name, defaultValue, value, onChange }: { name: string; defaultValue: unknown; value: unknown; onChange: (value: unknown) => void }) {
   if (typeof defaultValue === 'boolean') return <label className="workflow-checkbox"><input type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} /><span>{labelFromKey(name)}</span></label>
   if (Array.isArray(defaultValue)) return <label className="workflow-text-field"><span>{labelFromKey(name)}</span><textarea value={Array.isArray(value) ? value.map(String).join('\n') : ''} onChange={(event) => onChange(event.target.value.split('\n').map((item) => item.trim()).filter(Boolean))} /><small>One value per line.</small></label>

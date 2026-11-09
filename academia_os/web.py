@@ -760,6 +760,8 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             raw = self.rfile.read(length)
             value = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            if length > MAX_BODY_BYTES:
+                raise DashboardRequestError(413, "RequestTooLarge", "command request body is too large") from exc
             raise DashboardRequestError(400, "MalformedJSON", "command request body must be valid UTF-8 JSON") from exc
         if not isinstance(value, dict):
             raise DashboardRequestError(400, "InvalidRequest", "command request must be a JSON object")

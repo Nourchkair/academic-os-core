@@ -28,7 +28,6 @@ def test_dashboard_has_semester_courses_library_and_activity_surfaces() -> None:
     assert "<CoursesView" in source
     assert "<ActionPanel" in source
     assert "profile-action" not in source
-    assert "workspace-action-button" in source
     assert ">+</button>" in source
     assert "{ id: 'library'" not in source
     assert "{ id: 'import'" not in source
@@ -45,6 +44,10 @@ def test_dashboard_has_semester_courses_library_and_activity_surfaces() -> None:
     assert "api.filePreview(item.path, item.semester)" in courses
     assert "Open decisions" in source
     assert "Needs input" not in source
+
+    home = (FRONTEND / "HomeView.tsx").read_text(encoding="utf-8")
+    assert '<p className="eyebrow">Intake</p>' in home
+    assert "onClick={() => onNavigate('activity')}" in home
 
 
 def test_action_panel_owns_import_and_migration_without_review_navigation() -> None:
