@@ -80,7 +80,7 @@ jobs:
           tagName: ${{ inputs.release_tag || github.ref_name }}
           releaseName: Academia OS ${{ inputs.release_tag || github.ref_name }}
           releaseBody: Academia OS beta DMGs and signed in-app update artifacts. The app is not notarized; first launch may require a Gatekeeper approval.
-          releaseDraft: true
+          releaseDraft: false
           args: --bundles dmg
       - name: Remove the temporary beta signing keychain
         if: always() && steps.beta-sign.outputs.keychain-path != ''
