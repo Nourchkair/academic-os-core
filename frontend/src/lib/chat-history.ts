@@ -17,7 +17,7 @@ export type StudyChatRequest =
   | { id: string; action: 'new'; courseId: string; prompt?: string }
 
 const databaseName = 'academia-os-dashboard'
-const databaseVersion = 1
+const databaseVersion = 2
 const conversationStore = 'chat-conversations'
 let persistenceRequest: Promise<boolean> | null = null
 
@@ -27,15 +27,55 @@ function requestPersistentStorage(): Promise<boolean> {
   return persistenceRequest
 }
 
+function withoutAttachmentPreviews(value: unknown): ChatConversation | null {
+  if (!value || typeof value !== 'object') return null
+  const conversation = value as Partial<ChatConversation>
+  if (!Array.isArray(conversation.messages)) return null
+  const sanitized = {
+    ...conversation,
+    messages: conversation.messages.map((message) => {
+      if (!message || typeof message !== 'object') return message
+      const { attachments, ...rest } = message
+      return {
+        ...rest,
+        ...(Array.isArray(attachments) ? {
+          attachments: attachments.map((attachment) => {
+            if (!attachment || typeof attachment !== 'object') return attachment
+            const metadata = { ...attachment }
+            delete metadata.preview
+            return metadata
+          }),
+        } : attachments === undefined ? {} : { attachments }),
+      }
+    }),
+  }
+  return isConversation(sanitized) ? sanitized : null
+}
+
+export function stripChatAttachmentPreviews(conversation: ChatConversation): ChatConversation {
+  return withoutAttachmentPreviews(conversation) ?? conversation
+}
+
 async function openDatabase(): Promise<IDBDatabase> {
   if (!('indexedDB' in window)) return Promise.reject(new Error('Local chat history is unavailable in this browser.'))
   await requestPersistentStorage()
 
   return new Promise((resolve, reject) => {
     const request = window.indexedDB.open(databaseName, databaseVersion)
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const database = request.result
       if (!database.objectStoreNames.contains(conversationStore)) database.createObjectStore(conversationStore, { keyPath: 'id' })
+      const oldVersion = (event as IDBVersionChangeEvent).oldVersion
+      if (oldVersion > 0 && oldVersion < 2) {
+        const cursorRequest = request.transaction?.objectStore(conversationStore).openCursor()
+        if (cursorRequest) cursorRequest.onsuccess = () => {
+          const cursor = cursorRequest.result
+          if (!cursor) return
+          const sanitized = withoutAttachmentPreviews(cursor.value)
+          if (sanitized) cursor.update(sanitized)
+          cursor.continue()
+        }
+      }
     }
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error || new Error('Could not open local chat history.'))

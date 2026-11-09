@@ -26,7 +26,7 @@ def capabilities() -> dict[str, Any]:
                            'study answer --course COURSE --session SESSION_ID --item ITEM_ID --answer ANSWER --json',
                            'study overview --course COURSE --json'],
             'answer_policy': 'Answers are hidden by default. MCQ is answer-key graded before reveal; free responses and flashcards require reveal then self-rating. Practice never modifies course grades.',
-            'source_policy': 'Choose course Library IDs; context retrieves bounded, fingerprinted excerpts by default. context --deep or generate --deep scans all pages/text of up to 300 selected sources and returns ranked, page-addressed passages. Cite chunk IDs. Changed sources are flagged. Citations establish traceability, not semantic verification.',
+            'source_policy': 'Choose course Library IDs; context retrieves bounded, fingerprinted excerpts by default. context --deep, create --deep, or generate --deep scans all pages/text of up to 300 selected sources and returns ranked, page-addressed passages. Keep the same source/query/pages/limit/deep selection when submitting a create payload so its citations can be validated against retrieved context. Cite chunk IDs. Changed sources are flagged. Citations establish traceability, not semantic verification.',
             'storage': '<course>/06_KNOWLEDGE/STUDY/study.json (durable student-owned records)',
             'create_schema': output_schema('quiz'),
             'preferences': 'Read study preferences; configure saves desired study style and provider without credentials or a connection claim.',
@@ -50,7 +50,7 @@ def add_parser(sub: Any) -> None:
             parser.add_argument('--query', default='')
             parser.add_argument('--pages', help='PDF page or page range, maximum 100 pages')
             parser.add_argument('--limit', type=int, default=12)
-            if name in {'context', 'generate'}:
+            if name in {'context', 'create', 'generate'}:
                 parser.add_argument('--deep', action='store_true', help='Search the full text of every selected source, including all PDF pages')
         if name in {'create', 'exam-save', 'restore', 'revise', 'configure'}:
             group = parser.add_mutually_exclusive_group(required=True)

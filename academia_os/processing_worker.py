@@ -31,11 +31,10 @@ def launch_processing_worker(profile_path: Path, record_id: str) -> subprocess.P
     """Start one detached local worker for an already staged processing record."""
 
     profile = Path(profile_path).expanduser().resolve()
+    command = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "academia_os.cli"]
     return subprocess.Popen(
         [
-            sys.executable,
-            "-m",
-            "academia_os",
+            *command,
             "--profile",
             str(profile),
             "process",
