@@ -28,7 +28,7 @@ def test_dashboard_has_semester_courses_library_and_activity_surfaces() -> None:
     assert "<CoursesView" in source
     assert "<ActionPanel" in source
     assert "profile-action" not in source
-    assert ">+</button>" in source
+    assert "<HomeView" in source
     assert "{ id: 'library'" not in source
     assert "{ id: 'import'" not in source
     assert "{ id: 'review'" not in source
