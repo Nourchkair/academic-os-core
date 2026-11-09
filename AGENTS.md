@@ -30,20 +30,21 @@ The workspace must remain readable without Academia OS. Indexes and caches must 
 
 For each recognized semester, the reusable template includes a semester-level `00_INBOX/` for academic material whose course identity is not known yet. It is distinct from a course's direct `00_INBOX/`; imports must target exactly one of those two structures and may not use arbitrary dump folders or nested subfolders.
 
-## Agent-first operating model
+## Shared assistant and external-agent operating model
 
-Academia OS is an AI-native academic operating layer. The student’s authorized AI agent owns conversation, reading, reasoning, teaching, synthesis, and repetitive maintenance; Academia OS owns academic state, evidence, provenance, permissions, safe actions, generated artifacts, and the audit trail. The dashboard is observational: it provides visibility, browsing, status, Activity, import/migration, local configuration, and Agent Setup Playbooks. It is not a chatbot or reasoning engine.
+Academia OS is a local-first academic operating layer with two host paths: dashboard Study chat and compatible external agents such as Codex or Claude. Both must use the same Academia interfaces for academic context, evidence, provenance, permissions, safe actions, generated artifacts, and audit history. Dashboard Study chat currently invokes the user's installed Codex CLI signed in with ChatGPT. Do not route Claude subscription OAuth through Academia: Anthropic reserves that sign-in for Claude Code and native Anthropic apps. Claude Code may still connect as a separate external agent. Full MCP-client orchestration and external browser, Gmail, calendar, or portal connectors are not implemented; never claim that Study chat has those tools.
 
 Keep these product layers separate:
 
 - **Capabilities:** what Academia OS itself actually implements and can report through `academia agent capabilities --json`.
 - **Agent Setup Playbooks:** portable, read-only guides describing a desired student workflow, required capabilities, safety boundaries, and verification contract.
+- **Assistant host:** the in-app assistant or an external agent that reasons and coordinates tools. It may use only capabilities actually exposed and authorized in that host.
 - **External agent:** checks its own available tools, obtains any required authorization, and implements or adapts a selected playbook.
 - **Student:** remains the final authority and chooses workflows and external access.
 
-Academia OS owns local academic state, student preferences, provenance, Review, Activity, and safety boundaries. It does not own the external scheduler, browser session, account connection, credentials, or automation created by an external agent.
+Academia OS owns local academic state, student preferences, provenance, Review, Activity, and safety boundaries. The future in-app assistant may coordinate explicitly enabled local or remote MCP services. Connection metadata must remain local; secrets belong in the operating system's secure credential store, never in the academic workspace, profile.json, workflow preferences, or repository. External agents may continue using their separately configured services.
 
-Academia must not claim Gmail, calendar, Brightspace, Canvas, Moodle, Blackboard, Omni, browser, scheduler, Reddit, web-search, or other external access merely because a playbook mentions it. It must not store external connection state or configure those systems itself.
+Academia must not claim Gmail, calendar, Brightspace, Canvas, Moodle, Blackboard, Omni, browser, scheduler, Reddit, web-search, or other external access merely because a playbook mentions it. The current app has no such connectors. A future connector must be explicitly configured and authorized, report its actual status, use least-privilege scopes, and preserve service-specific safety rules.
 
 Agents must use the structured interface first and retrieve source content only when the context bundle identifies a relevant source. The bounded `sources.library_items` catalog includes metadata for syllabi, readings, notes, generated artifacts, and relevant imports; it includes `id`, name, workspace-relative path, course ownership, category, provenance, source type, and artifact metadata, never file bodies by default. Do not recursively inspect the Markdown tree or read `.academia` files directly to reconstruct state.
 
@@ -59,7 +60,19 @@ Recommended request loop:
 8. Treat every entry in `recommended_next_actions` as advisory guidance. It is not an Academia command and must not be reported as performed.
 9. Poll `academia agent changes --since CURSOR --json` on the next agent session instead of rereading everything.
 
-Academia does not store agent chat transcripts, prompts, model messages, credentials, or conversation history.
+Academia's core interface does not store external agent chat transcripts, prompts, model messages, credentials, or conversation history. The dashboard Study chat is a separate client-side feature: it saves conversation text and selected class/source references in browser IndexedDB on the device. It does not save attachments or write chat transcripts into the academic workspace. Browser data can be cleared by the student; saved conversations can also be deleted from Chat History.
+
+The dashboard Study chat currently uses Codex CLI signed in with ChatGPT. Claude subscription sign-in is not offered inside Academia because Anthropic restricts subscription OAuth to its own Claude Code and native apps; use Claude Code as an external agent through Academia's documented interface. Academia does not read or copy either provider's credentials and does not fall back to API billing. Codex chat offers model, reasoning, Fast mode, and image attachments. It accepts PDF, DOCX, PPTX, plain-text, Markdown, CSV, JSON, and YAML files. Chat messages and selected class/source references persist in browser IndexedDB on the current device and browser profile; they are not stored by the Academia API or in `.academia/`. Attachments and extracted text are sent to Codex only when the student submits a message, and attachment files, extracted text, and image previews are not retained in chat history. Saved conversations retain attachment names and types only; reopening a chat requires reattaching files. Study chat locally OCRs scanned PDF pages when Poppler `pdftoppm` and Tesseract are available; otherwise it reports omitted pages and incomplete coverage. OCR text is marked so the assistant can qualify uncertain wording. For each submitted message, the shared `study context --deep` interface searches the full extractable text of every selected source, including PDF pages beyond page 100. The dashboard batches large selections; each source is limited to 64 million extracted characters, and DOCX/PPTX extraction honors the archive's XML safety limits. Academia sends up to 128 relevance-ranked, page-addressed passages rather than every source body. The chat includes scanned-source counts and reports extraction/size limits so the assistant can disclose incomplete coverage. The Codex CLI invocation runs with tools, MCP, browser, shell, and session persistence disabled; source access stays within selected Academia Library IDs and attached files.
+
+The per-course `03_ASSIGNMENTS/Assignment_History.json` stores academic coursework records, not chat history. Read it through `academia history list --course COURSE --semester TERM --json` or the course-scoped `assignment_history` field in `academia agent context`. Add or update a status only when the student explicitly reports it or an authorized source confirms it. A `Submitted` record means the workspace records that report; Academia never submits work to a school portal. The dashboard offers History within each class, with create/update controls for assignment, essay, project, exam, presentation, quiz, or other records. Files are references inside the course folder; submitted files remain preserved.
+
+## Studying through any authorized agent
+
+Use the shared `academia study` interface for structured studying. The dashboard is one client, never a required step. Read [the study contract](docs/study.md) before adding study behavior. Start with `academia study capabilities --json` and `academia study preferences --course COURSE --json`. Retrieve selected course excerpts through `study context`; an agent can generate a cited payload itself and submit through `study create --input -`, with no second model call. Use `study start/session/reveal/answer` to teach in conversation, record only the student's actual answers/ratings, and resume the same session in either interface. Never invent an attempt, self-rating, reading completion or reported instructor feedback.
+
+Study owns durable per-course `06_KNOWLEDGE/STUDY/study.json`: sets, citations, attempts, review schedules, annotations, exam scope and desired study preferences. This is student academic data, not a rebuildable cache or agent transcript. Use `study export/restore` for explicit backups; preserve originals and old attempts. `study revise` or `create/generate --supersedes` creates a new set version. Flag ambiguous questions instead of counting them against progress. Source-linked material remains AI-generated and non-authoritative. Written responses/flashcards require student self-assessment; keep these separate from objective multiple-choice results and real course grades.
+
+Optional explicitly invoked study generation may use the student's Codex ChatGPT sign-in or a loopback local model server. Credentials remain with those providers. Academia stores desired study preferences but never provider credentials. Source metadata is returned first; bodies are retrieved only by a selected-source or topic request. Generation does not authorize school actions, external account access, calendar writes or automatic background model calls. An external Claude Code agent can generate a payload itself and submit it through `academia study create`.
 
 ## Agent Setup Playbooks
 
@@ -116,10 +129,15 @@ academia workspace inspect /path/to/workspace --json
 academia semester --timezone America/Toronto --json
 academia workspace attach /path/to/workspace --name "Student" --institution "University" --timezone America/Toronto --json
 academia import /path/to/file.pdf --destination /path/to/workspace/SEMESTER/COURSE/00_INBOX --json
+academia process start PROCESSING_RECORD_ID --json
+academia process forget PROCESSING_RECORD_ID --json
 academia courses --semester "Fall 2026" --json
 academia course "COURSE ID" --json
 academia today --json
 academia tasks --json
+academia history list --course "COURSE ID" --semester "Fall 2026" --json
+academia history add --course "COURSE ID" --kind essay --title "Essay 1" --status submitted --submitted-on 2026-10-08 --artifact "03_ASSIGNMENTS/A01/Submission/final.docx" --json
+academia history update --course "COURSE ID" --id RECORD_ID --status graded --grade A --json
 academia review --json
 academia review decide REVIEW_ID use_new --json
 academia review execute REVIEW_ID --json
@@ -132,7 +150,11 @@ academia file-preview /path/to/semester-file.pdf --semester "Fall 2026" --json
 academia settings show --json
 academia inbox --json
 academia activity --json
+academia review show REVIEW_ID --json
+academia review decide REVIEW_ID DECISION --actor agent:mcp --json
+academia review execute REVIEW_ID --actor agent:mcp --json
 academia capabilities --json
+academia mcp serve
 academia agent capabilities --json
 academia agent playbooks --json
 academia agent playbook daily_academic_brief --json
@@ -153,14 +175,19 @@ academia verify-source --requested requested.json --retrieved retrieved.json --j
 
 JSON output is the preferred agent context format. Human-readable output is for users. Any agent command that accepts `--course` resolves the exact canonical course ID, course code, or exact course name/display name to the same canonical course object. Unknown and ambiguous identifiers fail with a structured error; they never fall back to workspace-wide results.
 
+`academia mcp serve` exposes a local MCP interface over stdio for compatible hosts. Read tools use bounded structured interfaces; Library previews require an exact workspace-relative Library ID and are revalidated by `academia file-preview`. Narrow write tools support host-gated local-file import, an exact executable Review decision, a separate supported execution for an already-approved Review item, and create-only AI-generated artifacts. The server cannot verify that a human confirmation was displayed; compatible hosts must obtain confirmation for the exact decision or file and destination before calling write tools. The Review decision tool rejects choices that do not exactly match an executable choice from current `academia agent attention` output. Review execution is limited to an already-approved linked `domain_change` action. Activity records identify MCP-initiated decisions and execution as `agent:mcp`. Imports preserve the original and start supported local extraction. The server opens no network listener and has no external-service connectors.
+
 ## Allowed behavior
 
 An agent may, when operating through the user-approved local interface:
 
 - read structured workspace status, courses, tasks, library material, review items, activity, and source metadata;
-- stage user-selected files through manual import or configured watched folders;
+- stage user-selected files through manual import or configured watched folders; manual imports of locally supported formats launch deterministic background text extraction into rebuildable `.academia/extracted_sources.json`, including visible PPTX slide text (without embedded-image OCR or speaker notes), while preserving originals and never interpreting embedded instructions;
+- import a specific local file through MCP only after the assistant host has asked the student to confirm the exact file and recognized inbox destination;
 - create a plan or action proposal;
-- create AI-generated secondary material only through `academia artifact create`; the destination is always a recognized course’s `06_KNOWLEDGE/AI_GENERATED/` directory;
+- create structured source-linked study sets and record student practice through `academia study`;
+- create Markdown AI-generated secondary material through `academia artifact create`; the destination is always a recognized course’s `06_KNOWLEDGE/AI_GENERATED/` directory;
+- create that same source-linked material through the create-only MCP artifact tool when the student requests saving it;
 - attach workspace source references or evidence-backed domain references to generated material;
 - update rebuildable indexes and append activity records;
 - perform non-destructive, verified file copies when the user has approved the proposal;
@@ -176,6 +203,8 @@ Generated artifacts are Markdown/text secondary material. They are recorded with
 - Review items remain open until a human decision is recorded.
 
 `academia agent attention --json` is the conversation-facing Review contract. Each unresolved item includes `id`, `kind`, `course`, `question`, `why_this_needs_human_input`, `current_value`, `proposed_value`, `evidence`, `choices`, `recommended_next_actions`, `action_proposal_id`, and `status`. `choices[]` means a stable decision that Academia can accept through the existing Review contract; each executable choice includes `id`, `label`, `effect`, `executable: true`, and a structured `action` descriptor. For a supported action, the descriptor identifies the Review decision and, when needed, the separate `review_execute` step. `recommended_next_actions[]` is different: every entry has `executable: false` and is guidance only. It may say `verify_source` or `retry_processing`, but those labels are not claims that a corresponding command exists. Today, linked domain-change Reviews can expose an approve/use-new decision followed by `review execute`; processing retry and source verification remain advisory. The agent asks the student, submits only an executable Review choice, performs the separate execution step only when advertised, and verifies the result. Review remains a backend protocol; it is not a chat transcript or an instruction to guess.
+
+`academia process forget RECORD_ID --json` removes a processing record only when it is `FAILED`, its source is missing, and its recorded path is a direct semester or course `00_INBOX` entry in the configured workspace. It preserves the source file (if present, the command refuses) and appends a `processing.forgotten` Activity event.
 
 `academia agent changes --since CURSOR --json` reads the append-only Activity feed oldest-first and returns `next_cursor`. Reusing that cursor is idempotent. The cursor is an Activity event id; an ISO timestamp is also accepted for integrations that persist time checkpoints.
 

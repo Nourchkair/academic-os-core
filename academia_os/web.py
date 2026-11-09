@@ -16,12 +16,14 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from .config import SEMESTER_PATTERN, load_config
-from .file_preview import FilePreviewError, TEXT_EXTENSIONS, preview_file, resolve_library_file
+from .file_preview import FilePreviewError, IMAGE_EXTENSIONS, IMAGE_MIME_TYPES, MAX_IMAGE_PREVIEW_BYTES, TEXT_EXTENSIONS, preview_file, resolve_library_file
 from .workspace import build_workspace_snapshot
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 MAX_BODY_BYTES = 64 * 1024
+MAX_CHAT_BODY_BYTES = 48 * 1024 * 1024
+MAX_STUDY_COMMAND_BODY_BYTES = 2 * 1024 * 1024
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 MAX_UPLOAD_FILENAME_BYTES = 255
 UPLOAD_CHUNK_BYTES = 1024 * 1024
@@ -51,8 +53,11 @@ SAFE_COMMANDS = frozenset(
         "workspace",
         "semester",
         "inbox",
+        "process",
         "import",
         "domain",
+        "history",
+        "study",
         "library",
         "file-preview",
         "extract",
@@ -236,7 +241,8 @@ class DashboardServer:
         return self.url.rstrip("/")
 
     def _default_runner(self, command: str, args: list[str]) -> CommandResult:
-        return run_cli_command(command, args, profile=self.profile, timeout=self.command_timeout)
+        timeout = max(self.command_timeout, 300.0) if command == "study" and "--deep" in args else self.command_timeout
+        return run_cli_command(command, args, profile=self.profile, timeout=timeout)
 
     def serve_forever(self) -> None:
         self._httpd.serve_forever()
@@ -388,6 +394,8 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 self._handle_file_preview(origin)
             elif self.request_path == "/api/v1/file":
                 self._handle_file(origin, head_only=False)
+            elif self.request_path == "/api/v1/chat/providers":
+                self._handle_chat_providers(origin)
             else:
                 self._send_api_error(
                     DashboardRequestError(404, "NotFound", "API endpoint not found"),
@@ -419,6 +427,9 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             return
         if self.request_path == "/api/v1/upload":
             self._handle_upload(origin)
+            return
+        if self.request_path == "/api/v1/chat":
+            self._handle_chat(origin)
             return
         if self.request_path != "/api/v1/command":
             if self._is_api_request():
@@ -541,9 +552,10 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             semester = self._file_query_semester(workspace_root, active_semester)
             resolved, item = resolve_library_file(path, workspace_root=workspace_root, semester=semester)
             extension = str(item.get("extension", "")).casefold()
-            if extension != ".pdf" and extension not in TEXT_EXTENSIONS:
+            if extension != ".pdf" and extension not in TEXT_EXTENSIONS and extension not in IMAGE_EXTENSIONS:
                 raise DashboardRequestError(415, "UnsupportedFileType", "the raw file endpoint is limited to readable Library files")
-            if resolved.stat().st_size > MAX_UPLOAD_BYTES:
+            size_limit = MAX_IMAGE_PREVIEW_BYTES if extension in IMAGE_EXTENSIONS else MAX_UPLOAD_BYTES
+            if resolved.stat().st_size > size_limit:
                 raise DashboardRequestError(413, "FileTooLarge", "the selected file is too large to preview")
             body = resolved.read_bytes()
         except DashboardRequestError as exc:
@@ -555,7 +567,7 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
         except OSError:
             self._send_api_error(DashboardRequestError(422, "FileReadError", "the selected file could not be read"), cors_origin=origin)
             return
-        content_type = "application/pdf" if extension == ".pdf" else ("text/markdown; charset=utf-8" if extension in {".md", ".markdown"} else "text/plain; charset=utf-8")
+        content_type = "application/pdf" if extension == ".pdf" else IMAGE_MIME_TYPES.get(extension, "text/markdown; charset=utf-8" if extension in {".md", ".markdown"} else "text/plain; charset=utf-8")
         self._send_bytes(
             200,
             body,
@@ -564,6 +576,47 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             extra_headers={"Content-Disposition": f'inline; filename="{resolved.name.replace(chr(34), "")}"'},
             head_only=head_only,
         )
+
+    def _chat_payload(self) -> Any:
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.casefold().startswith("application/json"):
+            raise DashboardRequestError(415, "UnsupportedMediaType", "chat requests must use application/json")
+        content_length = self.headers.get("Content-Length")
+        if content_length is None:
+            raise DashboardRequestError(400, "MissingContentLength", "chat request body is required")
+        try:
+            length = int(content_length)
+        except ValueError as exc:
+            raise DashboardRequestError(400, "InvalidContentLength", "Content-Length must be an integer") from exc
+        if length < 0:
+            raise DashboardRequestError(400, "InvalidContentLength", "Content-Length must not be negative")
+        if length > MAX_CHAT_BODY_BYTES:
+            raise DashboardRequestError(413, "RequestTooLarge", "chat and attachments exceed 48 MB")
+        try:
+            return json.loads(self.rfile.read(length).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise DashboardRequestError(400, "MalformedJSON", "chat request must be valid UTF-8 JSON") from exc
+
+    def _handle_chat_providers(self, origin: str | None) -> None:
+        try:
+            from .dashboard_chat import providers
+            self._send_json(200, providers(), cors_origin=origin)
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            self._send_json(200, {"available": False, "models": [], "default_model": None,
+                                  "provider": "Codex CLI using ChatGPT sign-in"}, cors_origin=origin)
+
+    def _handle_chat(self, origin: str | None) -> None:
+        try:
+            payload = self._chat_payload()
+            from .dashboard_chat import respond
+            result = respond(payload)
+            self._send_json(200, result, cors_origin=origin)
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except ValueError as exc:
+            self._send_api_error(DashboardRequestError(422, "ChatError", str(exc)), cors_origin=origin)
+        except (OSError, subprocess.TimeoutExpired):
+            self._send_api_error(DashboardRequestError(502, "ChatUnavailable", "Codex could not complete this chat request"), cors_origin=origin)
 
     def _handle_upload(self, origin: str | None) -> None:
         try:
@@ -701,12 +754,14 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             raise DashboardRequestError(400, "InvalidContentLength", "Content-Length must be an integer") from exc
         if length < 0:
             raise DashboardRequestError(400, "InvalidContentLength", "Content-Length must not be negative")
-        if length > MAX_BODY_BYTES:
+        if length > MAX_STUDY_COMMAND_BODY_BYTES:
             raise DashboardRequestError(413, "RequestTooLarge", "command request body is too large")
         try:
             raw = self.rfile.read(length)
             value = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            if length > MAX_BODY_BYTES:
+                raise DashboardRequestError(413, "RequestTooLarge", "command request body is too large") from exc
             raise DashboardRequestError(400, "MalformedJSON", "command request body must be valid UTF-8 JSON") from exc
         if not isinstance(value, dict):
             raise DashboardRequestError(400, "InvalidRequest", "command request must be a JSON object")
@@ -714,14 +769,20 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
         args = value.get("args")
         if not isinstance(command, str) or not command:
             raise DashboardRequestError(400, "InvalidCommand", "command must be a non-empty string")
+        if command != "study" and length > MAX_BODY_BYTES:
+            raise DashboardRequestError(413, "RequestTooLarge", "command request body is too large")
         if command not in SAFE_COMMANDS:
             raise DashboardRequestError(400, "CommandNotAllowed", f"dashboard command is not allowed: {command}")
         if not isinstance(args, list) or any(not isinstance(arg, str) for arg in args):
             raise DashboardRequestError(400, "InvalidArguments", "args must be an array of strings")
-        if len(args) > MAX_ARGUMENTS:
-            raise DashboardRequestError(400, "TooManyArguments", f"at most {MAX_ARGUMENTS} command arguments are allowed")
+        if command == "process" and args != ["status"]:
+            raise DashboardRequestError(400, "CommandNotAllowed", "the dashboard may only read processing status")
+        argument_count_limit = 620 if command == "study" else MAX_ARGUMENTS
+        if len(args) > argument_count_limit:
+            raise DashboardRequestError(400, "TooManyArguments", f"at most {argument_count_limit} command arguments are allowed")
         for arg in args:
-            if len(arg) > MAX_ARGUMENT_LENGTH:
+            argument_limit = 48 * 1024 if command == "study" else MAX_ARGUMENT_LENGTH
+            if len(arg) > argument_limit:
                 raise DashboardRequestError(400, "ArgumentTooLong", f"command arguments are limited to {MAX_ARGUMENT_LENGTH} characters")
             if "\x00" in arg:
                 raise DashboardRequestError(400, "InvalidArguments", "command arguments must not contain NUL bytes")

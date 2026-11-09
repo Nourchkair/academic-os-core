@@ -1,21 +1,23 @@
 # Academia OS
 
-Academia OS is a **local-first, AI-native academic operating layer** for a student’s computer. Authorized agents such as Codex, Hermes, Claude Code, ChatGPT-compatible local workflows, or future tools perform conversation, reading, reasoning, source analysis, planning, and study support. Academia OS owns the human-readable workspace, academic state, evidence, provenance, permissions, safe actions, generated secondary material, and audit trail. The visual dashboard gives the student visibility and control; it is not the reasoning engine.
+[Visit the Academia OS website](https://academia-os.nearbykestrel1.chatgpt.site) · [Check GitHub Releases for app downloads](https://github.com/Nourchkair/academic-os-core/releases)
+
+Academia OS is a **local-first academic operating layer** for a student’s computer. It supports external agents such as Codex and Hermes, and its dashboard Study chat currently uses the user's signed-in Codex CLI. Academia OS owns the human-readable workspace, academic state, evidence, provenance, permissions, safe actions, generated secondary material, and audit trail. The in-app chat does not yet call external MCP tools such as browser, Gmail, or calendar.
 
 It is **not** a Hermes product. Hermes is one optional adapter. Academia OS works without Hermes, Codex, ChatGPT/Work, Claude, browser automation, or a school account connection.
 
-> **Status: Early public alpha / pre-1.0.** The current version is `0.4.x`. Source-based macOS installation is the main supported release path; the Tauri bundle is still a development foundation rather than the primary installer. APIs, schemas, and adapter contracts may evolve before 1.0. Academic data remains local to the student's computer.
+> **Status: Early public alpha / pre-1.0.** The current version is `0.4.x`. A signed macOS beta bundle and in-app updater are being prepared; app downloads will appear on GitHub Releases after the release workflow completes. Until then, source-based macOS installation is available. APIs, schemas, and adapter contracts may evolve before 1.0. Academic data remains local to the student's computer.
 
-## Agent-first architecture
+## Shared core, multiple assistant hosts
 
 ```text
-Student ↔ authorized AI agent
-          reasoning · teaching · synthesis · planning
-                         │ structured local CLI/API
-                         ▼
-                   Academia OS
-     context · evidence · provenance · permissions
-     Review protocol · safe actions · artifacts · Activity
+Academia Assistant (target host)    Codex / Claude / other external host
+provider choice · MCP client         provider and tool environment
+                  \                       /
+                   \                     /
+                    ▼                   ▼
+                 shared local Academia interface
+        context · evidence · provenance · Review · safe actions
                          │
                          ▼
               human-readable academic workspace
@@ -24,7 +26,13 @@ Student ↔ authorized AI agent
 Dashboard: observability · browsing · status · Activity · settings
 ```
 
-The core composes existing workspace, courses, tasks, Library, domain projections, Review, Activity, processing, provenance, capabilities, and student workflow preferences into bounded `academia agent ... --json` and `academia workflow ... --json` views. It does not create a second database, import model SDKs, or store AI conversations.
+The shared core composes workspace, courses, tasks, Library, domain projections, Review, Activity, processing, provenance, capabilities, and student workflow preferences into bounded `academia agent ... --json` and `academia workflow ... --json` views. It does not create a second academic database. External agent conversations are not stored by the core; dashboard Study chat history is kept separately in browser storage. The Study chat uses the installed Codex CLI sign-in. Claude subscription routing is disabled in Academia because Anthropic restricts subscription OAuth to Claude Code and other native Anthropic apps; Claude Code remains usable as a separate external agent. Academia does not read or store provider credentials. MCP client connections to external services remain future work. See [the assistant architecture and delivery stages](docs/assistant-architecture.md).
+
+## Study with your agent or the dashboard
+
+Each course now has a shared study workspace for cited quizzes, written practice, flashcards, mind maps, explanations, saved attempts, review schedules, annotations, exam preparation and time-bounded study plans. Ask your authorized agent to study with you using `academia study`; the same sets and sessions are available in Courses → Study. Dashboard Study chat currently uses Codex with the user's ChatGPT plan sign-in, with model, reasoning effort, selected course excerpts, document attachments, and PDF text extraction. Codex also supports image attachments and Fast mode. Chat history persists in browser storage on the current device; attachments are not saved. Study material can be generated through Codex or a loopback local model. Claude Code can still connect to Academia as an external agent using its own supported interface.
+
+Start with `academia study capabilities --json`. Read [the study interface and examples](docs/study.md) for source retrieval, conversational practice, saved preferences, corrections, source-change detection and JSON/Markdown backup. Study data stays local under each course's `06_KNOWLEDGE/STUDY/`. Explicit generation sends selected excerpts to the chosen provider; it does not submit work or change real grades. Dashboard chat history is stored separately in local browser storage, not in the academic workspace.
 
 ## Install the core locally
 
@@ -123,6 +131,9 @@ academia courses --json
 academia course "POL 2103 - Politics" --json
 academia today --json
 academia tasks --json
+academia history list --course "POL 2103 - Politics" --semester "Fall 2026" --json
+academia history add --course "POL 2103 - Politics" --kind essay --title "Essay 1" --status submitted --submitted-on 2026-10-08 --json
+academia history update --course "POL 2103 - Politics" --id RECORD_ID --status graded --grade A --json
 academia review --json
 academia review decide REVIEW_ID use_new --json
 academia review execute REVIEW_ID --json
@@ -215,12 +226,12 @@ The show response contains canonical `recommended_playbook`, compatibility `reco
 `academia agent context --json` is the primary machine-facing interface. It composes existing state without duplicating it and returns a bounded bundle containing:
 
 - workspace and semester identity;
-- scoped courses, open tasks, current assignments, and confirmed upcoming deadlines;
+- scoped courses, open tasks, current assignments, user-confirmed coursework history, and confirmed upcoming deadlines;
 - relevant Library references and evidence references without automatically loading file contents;
 - unresolved Review decisions translated into `attention.items` with a question, why human input is needed, evidence, choices, and linked action proposal;
 - failed or pending processing, important unverified facts, recent Activity, capability categories, and controlled write locations.
 
-Scopes are `workspace`, `semester`, `course`, and `today`. Detail modes are `compact`, `standard`, and `deep`; compact is recommended for routine agent turns. Course and source paths are workspace-scoped references. Agents should retrieve a bounded preview or authorized file only after context identifies it.
+Scopes are `workspace`, `semester`, `course`, and `today`. Detail modes are `compact`, `standard`, and `deep`; compact is recommended for routine agent turns. The course-scoped `assignment_history` records are stored under `<semester>/<course>/03_ASSIGNMENTS/Assignment_History.json`. Agents should retrieve a bounded preview or authorized file only after context identifies it. Coursework status is recorded only from a user report or authorized source; it never means Academia submitted work to a school portal.
 
 `academia agent changes --since CURSOR --json` returns append-only Activity events oldest-first and a `next_cursor`. Reusing the cursor is idempotent. Academia accepts an Activity event ID or ISO timestamp as a cursor and does not store chat-session state.
 
@@ -278,21 +289,24 @@ Workspace root, runtime directory, and semester changes require `--approve-struc
 
 The configured academic root remains the source of truth for the user. It contains semesters, course folders, Markdown status files, readings, notes, and imported material. `.academia/` stores rebuildable `index.json`, processing records, review items, activity events, and action proposals. Processing state is canonical under `<academic-root>/.academia/`; the runtime directory does not contain a second operational queue. A user can inspect and use the workspace without Academia OS.
 
-The processing lifecycle is explicit:
+The processing lifecycle is explicit. `academia process forget RECORD_ID` removes only a failed record whose source is missing from a direct semester or course `00_INBOX` folder, and records that cleanup in Activity.
 
 ```text
 DETECTED → PENDING → PROCESSING → VERIFIED → ACKNOWLEDGED
                                   └→ FAILED → retry → PENDING
 ```
 
+Manual imports of PDF, DOCX, PPTX, plain text, Markdown, and common image files launch a detached local worker after the copy completes. The worker extracts text with local deterministic extractors, stores a rebuildable cache in `.academia/extracted_sources.json`, verifies the source signature, and acknowledges the processing record. PPTX extraction reads visible slide text locally; it does not OCR embedded images or include speaker notes. On macOS, scanned PDFs and images use Apple Vision OCR locally; OCR text is marked with a verification warning. On systems without macOS Vision and Swift, text PDFs continue to extract normally and image-only PDFs/images remain in the inbox with `unsupported_without_ocr`. Processing does not move or rewrite sources, infer course facts, or follow instructions found in documents.
+
 ### How dashboard data is calculated
 
 - **Courses** are recognized folders in the configured active-semester directory that contain `01_COURSE/`. A course card also reports visible material counted from that course.
 - **Library** lists visible files in the active semester while excluding `.academia/`, hidden files, and known workspace control files. Syllabi, readings, notes, and imports are navigation categories based on explicit folder/name signals; they are not authority claims.
-- **Tasks** come from Markdown checkboxes in a course’s `01_COURSE/Course_Status.md` and from structured `assignment`/`deadline` entities in `.academia/domain.json`. Structured entities are normally created through syllabus extraction/reconciliation with evidence and confidence. Academia OS does not turn arbitrary filenames or prose into tasks.
+- **Tasks** come from Markdown checkboxes in a course’s `01_COURSE/Course_Status.md` and from structured `assignment`/`deadline` entities in `.academia/domain.json`. Structured entities are created through syllabus extraction/reconciliation with evidence and confidence. DOCX assessment rows and PDF assessment lines retain source locations; yearless dates use only an explicitly named academic term year. Each assessment appears once, with its deadline time and grade weight. User-confirmed `Submitted`, `Graded`, or `Completed` records in the course’s `03_ASSIGNMENTS/Assignment_History.json` close a matching task while preserving the original deadline evidence. Home and Tasks show upcoming dates, and Tasks includes a next-seven-days filter. Unknown dates and unrecorded completion stay visible. Academia OS does not turn arbitrary filenames or prose into tasks.
 - **Inbox / intake** contains files present in course or semester `00_INBOX/` folders. Running `academia inbox` detects pre-existing files into the retryable processing state machine. Detection alone does not classify, move, or delete a file.
 - **Review** contains only explicit `.academia/review.json` items, such as uncertain imports, source conflicts, or approval-required actions. An unprocessed inbox file is shown as intake until a deliberate Review item is created.
 - **Activity** is the append-only audit view of changes Academia OS actually completed. Reads, scans, and external agent conversations do not appear as changes unless the core performed a recorded action.
+- **Coursework History** is a per-course record of assignments, essays, projects, exams, presentations, quizzes, and other academic work. The dashboard can add and update these records; status changes remain in the record’s status log and are reflected in matching tasks. This academic history is separate from dashboard chat history, which is retained in browser storage on the current device and can be deleted from Chat History.
 - **File previews** are read-only and active-semester scoped. Markdown/text/CSV/JSON/YAML are shown as text; DOCX/PPTX text is extracted locally; PDFs open in an in-app browser frame with a text fallback in the desktop shell. Originals are never rewritten.
 
 ### Ownership of AI, browser, and automation
@@ -315,7 +329,7 @@ Academia OS remains useful with no browser access:
 3. **Browser companion** — architecture only for now. A future companion will support explicit actions such as “Send to Academia OS,” “Save reading,” and “Import this page.”
 4. **Advanced browser access** — optional and off by default.
 
-The current capability report is honest: manual import and one-shot watched-folder scanning are available; Chromium is limited to optional visible handoff with an explicit allow-list and target; Firefox and Safari are planned, not claimed as connected. The user may choose Chrome, Firefox, Safari, or another profile. A dedicated school/research profile is recommended for privacy but not required. Domain allow-lists narrow intended access but are not a security guarantee.
+The current capability report is honest: manual import with background extraction for supported text and image files is available; macOS adds local OCR for scanned PDFs and images. One-shot watched-folder scanning is also available; Chromium is limited to optional visible handoff with an explicit allow-list and target; Firefox and Safari are planned, not claimed as connected. The user may choose Chrome, Firefox, Safari, or another profile. A dedicated school/research profile is recommended for privacy but not required. Domain allow-lists narrow intended access but are not a security guarantee.
 
 For readings, prefer legitimate library, Omni/OpenAthens, publisher, DOI/open-access, institutional, or author-released access. Discovery-only sources do not authorize downloading an unclear copy. Academia OS does not implement payments; agents must never infer payment authorization. Any future payment capability would require explicit student confirmation. Never silently substitute an edition.
 
@@ -356,7 +370,7 @@ academia review decide REVIEW_ID use_new --json
 academia review execute REVIEW_ID --json
 ```
 
-Supported source formats are text-based PDF, plain text, and Markdown. Text-based PDFs retain page references; text and Markdown retain line/segment references. Extraction is deterministic and local using the lightweight `pypdf` dependency for PDF text. No syllabus is sent to a model or hosted service. Scanned/image-only PDFs return `unsupported_without_ocr`; OCR is intentionally not part of this pass. Other formats are unsupported by the syllabus extractor, although normal manual import can still preserve them in `00_INBOX/`.
+Supported source formats are PDF, DOCX, PPTX, plain text, Markdown, and common image files. Text-based PDFs retain page references; text and Markdown retain line/segment references; presentations retain slide references. PDF text extraction uses the lightweight `pypdf` dependency. PPTX extraction reads visible slide text from the local Open XML package and warns that embedded images and speaker notes are not extracted. On macOS, scanned PDFs and images use local Apple Vision OCR, with page and text limits and an explicit warning that OCR may contain errors. No source is sent to a model or hosted service. On other platforms without a local OCR provider, scanned PDFs and images return `unsupported_without_ocr`; normal manual import still preserves them in `00_INBOX/`.
 
 The first syllabus extractor only proposes course identity, assignments, explicit deadlines, assessment weights, required readings, and recurring course meetings. It does not interpret every date, policy, biography, URL, or arbitrary note. Missing dates, years, times, weights, pages, and course identity remain null or produce a warning. `current-confirmed` is used only when the user explicitly marks the supplied syllabus as current; otherwise directly stated facts are `likely` and ambiguous facts are `unverified`.
 
@@ -382,7 +396,7 @@ An email address or local path can be normal in a private workspace; it should b
 
 ## Review and activity
 
-Uncertain source matches, deadline conflicts, and approval-required changes remain durable structured Review records under `.academia/review.json` for external agents and CLI workflows. Action-linked records contain the exact `action_proposal_id`; approving one approves that proposal, and it resolves only after execution and verification. Activity events are append-only JSON lines under `.academia/activity.jsonl`, with human-readable fields such as title, course, source, confidence, authority, and action. The browser/desktop dashboard does not present a built-in Review queue because Academia OS does not contain its own AI agent; third-party agents may use these records when they need a human decision. Activity remains the user-facing audit trail of changes the core actually made.
+Uncertain source matches, deadline conflicts, and approval-required changes remain durable structured Review records under `.academia/review.json` for agent and CLI workflows. Action-linked records contain the exact `action_proposal_id`; approving one approves that proposal, and it resolves only after execution and verification. Activity events are append-only JSON lines under `.academia/activity.jsonl`. The current dashboard does not yet present a built-in Review queue; that is part of the in-app assistant host work. Activity remains the user-facing audit trail of changes the core actually made.
 
 ## Desktop application
 
@@ -396,7 +410,7 @@ npm run build
 npm run dev
 ```
 
-It is a React + TypeScript application with a Tauri 2 shell and a typed bridge to the `academia` CLI. It includes profile-free first-run onboarding, existing-workspace inspection/attachment, fresh-workspace setup, Home, semester-scoped **Courses**, Tasks, Activity, and local Settings views. Courses is also the academic library: choose a semester, open a class, then browse Syllabi & guides, Readings & references, Notes & study aids, Imported material, and other files with bounded read-only previews for supported text, PDF, DOCX, and PPTX files. The top-right profile badge opens a panel for Import material or **Migrate older material** instead of adding separate navigation sections. Review records remain available to external agents and CLI workflows, but there is no built-in Review page because Academia OS does not contain its own AI agent. Settings edits the local profile, workspace, and import preferences, and its Enhance your setup cards expand into Recommended setup plus editable My setup workflow preferences that use the same local CLI state as agents. AI models, browser sessions, external permissions, and schedules are owned outside Academia OS; the cards never offer provider-connect controls. The migration view scans an explicitly selected legacy folder, previews every destination, supports selected copy by default, and gates destructive Move behind an additional confirmation. Import uses the native Tauri file picker and drag/drop paths while delegating copying, processing, provenance, Activity, and uncertainty records to the existing CLI/core. The Tauri bundle is currently a development foundation (`bundle.active` is false); macOS signing, notarization, and sidecar packaging remain release work. The old Tkinter app remains as a compatibility fallback while the new shell matures.
+It is a React + TypeScript application with a Tauri 2 shell and a typed bridge to the `academia` CLI. It includes profile-free first-run onboarding, existing-workspace inspection/attachment, fresh-workspace setup, Home, semester-scoped **Courses**, Tasks, Activity, and local Settings views. Courses is also the academic library: choose a semester, open a class, then browse Syllabi & guides, Readings & references, Notes & study aids, Imported material, and other files with bounded read-only previews for supported text, PDF, DOCX, and PPTX files. The top-right profile badge opens a panel for Import material or **Migrate older material** instead of adding separate navigation sections. Settings edits local profile/workspace/import preferences, with playbook preferences sharing the CLI contract. Study chat invokes the installed Codex CLI; provider connection settings and external-service connectors are not yet implemented. The migration view scans an explicitly selected legacy folder, previews every destination, supports selected copy by default, and gates destructive Move behind an additional confirmation. Import uses the native Tauri file picker and drag/drop paths while delegating copying, processing, provenance, Activity, and uncertainty records to the existing CLI/core. The local stdio MCP supports bounded reads, host-gated file import, executable-choice-validated Review decisions, separate execution for already-approved supported domain changes, and create-only AI artifacts. It cannot verify that a host showed a confirmation, and has no browser/email/calendar connection. The macOS distribution path bundles the local CLI and MCP server and supports signed in-app updates. Beta builds use an Academia-specific self-signed code identity and a separate Tauri updater key; they are not notarized, so first launch may require a Gatekeeper approval. The workflow creates draft Apple Silicon and Intel releases. See [the desktop release and MCP guide](docs/desktop-release-and-mcp.md). Windows and Linux packaging remain future work. The old Tkinter app remains as a compatibility fallback while the new shell matures.
 
 ## Optional agents
 

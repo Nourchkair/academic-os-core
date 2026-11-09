@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 
 # Generated local instances and personal academic data
+.run/
 *.egg-info/
 dist/
 local/
@@ -31,6 +32,7 @@ frontend/dist/
 frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
+frontend/src-tauri/binaries/*
 
 # OS/editor files
 .DS_Store

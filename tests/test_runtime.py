@@ -46,7 +46,8 @@ def test_inbox_gate_ignores_course_template_and_reports_new_file(tmp_path: Path)
     assert str(course / "00_INBOX" / "syllabus.pdf") in json.dumps(first)
     assert "COURSE_TEMPLATE" not in json.dumps(first)
     second = gate.scan(config)
-    assert second == {"wakeAgent": False}
+    assert second["wakeAgent"] is True
+    assert second["changed_files"][0]["change"] == "pending"
 
 
 def test_inbox_gate_reports_changed_file(tmp_path: Path) -> None:
@@ -97,7 +98,8 @@ def test_inbox_gate_persists_retryable_processing_state_outside_hermes(tmp_path:
     assert not (tmp_path / ".academic-os" / ".academia" / "processing.json").exists()
     assert not (tmp_path / ".hermes" / "state" / "academic_os_inbox_gate.json").exists()
     second = gate.scan(config)
-    assert second == {"wakeAgent": False}
+    assert second["wakeAgent"] is True
+    assert second["changed_files"][0]["change"] == "pending"
     from academia_os.processing import ProcessingStore
 
     record_id = first["processing"][0]["record_id"]

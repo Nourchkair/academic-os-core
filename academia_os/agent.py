@@ -6,6 +6,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .acquisition import capability_report
+from .assignment_history import apply_history_to_tasks, list_assignment_history
 from .activity import ActivityEvent, ActivityLog
 from .course_identity import resolve_course_identifier
 from .domain import DomainProjection
@@ -17,9 +18,9 @@ from .workspace import build_workspace_snapshot
 
 AGENT_CONTEXT_SCHEMA_VERSION = 1
 DETAIL_LIMITS: dict[str, dict[str, int]] = {
-    "compact": {"courses": 12, "tasks": 8, "deadlines": 6, "assignments": 6, "readings": 8, "sources": 12, "attention": 20, "activity": 6},
-    "standard": {"courses": 40, "tasks": 25, "deadlines": 15, "assignments": 15, "readings": 20, "sources": 30, "attention": 50, "activity": 15},
-    "deep": {"courses": 100, "tasks": 100, "deadlines": 50, "assignments": 50, "readings": 80, "sources": 100, "attention": 100, "activity": 50},
+    "compact": {"courses": 12, "tasks": 8, "deadlines": 6, "assignments": 6, "assignment_history": 12, "readings": 8, "sources": 12, "attention": 20, "activity": 6},
+    "standard": {"courses": 40, "tasks": 25, "deadlines": 15, "assignments": 15, "assignment_history": 50, "readings": 20, "sources": 30, "attention": 50, "activity": 15},
+    "deep": {"courses": 100, "tasks": 100, "deadlines": 50, "assignments": 50, "assignment_history": 100, "readings": 80, "sources": 100, "attention": 100, "activity": 50},
 }
 
 
@@ -121,6 +122,7 @@ def _compact_library_item(item: dict[str, Any]) -> dict[str, Any]:
             "semester",
             "course_id",
             "category",
+            "intake_status",
             "provenance",
             "source_type",
         )
@@ -164,7 +166,7 @@ def _entity_evidence(entity: dict[str, Any], root: Path) -> dict[str, Any] | Non
 
 
 def _compact_task(task: dict[str, Any], root: Path) -> dict[str, Any]:
-    result = {key: task.get(key) for key in ("title", "completed", "course", "confidence", "kind", "due_date") if key in task}
+    result = {key: task.get(key) for key in ("title", "completed", "course", "confidence", "kind", "due_date", "due_time", "weight", "status") if key in task}
     raw_id = str(task.get("id", ""))
     if raw_id.startswith("/") and ":" in raw_id:
         source_path, line = raw_id.rsplit(":", 1)
@@ -527,7 +529,7 @@ def _capability_view() -> dict[str, Any]:
 def build_agent_context(config: dict[str, Any], snapshot: dict[str, Any], *, scope: str = "workspace", detail: str = "standard", course_id: str | None = None, semester: str | None = None) -> dict[str, Any]:
     if scope not in {"workspace", "semester", "course", "today"}:
         raise ValueError("scope must be one of: workspace, semester, course, today")
-    for key in ("courses", "tasks", "deadlines", "assignments", "readings", "sources", "attention", "activity"):
+    for key in ("courses", "tasks", "deadlines", "assignments", "assignment_history", "readings", "sources", "attention", "activity"):
         _limit(detail, key)
     root = Path(snapshot["academic_root"]).expanduser().resolve()
     current_semester = str(snapshot["semester"])
@@ -537,6 +539,16 @@ def build_agent_context(config: dict[str, Any], snapshot: dict[str, Any], *, sco
     projection = DomainProjection(root / ".academia" / "domain.json")
     entities = [entity for entity in projection.list() if str(entity.get("course_id", "")) in ids]
     tasks = [_compact_task(task, root) for task in snapshot.get("tasks", []) if str(task.get("course", "")) in ids]
+    coursework_history: list[dict[str, Any]] = []
+    for course_record in scoped_courses:
+        course_id_value = str(course_record.get("id", ""))
+        records = list_assignment_history(root, current_semester, course_id_value)
+        tasks = apply_history_to_tasks(tasks, records, course_name=str(course_record.get("name", "")))
+        coursework_history.extend({
+            "course_id": course_id_value,
+            "course": str(course_record.get("name", course_id_value)),
+            **{key: record.get(key) for key in ("id", "kind", "title", "status", "due_date", "submitted_on", "grade", "task_title", "artifact_paths", "notes", "record_basis", "status_history", "created_at", "updated_at")},
+        } for record in records)
     open_tasks = [task for task in tasks if not task.get("completed")]
     deadlines = [_compact_entity(entity, root) for entity in entities if entity.get("entity_type") == "deadline" and entity.get("evidence", {}).get("confidence") == "current-confirmed"]
     assignments = [_compact_entity(entity, root, include_assignment_fields=True) for entity in entities if entity.get("entity_type") == "assignment"]
@@ -544,7 +556,7 @@ def build_agent_context(config: dict[str, Any], snapshot: dict[str, Any], *, sco
     if scope == "course":
         materials = [item for item in materials if item.get("course_id") in ids]
     else:
-        materials = [item for item in materials if item.get("course_id") in ids or (item.get("category") == "imports" and item.get("course_id") is None)]
+        materials = [item for item in materials if item.get("course_id") in ids or (item.get("intake_status") == "inbox" and item.get("course_id") is None)]
     readings = [_compact_library_item(item) for item in materials if item.get("category") == "readings"]
     source_items = materials
     if scope == "today":
@@ -552,6 +564,7 @@ def build_agent_context(config: dict[str, Any], snapshot: dict[str, Any], *, sco
     open_tasks = open_tasks[:_limit(detail, "tasks")]
     deadlines = sorted(deadlines, key=lambda item: (str(item.get("date") or "9999-99-99"), str(item.get("title", ""))))[:_limit(detail, "deadlines")]
     assignments = assignments[:_limit(detail, "assignments")]
+    coursework_history = coursework_history[:_limit(detail, "assignment_history")]
     readings = readings[:_limit(detail, "readings")]
     library_items = [_compact_library_item(item) for item in source_items[:_limit(detail, "sources")]]
     evidence_refs = [_entity_evidence(entity, root) for entity in entities]
@@ -568,6 +581,21 @@ def build_agent_context(config: dict[str, Any], snapshot: dict[str, Any], *, sco
         "open_task_count": len(open_tasks),
         "next_deadline_count": len(deadlines),
     }
+    from .study import StudyService
+    study_summaries = []
+    for entry in scoped_courses[:_limit(detail, "courses")]:
+        try:
+            overview = StudyService(root, current_semester, str(entry["id"])).overview()
+        except (OSError, ValueError, KeyError):
+            study_summaries.append({"course_id": entry["id"], "state": "needs_attention",
+                                    "issue": "Study records could not be read safely; use study overview to inspect the error. Other academic context remains available.",
+                                    "interface": "academia study capabilities --json"})
+            continue
+        study_summaries.append({"course_id": entry["id"], "set_count": len(overview["sets"]),
+                                "due_count": overview["due_count"], "attempt_count": overview["attempt_count"],
+                                "topics": overview["topics"][:8], "sets": overview["sets"][-8:],
+                                "exams": overview["exams"][:4],
+                                "interface": "academia study capabilities --json"})
     context: dict[str, Any] = {
         "schema_version": AGENT_CONTEXT_SCHEMA_VERSION,
         "generated_at": _generated_at(),
@@ -585,6 +613,8 @@ def build_agent_context(config: dict[str, Any], snapshot: dict[str, Any], *, sco
             "open_tasks": open_tasks,
             "next_deadlines": deadlines,
             "current_assignments": assignments,
+            "assignment_history": coursework_history,
+            "study": study_summaries,
             "relevant_readings": readings,
         },
         "attention": attention,

@@ -52,7 +52,10 @@ def _extract_tasks(path: Path, course: str | None = None) -> list[dict[str, Any]
 def _domain_tasks(root: Path, course_ids: set[str]) -> list[dict[str, Any]]:
     projection = DomainProjection(root / ".academia" / "domain.json")
     tasks: list[dict[str, Any]] = []
-    for entity in projection.list():
+    entities = projection.list()
+    deadlines = {(str(item.get("course_id")), str(item.get("title", "")).casefold()): item for item in entities if item.get("entity_type") == "deadline"}
+    assignments = {(str(item.get("course_id")), str(item.get("title", "")).casefold()) for item in entities if item.get("entity_type") == "assignment"}
+    for entity in entities:
         entity_type = str(entity.get("entity_type", ""))
         if entity_type not in {"deadline", "assignment"}:
             continue
@@ -61,6 +64,12 @@ def _domain_tasks(root: Path, course_ids: set[str]) -> list[dict[str, Any]]:
         evidence = entity.get("evidence")
         if not course or course not in course_ids or not title or not isinstance(evidence, dict):
             continue
+        key = (course, title.casefold())
+        # An assessment and its deadline describe the same piece of work.
+        if entity_type == "deadline" and key in assignments:
+            continue
+        deadline = deadlines.get(key, {}) if entity_type == "assignment" else entity
+        date_evidence = deadline.get("evidence") or evidence
         status = str(entity.get("status", "")).casefold()
         tasks.append(
             {
@@ -68,14 +77,17 @@ def _domain_tasks(root: Path, course_ids: set[str]) -> list[dict[str, Any]]:
                 "title": title,
                 "completed": status in {"complete", "completed", "submitted", "graded"},
                 "course": course,
-                "source": str(evidence.get("source_path", "")),
-                "source_location": evidence.get("source_location"),
-                "confidence": str(evidence.get("confidence", "unverified")),
+                "source": str(date_evidence.get("source_path", "")),
+                "source_location": date_evidence.get("source_location"),
+                "confidence": str(date_evidence.get("confidence", "unverified")),
                 "kind": entity_type,
-                "due_date": entity.get("date") or entity.get("deadline"),
+                "due_date": deadline.get("date") or entity.get("date") or entity.get("deadline"),
+                "due_time": deadline.get("time"),
+                "weight": entity.get("weight"),
+                "status": entity.get("status"),
             }
         )
-    return tasks
+    return sorted(tasks, key=lambda task: (task["completed"], task.get("due_date") or "9999", task.get("due_time") or "", task["title"]))
 
 
 def build_workspace_snapshot(config: dict[str, Any], *, persist: bool = True, semester_override: str | None = None) -> dict[str, Any]:
@@ -119,7 +131,7 @@ def build_workspace_snapshot(config: dict[str, Any], *, persist: bool = True, se
         "tasks": tasks,
         "today": {"path": str(today_path), "exists": today_path.is_file(), "lines": today_lines[:80]},
         "material_count": len(materials),
-        "inbox_count": sum(1 for item in materials if item.get("category") == "imports"),
+        "inbox_count": sum(1 for item in materials if item.get("intake_status") == "inbox"),
         "review_count": sum(1 for item in courses if item["review_required"]),
         "workspace_exists": root.is_dir(),
     }

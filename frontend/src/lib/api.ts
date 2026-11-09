@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
+import type { ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
@@ -104,6 +104,16 @@ async function browserFilePreview(path: string, semester?: string): Promise<File
   return readJsonResponse<FilePreview>(response)
 }
 
+async function browserChat(payload: Record<string, unknown>): Promise<{ message: string; model: string | null; effort: string; speed: string; notice: string | null }> {
+  let response: Response
+  try {
+    response = await fetch('/api/v1/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+  } catch {
+    throw new BridgeUnavailableError()
+  }
+  return readJsonResponse(response)
+}
+
 export function fileUrl(path: string, semester?: string): string {
   const query = new URLSearchParams({ path })
   if (semester) query.set('semester', semester)
@@ -111,15 +121,23 @@ export function fileUrl(path: string, semester?: string): string {
 }
 
 export const api = {
+  study: <T>(args: string[]) => command<T>("study", args),
+  chat: <T>(payload: Record<string, unknown>) => isTauriEnvironment() ? invoke<string>('academia_chat', { payload }).then((raw) => JSON.parse(raw) as T) : browserChat(payload) as Promise<T>,
+  chatProviders: <T>() => isTauriEnvironment() ? command<T>('study', ['providers']) : fetch('/api/v1/chat/providers').then(readJsonResponse<T>),
   status: () => command<StatusPayload>('status'),
   courses: (semester?: string) => command<Course[]>('courses', semester ? ['--semester', semester] : []),
-  tasks: () => command<Task[]>('tasks'),
+  tasks: (semester?: string) => command<Task[]>('tasks', semester ? ['--semester', semester] : []),
+  agentCourseContext: (courseId: string, semester: string) => command<{ current_state?: { open_tasks?: Task[] } }>('agent', ['context', '--scope', 'course', '--course', courseId, '--semester', semester, '--detail', 'deep']),
   review: () => command<ReviewItem[]>('review'),
   reviewAction: (action: 'approve' | 'reject' | 'resolve', itemId: string) => command<ReviewItem>('review', [action, itemId]),
   reviewDecision: (itemId: string, decision: string) => command<ReviewItem>('review', ['decide', itemId, decision]),
   reviewExecute: (itemId: string) => command<Record<string, unknown>>('review', ['execute', itemId]),
   activity: () => command<ActivityEvent[]>('activity'),
+  processingStatus: () => command<ProcessingRecord[]>('process', ['status']),
   domain: (entityType?: string) => command<DomainEntity[]>('domain', entityType ? [entityType] : []),
+  courseworkHistory: (courseId: string, semester: string) => command<CourseworkHistoryRecord[]>('history', ['list', '--course', courseId, '--semester', semester]),
+  addCourseworkHistory: (courseId: string, semester: string, input: CourseworkHistoryInput) => command<CourseworkHistoryRecord>('history', courseworkHistoryArgs('add', courseId, semester, input)),
+  updateCourseworkHistory: (courseId: string, semester: string, recordId: string, input: Partial<CourseworkHistoryInput>) => command<CourseworkHistoryRecord>('history', [...courseworkHistoryArgs('update', courseId, semester, input), '--id', recordId]),
   library: (options: { category?: string; courseId?: string; query?: string; semester?: string } = {}) => {
     const args = []
     if (options.semester) args.push('--semester', options.semester)
@@ -128,7 +146,7 @@ export const api = {
     if (options.query) args.push('--query', options.query)
     return command<LibraryItem[]>('library', args)
   },
-  filePreview: (path: string, semester?: string) => isTauriEnvironment() ? command<FilePreview>('file-preview', [path, ...(semester ? ['--semester', semester] : [])]) : browserFilePreview(path, semester),
+  filePreview: (path: string, semester?: string) => isTauriEnvironment() ? command<FilePreview>('file-preview', [path, ...(semester ? ['--semester', semester] : []), '--include-image-data']) : browserFilePreview(path, semester),
   inbox: () => command<ProcessingRecord[]>('inbox'),
   workspace: () => command<WorkspaceSnapshot>('workspace'),
   workspaceDiscover: () => command<WorkspaceCandidate[]>('workspace', ['discover']),
@@ -196,4 +214,19 @@ export const api = {
     return command<WorkflowSetPayload>('workflow', args)
   },
   semester: (timezone: string) => command<{ semester: string; timezone: string }>('semester', ['--timezone', timezone]),
+}
+
+function courseworkHistoryArgs(action: 'add' | 'update', courseId: string, semester: string, input: Partial<CourseworkHistoryInput>): string[] {
+  const args = [action, '--course', courseId, '--semester', semester]
+  const pairs: Array<[keyof CourseworkHistoryInput, string]> = [
+    ['kind', '--kind'], ['title', '--title'], ['status', '--status'], ['due_date', '--due-date'],
+    ['submitted_on', '--submitted-on'], ['grade', '--grade'], ['task_title', '--task-title'], ['notes', '--notes'],
+  ]
+  for (const [key, flag] of pairs) {
+    const value = input[key]
+    if (value !== undefined) args.push(flag, String(value))
+  }
+  if (input.artifact_paths?.length) for (const path of input.artifact_paths) args.push('--artifact', path)
+  else if (action === 'update' && input.artifact_paths !== undefined) args.push('--clear-artifacts')
+  return args
 }

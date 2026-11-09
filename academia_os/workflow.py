@@ -66,7 +66,7 @@ class ApprovalWorkflow:
         )
         return proposal, review
 
-    def approve_review(self, review_id: str) -> ReviewItem:
+    def approve_review(self, review_id: str, *, actor: str = "user") -> ReviewItem:
         review = self.reviews.get(review_id)
         if review.action_proposal_id:
             proposal = self.actions.approve(review.action_proposal_id)
@@ -84,12 +84,12 @@ class ApprovalWorkflow:
                 title=review.title,
                 course=review.course,
                 details={"proposal_id": proposal.id, "review_id": review.id},
-                actor="user",
+                actor=actor,
             )
             return updated
         return self.reviews.update(review_id, status=ReviewStatus.APPROVED)
 
-    def reject_review(self, review_id: str) -> ReviewItem:
+    def reject_review(self, review_id: str, *, actor: str = "user") -> ReviewItem:
         review = self.reviews.get(review_id)
         if review.action_proposal_id:
             proposal = self.actions.reject(review.action_proposal_id)
@@ -103,12 +103,12 @@ class ApprovalWorkflow:
                 title=review.title,
                 course=review.course,
                 details={"proposal_id": proposal.id, "review_id": review.id},
-                actor="user",
+                actor=actor,
             )
             return updated
         return self.reviews.update(review_id, status=ReviewStatus.REJECTED)
 
-    def decide_review(self, review_id: str, decision: str) -> ReviewItem:
+    def decide_review(self, review_id: str, decision: str, *, actor: str = "user") -> ReviewItem:
         review = self.reviews.get(review_id)
         decision = validate_review_decision(review, decision, self.courses)
         rejection = is_review_rejection_decision(decision)
@@ -126,7 +126,7 @@ class ApprovalWorkflow:
             title=review.title,
             course=review.course,
             details={"review_id": review_id, "decision": decision, "status": status.value, "action_status": action_status},
-            actor="user",
+            actor=actor,
         )
         return updated
 
@@ -138,7 +138,13 @@ class ApprovalWorkflow:
                 raise ValueError("action-linked review items resolve only after proposal verification")
         return self.reviews.update(review_id, status=ReviewStatus.RESOLVED)
 
-    def execute_approved(self, proposal_id: str, executor: Callable[[ActionProposal], dict[str, Any]]) -> ActionProposal:
+    def execute_approved(
+        self,
+        proposal_id: str,
+        executor: Callable[[ActionProposal], dict[str, Any]],
+        *,
+        actor: str = "system",
+    ) -> ActionProposal:
         proposal = self.actions.get(proposal_id)
         if proposal.status != ActionStatus.APPROVED.value:
             raise ValueError(f"proposal is not approved: {proposal.status}")
@@ -161,7 +167,7 @@ class ApprovalWorkflow:
                 event_type="action.failed",
                 title=proposal.title,
                 details={"proposal_id": proposal_id, "failure_reason": str(exc)},
-                actor="system",
+                actor=actor,
             )
             raise
 
@@ -176,7 +182,7 @@ class ApprovalWorkflow:
             event_type="action.verified",
             title=proposal.title,
             details={"proposal_id": proposal_id, "verification": verification},
-            actor="system",
+            actor=actor,
         )
         return verified
 

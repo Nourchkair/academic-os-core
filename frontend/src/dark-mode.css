@@ -1,0 +1,579 @@
+:root {
+  color-scheme: light;
+  --app-bg: #f5f2eb;
+  --surface: #fffdfa;
+  --surface-raised: #f5f2eb;
+  --surface-soft: #efebe3;
+  --surface-hover: #e8e4dc;
+  --line: #e1ddd4;
+  --text-strong: #181818;
+  --text-muted: #696761;
+  --accent: #181818;
+}
+
+html, body, #root { background: var(--app-bg); color: var(--text-strong); }
+.app-shell, .main-content { background: var(--app-bg); color: var(--text-strong); }
+.sidebar { background: linear-gradient(180deg, #1b1b1b 0%, #111 100%); border-color: #333; }
+.sidebar .nav-item.active { background: linear-gradient(90deg, #393939, #2e2e2e); }
+.sidebar .nav-item:hover, .profile-button:hover, .profile-button.active { background: #292929; border-color: #414141; }
+
+:is(.focus-card, .empty-card, .course-card, .settings-card, .advanced-card, .activity-panel,
+  .library-tile, .metric-cell, .library-list-panel, .activity-page-panel, .course-material-panel,
+  .course-browser-card, .course-row, .task-row, .review-row, .library-search, .settings-section,
+  .review-card, .connection-screen, .candidate, .result-row, .action-panel, .playbook-panel,
+  .workflow-card, .coursework-history-card, .coursework-editor, .file-preview-dialog,
+  .chat-sources-panel, .chat-main, .chat-study-panel, .chat-dialog, .study-source-panel,
+  .study-exam-editor, .study-plan, .study-backup, .study-agent-guide, .study-set-card,
+  .study-exam-card, .study-annotation, .study-session, .study-excerpt, .document-reader-toolbar,
+  .document-reader-scroll, .document-table-wrap, .document-json-root) {
+  background-color: var(--surface);
+  border-color: var(--line);
+  color: var(--text-strong);
+}
+
+.hero, .study-heading { background: linear-gradient(115deg, #f4f0e8, #fbfaf7 58%, #efede8); border-color: var(--line); }
+.primary-button { background: #181818; color: #fff; }
+.primary-button:hover { background: #333; }
+.secondary-button, .icon-button, .workspace-action-button,
+.chat-picker-trigger, .chat-speed-toggle, .chat-history-button, .chat-new-session,
+.chat-clear, .chat-inline-panel-toggle, .chat-panel-collapse, .document-reader-toolbar button {
+  background: #f1eee8;
+  border-color: #dedad1;
+  color: #292929;
+}
+.secondary-button:hover, .icon-button:hover:not(:disabled), .workspace-action-button:hover:not(:disabled),
+.chat-picker-trigger:hover:not(:disabled), .chat-speed-toggle:hover, .chat-history-button:hover,
+.chat-new-session:hover:not(:disabled), .chat-clear:hover:not(:disabled),
+.chat-inline-panel-toggle:hover, .chat-panel-collapse:hover, .document-reader-toolbar button:hover {
+  background: #e6e2da;
+  border-color: #c9c4ba;
+  color: #111;
+}
+.chat-speed-toggle.active, .chat-mode-card.active, .chat-source-row.selected,
+.study-options button.selected, .study-options button.correct { background: #e7e3db; border-color: #bbb6ac; color: #171717; }
+.chat-mode-icon, .chat-history-icon, .course-symbol, .tile-icon, .empty-mark,
+.connection-art, .material-category-icon, .study-kind { background: #eeebe5; color: #333; }
+input:not([type=checkbox]):not([type=radio]), select, textarea { background-color: #fffdfa; border-color: #d9d5cc; color: #181818; }
+input::placeholder, textarea::placeholder { color: #85827b; }
+a { color: #242424; }
+::selection { background: #d8d4cc; color: #111; }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --ink: #ececec;
+    --muted: #a6a6a6;
+    --line: #3e3e3e;
+    --app-bg: #141414;
+    --surface: #1f1f1f;
+    --surface-raised: #262626;
+    --surface-soft: #2c2c2c;
+    --surface-hover: #343434;
+    --text-strong: #ebebeb;
+    --text-muted: #acacac;
+    --accent: #c8c8c8;
+  }
+
+  html, body, #root { background: var(--app-bg); color: var(--text-strong); }
+  body { color-scheme: dark; }
+  button, input, select, textarea { color-scheme: dark; }
+  .app-shell, .main-content { background: var(--app-bg); color: var(--text-strong); }
+  .main-content :is(h1, h2, h3, h4, h5, h6, strong) { color: var(--text-strong); }
+  .main-content :is(p, li, dt, dd, small, time, label) { color: var(--text-muted); }
+  .eyebrow { color: #9d9d9d; }
+  a { color: #c8c8c8; }
+  hr { border-color: var(--line); }
+  ::selection { background: #505050; color: #fbfbfb; }
+
+  .sidebar { background: linear-gradient(180deg, #1a1a1a 0%, #161616 100%); border-color: #333333; }
+  .sidebar .nav-item.active { background: linear-gradient(90deg, #393939, #313131); }
+  .sidebar .nav-item:hover, .profile-button:hover, .profile-button.active { background: #2b2b2b; border-color: #424242; }
+  .topbar { border-color: #323232; }
+  .topbar h1, .page-intro h2, .section-heading h3 { color: var(--text-strong); }
+  .main-content :is(.focus-task strong, .focus-card h4, .empty-card h3, .course-row h3,
+    .activity-panel .card-topline h3, .activity-row strong, .task-body h3, .task-source,
+    .library-tile h3, .review-copy h3, .setting-row h3, .advanced-card h3,
+    .selected-course h3, .coursework-history-heading h3, .coursework-history-card h4,
+    .course-card h3, .workflow-card h3, .playbook-guide h5, .playbook-preferences h5) {
+    color: var(--text-strong);
+  }
+
+  :is(.focus-card, .empty-card, .course-card, .settings-card, .advanced-card, .activity-panel,
+    .library-tile, .metric-cell, .library-list-panel, .activity-page-panel, .course-material-panel,
+    .course-browser-card, .course-row, .task-row, .review-row, .library-search, .settings-section,
+    .review-card, .connection-screen, .candidate, .result-row, .action-panel-header,
+    .playbook-panel-header, .playbook-panel-body .playbook-guide, .playbook-panel-body .playbook-preferences,
+    .workflow-card, .coursework-history-card, .coursework-editor, .file-preview-dialog,
+    .chat-sources-panel, .chat-main, .chat-study-panel, .chat-dialog,
+    .study-source-panel, .study-exam-editor, .study-plan, .study-backup, .study-agent-guide,
+    .study-set-card, .study-exam-card, .study-annotation, .study-session, .study-excerpt,
+    .document-reader-toolbar, .document-reader-scroll, .document-table-wrap, .document-json-root) {
+    background: var(--surface);
+    border-color: var(--line);
+    color: var(--text-strong);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+  }
+
+  .hero, .study-heading {
+    background: linear-gradient(115deg, #2b2b2b, #252525 58%, #262626);
+    border-color: #414141;
+  }
+  .hero-subtitle, .page-intro > p:last-child, .card-meta, .muted-copy,
+  .focus-card p, .empty-card p, .course-card p, .course-row p, .task-body p,
+  .activity-row p, .library-tile p, .page-stack > p, .review-copy p,
+  .setting-row p, .connection-screen > p:not(.eyebrow), .setup-content > p:not(.eyebrow),
+  .course-material-empty, .course-selection-empty, .coursework-history-meta,
+  .coursework-history-notes, .history-form-note, .migration-muted,
+  .migration-target-hint, .migration-browser-empty-note, .workflow-helper,
+  .workflow-card-meta, .workflow-detail, .workflow-level, .workflow-safety {
+    color: var(--text-muted);
+  }
+  .attention-card, .data-note, .review-context, .selected-course, .source-note,
+  .migration-safety-card, .migration-source-card, .migration-preview-card,
+  .migration-items-card, .migration-action-card, .migration-result-card,
+  .migration-loading-card, .migration-error-card, .setup-boundary-note,
+  .preview-banner, .preservation-callout, .inspection-summary.safe,
+  .study-notice, .study-working, .study-answer, .chat-source-plan {
+    background: #272727;
+    border-color: #464646;
+    color: #d0d0d0;
+  }
+  .data-note.warning, .migration-reviewable-note, .migration-move-option.enabled,
+  .migration-move-warning, .migration-dialog .migration-confirm-check,
+  .inspection-summary.warning, .attention-card {
+    background-color: #292929;
+    border-color: #464646;
+    color: #c2c2c2;
+  }
+  .data-note.warning h3, .data-note.warning p:not(.eyebrow),
+  .migration-reviewable-note strong, .migration-move-warning strong,
+  .migration-selection-help, .inspection-summary.warning { color: #c7c7c7; }
+  .attention-icon { background: #5d5d5d; color: #e5e5e5; }
+
+  .course-row, .task-row, .review-row, .library-file-row, .migration-file-row,
+  .course-browser-card, .course-material-panel, .coursework-history-card,
+  .study-topic-row, .study-resume-row, .study-options button, .document-json-group,
+  .document-image-viewer img, .material-category-card, .workflow-card,
+  .playbook-guide, .playbook-preferences, .history-artifact-link,
+  .workflow-prompt, .file-preview-meta, .file-preview-content {
+    background: var(--surface);
+    border-color: var(--line);
+    color: var(--text-strong);
+  }
+  .course-row:hover, .library-file-row:hover, .course-browser-card:hover,
+  .course-browser-card.selected, .migration-file-row:hover, .migration-file-row.selected,
+  .study-options button:hover:not(:disabled), .document-table tr:hover td,
+  .material-category-card:hover, .material-category-card.selected,
+  .history-artifact-link:hover {
+    background: var(--surface-hover);
+    border-color: #676767;
+  }
+  .course-row.selected, .library-tile.selected, .candidate.selected,
+  .choice-card.selected, .mode-switch button.selected, .study-options button.selected,
+  .study-options button.correct, .chat-mode-card.active, .chat-source-row.selected,
+  .chat-source-row.retrieved, .chat-picker-menu button.selected {
+    background: #313131;
+    border-color: #626262;
+    color: #e0e0e0;
+  }
+  .chat-source-row.selected, .chat-source-row.selected.retrieved {
+    background: #172b3b;
+    border-color: #5d9fd7;
+    box-shadow: 0 0 0 1px rgba(93, 159, 215, .2);
+    color: #e6f3ff;
+  }
+  .chat-source-row input { accent-color: #80bdf0; }
+  .chat-source-bulk-toggle small { color: #aaaaaa; }
+  .chat-mode-icon.mode-explain { background: #473817; color: #f0c45f; }
+  .chat-mode-icon.mode-quiz { background: #1c3650; color: #83bbff; }
+  .chat-mode-icon.mode-flashcards { background: #382748; color: #c39aff; }
+  .chat-mode-icon.mode-guide { background: #482b23; color: #ffad8f; }
+  .chat-mode-icon.mode-map { background: #183c31; color: #74d6ae; }
+  .chat-mode-icon.mode-compare { background: #482735; color: #f39ab9; }
+  .course-symbol, .tile-icon, .library-file-icon, .chat-source-file-icon,
+  .study-kind, .document-json-group > summary, .material-category-icon,
+  .empty-mark, .connection-art { background: #333333; color: #cacaca; }
+  .course-code, .course-tag, .course-material-count, .library-file-meta small,
+  .row-status, .complete-dot, .history-edit-button, .history-file-preview-link,
+  .history-artifact-link, .library-file-meta em.generated-badge { color: #c8c8c8; }
+  .row-status.warm, .review-dot, .confidence { color: #bfbfbf; }
+  .history-status.status-submitted, .history-status.status-graded,
+  .history-status.status-completed { background: #343434; color: #cacaca; }
+  .history-status.status-planned { background: #2b2b2b; color: #c8c8c8; }
+  .history-status.status-in_progress { background: #313131; color: #c4c4c4; }
+  .history-status-log, .history-artifacts > strong { color: #aeaeae; }
+
+  .secondary-button, .filter-pill, .chat-panel-collapse, .chat-inline-panel-toggle,
+  .chat-history-button, .chat-new-session, .chat-clear, .chat-picker-trigger,
+  .chat-speed-toggle, .chat-source-bulk-toggle, .chat-dialog-close, .document-reader-toolbar button,
+  .study-tabs button, .study-question-nav button {
+    background: #292929;
+    border-color: #424242;
+    color: #cecece;
+  }
+  .secondary-button:hover, .filter-pill.active, .chat-panel-collapse:hover,
+  .chat-inline-panel-toggle:hover, .chat-history-button:hover,
+  .chat-new-session:hover:not(:disabled), .chat-clear:hover:not(:disabled),
+  .chat-picker-trigger:hover:not(:disabled), .chat-source-bulk-toggle:hover:not(:disabled), .chat-picker.open .chat-picker-trigger,
+  .chat-speed-toggle:hover, .document-reader-toolbar button:hover,
+  .document-reader-toolbar button.active, .study-tabs button.active,
+  .study-question-nav button[aria-current=step] {
+    background: #3c3c3c;
+    border-color: #616161;
+    color: #e1e1e1;
+  }
+  .primary-button { background: #f1f1f1; color: #111; }
+  .primary-button:hover { background: #dcdcdc; }
+  .secondary-button, .icon-button, .workspace-action-button,
+  .chat-picker-trigger, .chat-speed-toggle, .chat-history-button, .chat-new-session,
+  .chat-clear, .chat-inline-panel-toggle, .chat-panel-collapse, .document-reader-toolbar button {
+    background: #292929;
+    border-color: #444;
+    color: #e6e6e6;
+  }
+  .secondary-button:hover, .icon-button:hover:not(:disabled), .workspace-action-button:hover:not(:disabled),
+  .chat-picker-trigger:hover:not(:disabled), .chat-speed-toggle:hover, .chat-history-button:hover,
+  .chat-new-session:hover:not(:disabled), .chat-clear:hover:not(:disabled),
+  .chat-inline-panel-toggle:hover, .chat-panel-collapse:hover, .document-reader-toolbar button:hover {
+    background: #3a3a3a;
+    border-color: #595959;
+    color: #fff;
+  }
+  .chat-composer-context .chat-course-picker .chat-picker-trigger {
+    background: #292929;
+    border-color: #444;
+    color: #e6e6e6;
+  }
+  .chat-composer-context .chat-course-picker .chat-picker-trigger strong { color: #e6e6e6; }
+  .chat-composer-context .chat-course-picker .chat-picker-trigger:hover:not(:disabled),
+  .chat-composer-context .chat-course-picker.chat-picker.open .chat-picker-trigger {
+    background: #3a3a3a;
+    border-color: #595959;
+    color: #fff;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]), select, textarea,
+  .workflow-text-field input, .workflow-text-field textarea,
+  .coursework-editor input, .coursework-editor select, .coursework-editor textarea,
+  .setup-field input, .setup-field select,
+  .library-filters select, .chat-source-search, .study-source-filter,
+  .study-workspace input:not([type=checkbox]), .study-workspace textarea,
+  .study-workspace select {
+    background-color: #191919;
+    border-color: #464646;
+    color: #e8e8e8;
+  }
+  input::placeholder, textarea::placeholder { color: #8d8d8d; }
+  input:focus, select:focus, textarea:focus { border-color: #959595; }
+  .chat-composer textarea { background: transparent; color: #e9e9e9; }
+  .chat-composer textarea::placeholder { color: #8d8d8d; }
+
+  .chat-nav-dropdown > summary, .chat-nav-menu, .chat-attach-menu,
+  .chat-attach-menu button, .chat-picker-menu, .chat-suggestions button,
+  .chat-source-row, .chat-local-file, .chat-mode-card, .chat-history-row,
+  .chat-composer-wrap, .chat-composer, .chat-image-note,
+  .chat-rich-text blockquote, .chat-rich-text code, .chat-rich-text pre,
+  .chat-rich-text th, .chat-suggestions-empty, .chat-source-search,
+  .chat-picker-trigger, .chat-picker-menu button:hover {
+    background-color: var(--surface-raised);
+    border-color: var(--line);
+    color: #dedede;
+  }
+  .chat-nav-dropdown[open] > summary, .chat-nav-menu button:hover,
+  .chat-attach-menu button:hover, .chat-picker-menu button:hover,
+  .chat-suggestions button:hover, .chat-history-row:hover,
+  .chat-source-row:hover, .chat-mode-card:hover {
+    background: var(--surface-hover);
+    border-color: #5e5e5e;
+    color: #ebebeb;
+  }
+  .chat-composer-wrap, .chat-conversation-heading,
+  .chat-source-group, .chat-local-files, .chat-source-picker-dialog > footer,
+  .chat-history-dialog > footer { border-color: var(--line); }
+  .chat-panel-heading h3, .chat-heading-end strong, .chat-welcome h3,
+  .chat-rich-text h1, .chat-rich-text h2, .chat-rich-text h3, .chat-rich-text h4,
+  .chat-source-copy strong, .chat-source-group > header strong,
+  .chat-attach-menu strong, .chat-picker-menu button.selected,
+  .chat-mode-card strong, .chat-dialog > header h3, .chat-history-row strong,
+  .chat-history-row b { color: #e6e6e6; }
+  .chat-rich-text, .chat-message small, .chat-thinking, .chat-panel-note,
+  .chat-source-copy small, .chat-source-group > header span,
+  .chat-attach-menu small, .chat-picker-label, .chat-picker-caret,
+  .chat-mode-card small, .chat-dialog > header p:last-child,
+  .chat-history-row small, .chat-history-session-note,
+  .chat-composer-foot { color: #aaaaaa; }
+  .chat-provider-note { color: #a7a7a7; }
+  .chat-provider-note strong { color: #dedede; }
+  .chat-provider-note.disconnected, .chat-provider-note.disconnected strong { color: #e2b66f; }
+  .chat-rich-text { color: #f4f4f4; }
+  .chat-rich-text a { color: #c8c8c8; }
+  .chat-rich-text th, .chat-rich-text td, .chat-rich-text hr { border-color: #444444; }
+  .chat-avatar { background: #393939; color: #d3d3d3; }
+  .chat-message.user .chat-avatar { background: #303030; color: #c8c8c8; }
+  .chat-error { background: #262626; border-color: #404040; color: #b5b5b5; }
+  .chat-status-dot.available { background: #36bd7e; box-shadow: 0 0 0 3px rgba(54, 189, 126, .2); }
+  .chat-status-dot.unavailable { background: #edaa4f; box-shadow: 0 0 0 3px rgba(237, 170, 79, .2); }
+  .chat-speed-toggle.active { background: #414141; border-color: #6e6e6e; color: #d1d1d1; }
+  .chat-speed-toggle.active .chat-speed-needle { stroke: #212121; }
+  .chat-speed-toggle.active .chat-speed-center { fill: #212121; }
+  .chat-dialog-backdrop, .file-preview-backdrop, .action-panel-backdrop,
+  .playbook-panel-backdrop, .migration-dialog-backdrop { background: rgba(0, 0, 0, .62); }
+  .chat-history-icon { background: #333333; color: #c8c8c8; }
+  .chat-history-delete { color: #b1b1b1; }
+  .chat-history-delete:hover { background: #292929; border-color: #474747; color: #b7b7b7; }
+
+  .study-tabs { background: var(--surface); border-color: var(--line); }
+  .study-heading { color: var(--text-strong); }
+  .study-workspace h4, .study-source-panel > h4, .study-section-title h4,
+  .study-session h3, .study-kind, .study-excerpt header,
+  .study-excerpt-text, .study-source-choice span, .study-plan ol,
+  .study-coverage li, .study-map text { color: #e2e2e2; }
+  .study-workspace p, .study-hint, .study-workspace label,
+  .study-workspace summary, .study-excerpt small, .study-annotation small,
+  .study-source-choice small, .study-coverage span { color: #a6a6a6; }
+  .study-empty, .study-topic-row, .study-advanced, .study-options button,
+  .study-answer, .study-session-progress, .study-question-nav button,
+  .study-source-filter, .study-map { background: var(--surface-raised); border-color: var(--line); }
+  .study-citations blockquote, .study-excerpt blockquote, .study-annotation blockquote,
+  .study-map rect { background: #2a2a2a; fill: #2a2a2a; border-color: #4e4e4e; color: #c9c9c9; }
+  .study-map line { stroke: #717171; }
+  .study-map text { fill: #d8d8d8; }
+  .study-map g.selected rect, .study-map g[role=button]:focus rect { fill: #4c4c4c; stroke: #b7b7b7; }
+  .study-source-panel > .primary-button { box-shadow: 0 -8px 14px var(--surface); }
+
+  .document-reader-toolbar, .document-reader-scroll, .document-table-wrap,
+  .document-json-root, .document-source, .document-image-viewer { background: var(--surface); }
+  .document-reader-toolbar button { color: #cbcbcb; }
+  .document-prose, .document-table, .document-json-leaf > code,
+  .document-json-group > summary { color: #e1e1e1; }
+  .document-prose h1, .document-prose h2, .document-prose h3,
+  .document-prose h4, .document-table th, .document-json-root > .document-json-leaf > span { color: #e9e9e9; }
+  .document-prose blockquote, .document-prose th, .document-json-group > summary,
+  .document-table th, .document-table tr:hover td, .document-image-note,
+  .document-empty, .document-extracted-note, .document-reader-note { background: #2a2a2a; border-color: var(--line); color: #b9b9b9; }
+  .document-prose :not(pre) > code, .document-prose pre { background: #181818; border-color: #444444; color: #d6d6d6; }
+  .document-source { color: #d4d4d4; }
+  .document-prose th, .document-prose td, .document-prose hr,
+  .document-table th, .document-table td, .document-json-leaf { border-color: #404040; }
+  .app-shell .document-reader-toolbar, .app-shell .document-reader-scroll,
+  .app-shell .document-table-wrap, .app-shell .document-json-root,
+  .app-shell .document-image-viewer { background: var(--surface); border-color: var(--line); }
+  .app-shell .document-prose, .app-shell .document-table,
+  .app-shell .document-json-leaf > code { color: #d7d7d7; }
+  .app-shell .document-prose :is(h1, h2, h3, h4),
+  .app-shell .document-table th, .app-shell .document-json-root > .document-json-leaf > span { color: #ededed; }
+  .app-shell .document-prose :is(blockquote, th),
+  .app-shell .document-json-group > summary,
+  .app-shell .document-image-note, .app-shell .document-empty,
+  .app-shell .document-extracted-note, .app-shell .document-reader-note {
+    background: #292929;
+    border-color: var(--line);
+    color: #b9b9b9;
+  }
+  .app-shell .document-prose :not(pre) > code,
+  .app-shell .document-prose pre { background: #181818; border-color: #444; color: #d6d6d6; }
+
+  .onboarding-shell { background: radial-gradient(circle at 15% 10%, #2b2b2b, transparent 34%), #141414; color: #e4e4e4; }
+  .onboarding-brand, .setup-content h1, .mode-switch button strong,
+  .choice-card strong, .agent-choice strong, .setup-summary strong,
+  .migration-dialog h3 { color: #e9e9e9; }
+  .onboarding-card, .mode-switch button, .candidate, .choice-card,
+  .agent-choice, .setup-summary, .migration-dialog, .file-preview-dialog,
+  .action-panel, .playbook-panel { background: var(--surface); border-color: var(--line); color: #e4e4e4; }
+  .setup-field span, .field-caption, .choice-card small, .agent-choice span,
+  .onboarding-footnote, .setup-summary span { color: #ababab; }
+  .setup-benefits span, .setup-note, .preview-banner, .preservation-callout,
+  .inspection-summary.safe { background: #303030; border-color: #525252; color: #d4d4d4; }
+  .connection-help { background: #282828; color: #b5b5b5; }
+  .onboarding-progress span { background: #323232; color: #aaaaaa; }
+  .onboarding-progress span.complete { background: #bdbdbd; color: #1e1e1e; }
+  .setup-hero-mark, .ready-mark { background: linear-gradient(135deg, #bdbdbd, #afafaf); color: #1e1e1e; }
+  .playbook-list, .setting-row, .course-section-tabs { border-color: var(--line); }
+  .playbook-list h6, .workflow-preference-fields :is(label, span),
+  .workflow-level, .workflow-id { color: #aaaaaa; }
+  .workflow-level.recommended { background: #343434; color: #cacaca; }
+  .workflow-level.optional { background: #323232; color: #b3b3b3; }
+  .workflow-level.advanced { background: #313131; color: #c4c4c4; }
+  .workflow-prompt { background: #191919; border-color: var(--line); }
+  .workflow-prompt code, .connection-help code, .advanced-card code { background: #2a2a2a; color: #d8d8d8; }
+  .workflow-save-message { color: #cacaca; }
+  .workflow-save-error, .dashboard-inline-error { background: #262626; border-color: #404040; color: #b5b5b5; }
+  .hero-action, .icon-button, .workspace-action-button { background: #292929; border-color: #424242; color: #cecece; }
+  .hero-action:hover, .icon-button:hover:not(:disabled), .workspace-action-button:hover:not(:disabled) {
+    background: #3c3c3c; border-color: #616161; color: #e1e1e1;
+  }
+  .focus-task { border-color: var(--line); }
+  .focus-task span, .task-body summary, .detail-list dt { color: #aaaaaa; }
+  .task-row.done .task-check { background: #898989; border-color: #898989; }
+  .task-check { border-color: #717171; }
+  .activity-dot { box-shadow: 0 0 0 4px #353535; }
+  .activity-confidence, .row-arrow, .task-source { color: #acacac; }
+  .soft-badge { background: #313131; color: #c4c4c4; }
+  .library-search kbd { background: #191919; border-color: var(--line); color: #acacac; }
+  .source-note, .selected-course { background: #272727; border-color: #464646; color: #d0d0d0; }
+  .course-section-tabs button { color: #aaaaaa; }
+  .course-section-tabs button.active { color: #cacaca; border-bottom-color: #a6a6a6; }
+  .history-artifact-link span { color: #acacac; }
+  .file-preview-note { background: #292929; border-color: #464646; color: #c2c2c2; }
+
+  .extraction-preview { background: linear-gradient(135deg, rgba(108, 108, 108, .1), rgba(36, 36, 36, .75)); border-color: var(--line); }
+  .extraction-counts span { background: #2a2a2a; }
+  .extraction-counts strong { color: var(--text-strong); }
+
+  .migration-file-row, .migration-result-artifact, .migration-result-list li,
+  .migration-no-files, .migration-result-counts > div { background: #282828; border-color: #404040; color: #cecece; }
+  .migration-copy-option, .migration-result-card.complete { background: #2e2e2e; border-color: #525252; }
+  .migration-move-option, .migration-error-card, .migration-failure-list li { background: #262626; border-color: #434343; }
+  .migration-copy-option strong, .migration-copy-option p, .migration-group-heading h4,
+  .migration-file-main strong, .migration-result-heading h3,
+  .migration-result-columns h4, .migration-result-counts strong { color: #e2e2e2; }
+  .migration-file-main code, .migration-file-meta span, .migration-target-hint code,
+  .migration-result-list code, .migration-result-artifact code { color: #b7b7b7; }
+  .migration-result-heading p:last-child, .migration-result-summary,
+  .migration-result-counts span, .migration-artifacts code { color: #adadad; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .study-recommendations { background: var(--surface); border-color: var(--line); }
+  .study-recommendation { background: var(--surface-raised); border-color: var(--line); }
+  .study-recommendation-heading span, .study-recommendation p,
+  .study-recommendations > header > span { color: var(--text-muted); }
+  .chat-study-context { background: var(--surface-raised); border-color: var(--line); }
+  .chat-study-context > header strong, .chat-study-context details summary,
+  .chat-study-context li strong, .chat-study-context-metrics strong { color: var(--text-strong); }
+  .chat-study-context > header span, .chat-study-context > p,
+  .chat-study-context li span, .chat-study-context-metrics small,
+  .chat-study-context .chat-study-context-footnote { color: var(--text-muted); }
+  .chat-study-context-metrics > span { background: var(--surface); border-color: var(--line); }
+  .chat-study-context .chat-study-context-warning { color: #d3b58d; }
+  .chat-study-context > header button { color: var(--text-muted); }
+  .study-provenance { color: var(--text-muted); }
+  .study-freshness-note { background: #2b2924; border-color: #4a453a; color: #d1c3a7!important; }
+  .study-workspace .study-generation-boundary { color: var(--text-muted)!important; }
+  .study-deep-search, .study-source-coverage { background: var(--surface-raised); border-color: var(--line); }
+  .study-deep-search strong, .study-source-coverage>strong { color: var(--text-strong); }
+  .study-deep-search small, .study-source-coverage p,
+  .study-source-coverage>span, .study-source-coverage ul { color: var(--text-muted); }
+}
+
+@media (prefers-color-scheme: dark) {
+  .study-archive-summary > div, .study-archive-filters, .study-archive-card,
+  .study-archive-material-view, .study-archive-search { background: var(--surface); border-color: var(--line); }
+  .study-archive-filters button.active, .study-archive-question { background: var(--surface-raised); border-color: var(--line); }
+  .study-archive-card:hover { border-color: #646464; }
+  .study-archive-summary span, .study-archive-card-top time,
+  .study-archive-card-copy p, .study-archive-card-copy small { color: var(--text-muted); }
+  .study-archive-search { color: var(--text-muted); }
+  .study-archive-card-copy h4, .study-archive-toolbar h4,
+  .study-archive-question h4 { color: var(--text-strong); }
+  .study-archive-icon.chat { background: #302f2c; border-color: #4a4843; color: #d2ccbe; }
+  .study-archive-icon.material { background: #29323a; border-color: #45525e; color: #c0d7e8; }
+  .study-archive-icon.material.flashcards { background: #393626; border-color: #5a5334; color: #e1d48c; }
+  .study-archive-icon.material.mind_map { background: #352d3c; border-color: #514260; color: #d0b9e7; }
+  .study-archive-icon.material.quiz, .study-archive-icon.material.practice_exam { background: #29343c; border-color: #455563; color: #b9d9ed; }
+  .study-archive-icon.practice { background: #303831; border-color: #49564b; color: #c2d6c5; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .home-greeting h1, .home-section-heading h2, .home-deadline-copy h2,
+  .home-week-task-copy strong, .home-attention-card strong,
+  .home-recent-row strong, .home-empty-classes strong { color: var(--text-strong); }
+  .home-greeting-copy > p:last-child, .home-clock, .home-deadline-copy p:last-child,
+  .home-week-task-date, .home-week-task-copy small, .home-empty-note,
+  .home-attention-card span:not(.home-attention-arrow), .home-recent-row small,
+  .home-recent-row time, .home-empty-classes p { color: var(--text-muted); }
+  .home-deadline, .home-week-panel, .home-attention-card, .home-recent-activity,
+  .home-empty-classes { background: var(--surface); border-color: var(--line); color: var(--text-strong); }
+  .home-deadline-mark, .home-count, .home-attention-icon,
+  .home-count { background-color: var(--surface-hover); }
+  .home-week-task, .home-recent-row { border-color: var(--line); }
+  .home-deadline-link, .home-inline-link, .course-back-button { color: var(--text-muted); }
+  .home-week-task:hover .home-week-task-copy strong,
+  .home-deadline-link:hover, .home-inline-link:hover { color: var(--text-strong); }
+  .home-attention-action:hover { box-shadow: 0 12px 26px rgba(0, 0, 0, .28); }
+}
+
+@media (prefers-color-scheme: dark) {
+  .home-deadline { background: transparent; border: 0; border-left: 3px solid var(--deadline-color); box-shadow: none; }
+  .home-deadline-mark { background: var(--deadline-bg); border-color: var(--deadline-line); color: var(--deadline-color); }
+  .deadline-status { background: var(--deadline-bg); border-color: var(--deadline-line); color: var(--deadline-color); }
+  .home-deadline-link { color: var(--deadline-color); }
+  .home-week-task-date { color: var(--task-color, var(--semantic-blue)); }
+  .home-count[data-tone="urgent"], .home-count[data-tone="overdue"] { background: var(--semantic-red-bg); border-color: var(--semantic-red-line); color: var(--semantic-red); }
+  .home-count[data-tone="soon"] { background: var(--semantic-amber-bg); border-color: var(--semantic-amber-line); color: var(--semantic-amber); }
+  .home-count[data-tone="upcoming"] { background: var(--semantic-blue-bg); border-color: var(--semantic-blue-line); color: var(--semantic-blue); }
+  .home-count[data-tone="completed"] { background: var(--semantic-green-bg); border-color: var(--semantic-green-line); color: var(--semantic-green); }
+  .home-attention-card[data-tone="soon"] .home-attention-icon { background: var(--semantic-amber-bg); color: var(--semantic-amber); }
+  .home-attention-card[data-tone="completed"] .home-attention-icon { background: var(--semantic-green-bg); color: var(--semantic-green); }
+  .course-browser-card-shell > .course-browser-card { border-left-color: var(--course-accent); }
+  .course-browser-card-shell .course-code { color: var(--course-accent); }
+  .task-row[data-tone="upcoming"] { border-left-color: var(--semantic-blue); }
+  .task-row[data-tone="soon"] { border-left-color: var(--semantic-amber); }
+  .task-row[data-tone="urgent"], .task-row[data-tone="overdue"] { border-left-color: var(--semantic-red); }
+  .task-row[data-tone="completed"] { border-left-color: var(--semantic-green); }
+  .task-row.done .task-check { background: var(--semantic-green); border-color: var(--semantic-green); }
+  .history-status.status-submitted, .history-status.status-planned { background: var(--semantic-blue-bg); border-color: var(--semantic-blue-line); color: var(--semantic-blue); }
+  .history-status.status-in_progress { background: var(--semantic-amber-bg); border-color: var(--semantic-amber-line); color: var(--semantic-amber); }
+  .history-status.status-graded, .history-status.status-completed { background: var(--semantic-green-bg); border-color: var(--semantic-green-line); color: var(--semantic-green); }
+  .activity-dot { background: var(--semantic-blue); box-shadow: 0 0 0 4px var(--semantic-blue-bg); }
+  .activity-dot.tone-overdue { background: var(--semantic-red); box-shadow: 0 0 0 4px var(--semantic-red-bg); }
+  .activity-dot.tone-soon { background: var(--semantic-amber); box-shadow: 0 0 0 4px var(--semantic-amber-bg); }
+  .activity-dot.tone-completed { background: var(--semantic-green); box-shadow: 0 0 0 4px var(--semantic-green-bg); }
+}
+
+@media (prefers-color-scheme: dark) {
+  button.library-file-row, .library-tile, .material-category-card {
+    background: var(--surface);
+    border-color: var(--line);
+    color: var(--text-strong);
+  }
+  button.library-file-row:hover, button.library-file-row:focus-visible,
+  .library-tile:hover, .library-tile:focus-visible,
+  .material-category-card:hover, .material-category-card.selected {
+    background: #292929;
+    border-color: #505050;
+    color: var(--text-strong);
+  }
+  .library-tile.selected { background: #2c2c2c; border-color: #565656; }
+  .activity-retention-switch { background: #252525; border-color: #414141; }
+  .activity-retention-switch button:hover, .activity-retention-switch button.active { background: #353535; color: #ededed; }
+  .task-done-trigger, .task-grade-trigger, .task-grade-editor > div button { background: #292929; border-color: #444; color: #e6e6e6; }
+  .task-done-trigger:hover, .task-grade-trigger:hover, .task-grade-editor > div button:hover { background: #343434; border-color: #575757; }
+  .task-grade-editor { background: #222; border-color: #4a4a4a; }
+  .task-grade-editor label input { background: #292929; border-color: #4a4a4a; color: #ededed; }
+  .task-grade-editor > div .task-save-done { background: #e8e8e8; border-color: #e8e8e8; color: #181818; }
+  .task-grade-editor > div .task-save-done:hover { background: #d6d6d6; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .app-update-card, .app-update-browser-note { background: #292929; border-color: #454545; }
+  .app-update-copy p, .app-update-browser-note p { color: #b4b4b4; }
+  .app-update-copy small { color: #989898; }
+  .app-update-progress { accent-color: #c8c8c8; }
+  .agent-playbooks { background: #1f1f1f; border-color: #3e3e3e; }
+  .workflow-card { background: #272727; border-color: #414141; box-shadow: 0 8px 20px rgba(0, 0, 0, .22); }
+  .playbook-panel, .playbook-panel-header, .playbook-panel-body { background: #202020; border-color: #414141; }
+  .playbook-panel-body .playbook-guide, .playbook-panel-body .playbook-preferences { background: #292929; border-color: #444; }
+  .workflow-text-field textarea { background: #222; border-color: #484848; color: #e1e1e1; }
+  .playbook-list { border-color: #454545; }
+
+  .action-panel { background: #202020; border-color: #414141; }
+  .action-panel-tabs { background: #222; border-color: #414141; }
+  .action-panel-tabs button { color: #aaa; }
+  .action-panel-tabs button.active { border-bottom-color: #b5b5b5; color: #e0e0e0; }
+  .drop-zone { background: linear-gradient(145deg, #292929, #242424); border-color: #555; }
+  .drop-zone.dragging, .drop-zone:focus-within { background: #303030; border-color: #858585; box-shadow: 0 0 0 3px #373737; }
+  .drop-icon { background: #393939; color: #d0d0d0; }
+  .drop-zone h3 { color: #e6e6e6; }
+  .drop-zone p, .drop-zone small { color: #aaa; }
+  .drop-zone .primary-button { background: #d0d0d0; color: #191919; }
+  .drop-zone .primary-button:hover { background: #e0e0e0; }
+  .selected-file, .result-row, .import-results { background: #262626; border-color: #444; }
+  .selected-file strong, .result-row strong, .import-results h3 { color: #e0e0e0; }
+  .selected-file small, .result-row small { color: #aaa; }
+  .course-material-count { background: #303030; border-color: #484848; color: #d8d8d8; }
+  .library-file-meta em { background: #303030; border: 1px solid #464646; color: #d0d0d0; }
+  .library-file-meta em.generated-badge { background: #343434; border-color: #4b4b4b; color: #e0e0e0; }
+  .chat-rail-toggle { background: #292929; border-color: #444; color: #d0d0d0; }
+  .chat-rail-toggle:hover { background: #3a3a3a; border-color: #5d5d5d; color: #f0f0f0; }
+}

@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Academia OS",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "identifier": "com.academia.os",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:4173",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run build && npm run bundle:sidecar",
     "frontendDist": "../dist"
   },
   "app": {
@@ -14,8 +14,18 @@
     "security": {"csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost"}
   },
   "bundle": {
-    "active": false,
-    "targets": "all",
+    "active": true,
+    "targets": ["dmg"],
+    "externalBin": ["binaries/academia"],
+    "createUpdaterArtifacts": true,
     "macOS": {"minimumSystemVersion": "13.0"}
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "CONFIGURE_TAURI_UPDATER_PUBLIC_KEY_BEFORE_RELEASE",
+      "endpoints": [
+        "https://github.com/Nourchkair/academic-os-core/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

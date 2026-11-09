@@ -18,6 +18,10 @@ export type Task = {
   confidence: string
   kind?: string
   due_date?: string | null
+  due_time?: string | null
+  weight?: string | null
+  status?: string | null
+  grade?: string | null
 }
 
 export type ProcessingRecord = {
@@ -42,6 +46,7 @@ export type LibraryItem = {
   semester: string
   course_id?: string | null
   category: 'syllabi' | 'readings' | 'notes' | 'generated' | 'imports' | 'other'
+  intake_status?: 'inbox' | 'organized'
   extension: string
   size: number
   modified_at: string
@@ -52,15 +57,18 @@ export type LibraryItem = {
   created_by?: string | null
   authoritative?: boolean | null
   source_refs?: Array<Record<string, unknown>>
+  processing_status?: 'DETECTED' | 'PENDING' | 'PROCESSING' | 'VERIFIED' | 'ACKNOWLEDGED' | 'FAILED'
+  extraction_status?: string | null
 }
 
 export type FilePreview = {
   id: string
   name: string
   extension: string
-  kind: 'text' | 'pdf'
+  kind: 'text' | 'pdf' | 'image'
   size: number
   content: string
+  image_data_url?: string
   truncated: boolean
 }
 
@@ -102,6 +110,39 @@ export type ActivityEvent = {
   confidence?: string
   actor: string
   created_at: string
+}
+
+export type CourseworkKind = 'assignment' | 'essay' | 'project' | 'exam' | 'presentation' | 'quiz' | 'other'
+export type CourseworkStatus = 'planned' | 'in_progress' | 'submitted' | 'graded' | 'completed'
+
+export type CourseworkHistoryRecord = {
+  id: string
+  kind: CourseworkKind
+  title: string
+  status: CourseworkStatus
+  due_date?: string | null
+  submitted_on?: string | null
+  grade?: string | null
+  task_title?: string | null
+  artifact_paths: string[]
+  notes?: string | null
+  record_basis: string
+  status_history: Array<{ status: CourseworkStatus; recorded_at: string; actor: string; basis: string }>
+  created_at: string
+  updated_at: string
+  actor: string
+}
+
+export type CourseworkHistoryInput = {
+  kind: CourseworkKind
+  title: string
+  status: CourseworkStatus
+  due_date?: string
+  submitted_on?: string
+  grade?: string
+  task_title?: string
+  artifact_paths?: string[]
+  notes?: string
 }
 
 export type WorkflowRecipe = {

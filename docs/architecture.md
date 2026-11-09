@@ -40,33 +40,34 @@ templates/University/              readable academic workspace template
 
 The user’s workspace remains the human-readable source of truth. `.academia/` is local structured state: rebuildable indexes, acquisition/provenance records, generated-artifact registry, review/activity records, processing records, and proposals. Indexes can be rebuilt from the workspace; they are not a database dump that makes files inaccessible.
 
-## AI-native operating boundary
+## Shared local core and two supported host paths
 
 ```text
-AI AGENT
-Reasoning · conversation · teaching · writing assistance · planning · research synthesis
-                                      │
-                                      ▼
-ACADEMIA OS
-Academic state · bounded Agent Context · evidence · provenance · permissions
-Review protocol · safe actions · generated artifacts · Activity audit trail
-                                      │
-                                      ▼
-ACADEMIC WORKSPACE
-Human-readable originals · student material · AI-generated secondary material
+IN-APP ACADEMIA ASSISTANT (target host)       CODEX / CLAUDE / OTHER EXTERNAL HOST
+Conversation · provider choice · MCP clients   Conversation · provider/tool environment
+                   \                                /
+                    \                              /
+                     ▼                            ▼
+                 SHARED ACADEMIA INTERFACE
+          Local context · evidence · provenance · Review
+          safe imports · study records · generated artifacts
+                              │
+                              ▼
+                    ACADEMIC WORKSPACE
+       Human-readable originals · student material · AI-generated secondary material
 
-DASHBOARD
-Observability · visual reference · browsing · status · Activity · Courses · Tasks
-Files · Settings · import/migration
+DASHBOARD: visibility · browsing · status · Activity · Courses · Tasks · Settings
 ```
 
-The agent interface is the primary product interface for authorized automation. `academia agent context`, `attention`, `changes`, and `capabilities` compose existing services; they do not create a parallel database or expose `.academia` internals. Context is deliberately bounded by scope (`workspace`, `semester`, `course`, or `today`) and detail (`compact`, `standard`, or `deep`). It returns identifiers, workspace-relative paths, evidence references, and safe-write locations rather than dumping source contents. The `sources.library_items` catalog is metadata-only and covers syllabi, readings, notes, generated material, and relevant imports within the bounded scope.
+The local core remains the source of academic state and safety policy. The CLI/API and local stdio MCP are shared interfaces; they do not create a parallel academic database or expose `.academia` internals. Context is deliberately bounded by scope (`workspace`, `semester`, `course`, or `today`) and detail (`compact`, `standard`, or `deep`). It returns identifiers, workspace-relative paths, evidence references, and safe-write locations rather than dumping source contents. The `sources.library_items` catalog is metadata-only and covers syllabi, readings, notes, generated material, and relevant imports within the bounded scope. Both a future in-app assistant and external agents should use these same contracts.
 
-`academia agent playbooks --json` and `academia agent playbook PLAYBOOK_ID --json` expose the static Agent Setup Playbook registry. The registry separates Academia capabilities from portable external-agent guides. Reading it is side-effect free: it does not inspect Gmail, calendars, course portals, browsers, research services, communities, or schedulers; it does not create integrations or store their state. External agents own implementation mechanics, and students authorize any external access or automation. The older `recommendations` and `recipe` commands remain compatibility aliases.
+The local MCP currently exposes bounded reads, host-gated file import, structured Review decisions, a separate executor for already-approved supported domain changes, and create-only AI-generated course artifacts. Review decisions must match an executable choice returned by `academia agent attention`; Activity identifies the caller as `agent:mcp`. The MCP server cannot verify that a human confirmation dialog was shown, so each compatible host must obtain confirmation of the exact choice and effect before calling a write tool. It does not connect to browser, email, calendar, or other external services. Dashboard Study chat can invoke the user's signed-in Codex CLI subscription, but its model tools are disabled and it is not an MCP client. Claude subscription OAuth cannot be routed through Academia under Anthropic's current restrictions; Claude Code remains usable as an external host. Full in-app MCP-client/tool orchestration remains planned. External Codex or another compatible host can connect to Academia MCP and its own separately authorized tools.
+
+`academia agent playbooks --json` and `academia agent playbook PLAYBOOK_ID --json` expose the static Agent Setup Playbook registry. The registry separates implemented Academia capabilities from portable workflow guidance. Reading it is side-effect free: it does not inspect Gmail, calendars, course portals, browsers, research services, communities, or schedulers; it does not create integrations or store their state. External hosts use their own configured tools. A future in-app assistant may use user-enabled MCP connections, but it must report only services that are actually configured and authorized. The older `recommendations` and `recipe` commands remain compatibility aliases.
 
 `academia workflow preferences --json`, `workflow show WORKFLOW_ID --json`, and `workflow set WORKFLOW_ID ... --json` expose the separate student-owned preference layer. `workflow_preferences.py` stores validated overrides, custom instructions, optional maintenance notes, timestamps, and audit attribution under `<academic_root>/.academia/workflow_preferences.json` through `JsonStateStore`. Reads do not create missing state; writes are atomic and locked. A show response includes the canonical Agent Setup Playbook, a compatibility recipe view, saved overrides, and merged effective preferences. The store rejects unknown playbook IDs, unknown preference keys, type mismatches, invalid times/timezones, unsupported attribution, and credential-like fields or notes. It does not contain fields such as provider-connected, account-connected, or automation-running, and saved preferences never authorize external access.
 
-`attention.items` is the conversation-facing representation of unresolved Review decisions and retryable or advisory issues. `choices[]` is reserved for stable executable decisions and contains a structured Review action descriptor; `recommended_next_actions[]` is explicitly non-executable guidance. A supported linked domain-change decision can advertise the two-stage `review_decide` then `review_execute` flow. Processing retry and source verification are advisory until a backend executor exists. The agent asks the student in its own conversation and then uses the existing Review/Action/Verification workflow. Academia does not store the conversation.
+`attention.items` is the conversation-facing representation of unresolved Review decisions and retryable or advisory issues. `choices[]` is reserved for stable executable decisions and contains a structured Review action descriptor; `recommended_next_actions[]` is explicitly non-executable guidance. A supported linked domain-change decision can advertise the two-stage `review_decide` then `review_execute` flow. Processing retry and source verification are advisory until a backend executor exists. The agent asks the student in its own conversation and then uses the existing Review/Action/Verification workflow. The core does not store external agent conversations; dashboard Study chat has a separate client-side history store in browser IndexedDB.
 
 `agent changes` reads append-only Activity oldest-first after an Activity ID or ISO timestamp cursor and returns a new cursor. Reusing the returned cursor is idempotent. Activity remains a record of changes the core actually performed, not reads or chat messages.
 
@@ -80,17 +81,17 @@ Structural settings use `academia_os.settings.update_config()`, which returns a 
 
 ## Reliability
 
-`academia_os.processing.ProcessingStore` persists each source signature and lifecycle status. Detection creates `PENDING` work; processing obtains a lease; verification must succeed before acknowledgement. Failures retain a reason and can be retried. The runtime inbox gate only detects/reports; it never acknowledges.
+`academia_os.processing.ProcessingStore` persists each source signature and lifecycle status. Supported manual imports launch a detached local worker that obtains a lease, extracts text, writes a rebuildable `.academia/extracted_sources.json` cache, verifies the source signature, and acknowledges the record. Failures retain a reason and can be retried. `academia process forget` removes only a failed record whose source is missing from a direct semester or course inbox, and records the cleanup in Activity. On macOS, scanned PDFs and common image files use local Apple Vision OCR through Swift, with page/text bounds and an explicit OCR verification warning. Other platforms without a configured local OCR provider report `unsupported_without_ocr`. The runtime inbox gate only detects/reports; it never acknowledges. Extraction preserves the source and does not interpret document instructions or update academic facts.
 
 ## Acquisition
 
-Core acquisition normalizes manual files, watched-folder candidates, and browser metadata. Browser implementations are adapters. Current supported browser behavior is limited to optional visible Chromium handoff; Firefox, Safari, and a companion extension remain planned. Browser access defaults off and should not read credentials or browser secrets.
+Core acquisition normalizes manual files, watched-folder candidates, and browser metadata. Manual imports of PDF, DOCX, PPTX, plain text, Markdown, and common images start local extraction automatically; PPTX extraction reads visible slide text but does not OCR embedded images or include speaker notes. macOS uses Apple Vision for scanned PDFs and images. Browser implementations are adapters. Current supported browser behavior is limited to optional visible Chromium handoff; Firefox, Safari, and a companion extension remain planned. Browser access defaults off and should not read credentials or browser secrets.
 
 ## Agent, browser, and automation ownership
 
-The core does not contain a model or require an AI agent. It owns the local workspace, structured state, provenance, processing lifecycle, Review Queue, activity, and safety policy. External agents use the neutral CLI/API and own their own model, credentials, operating-system permissions, browser session, and schedule.
+The shared core does not require a model. It owns the local workspace, structured state, provenance, processing lifecycle, Review Queue, Activity, and safety policy. Dashboard Study chat currently invokes the installed Codex CLI with selected context; its provider menu shows Claude as unavailable because Anthropic restricts subscription OAuth to Claude Code and other native Anthropic applications. Claude Code remains available as a separate external agent through the documented Academia interface. Provider setup, app-level ChatGPT sign-in, MCP-client management, and per-tool grants are not yet implemented. External agents continue to use the same CLI/API/MCP and retain their own provider/tool configuration.
 
-The browser flag is a defense-in-depth core guard: an adapter must still be explicitly allowed by the local policy before requesting read-only browser access. It does not launch a browser, log into a school account, or grant an agent credentials. The core has no independent recurring daemon; automation is adapter/scheduler-owned and any resulting changes still pass through core action and approval rules.
+The browser flag is a defense-in-depth core guard: the current optional Chromium capability is a visible read-only handoff. It does not log into a school account or grant a host credentials. Any future in-app connector must be explicitly enabled and scoped, and it must not access credential/session data. The core has no independent recurring daemon; external automation remains separately configured and any resulting changes still pass through core action and approval rules.
 
 ## Agent Setup Playbook ownership
 
@@ -105,3 +106,7 @@ The Settings dashboard renders each playbook as an expandable guide plus a reusa
 ## Optional Hermes boundary
 
 Core code may run with no Hermes executable or home directory. `adapters/hermes/` translates neutral job descriptions only when configured. The old generated cron script remains a compatibility path for v1 Hermes-enabled profiles; it is not part of the core installation contract.
+
+## Shared study domain
+
+`academia_os/study/` implements a provider-independent study domain and course source retrieval. `study/cli.py` exposes the contract to external agents and the existing browser/Tauri bridge; `frontend/src/StudyView.tsx` is another client. `study/providers.py` optionally requests schema-constrained generation from the installed ChatGPT-authenticated Codex CLI or a loopback local model. Claude Code external agents may submit their own generated payload through `study create`; Academia does not route Claude subscription OAuth. Study sets, citation excerpts/fingerprints, sessions, responses, spaced-review state, annotations, preferences and exam scope are durable student-owned course records in `06_KNOWLEDGE/STUDY/study.json`, not rebuildable `.academia` caches. Activity remains shared. `agent context` includes bounded answer-free study summaries; `study context` retrieves selected source bodies explicitly. See [study.md](study.md).

@@ -136,3 +136,58 @@ def test_text_pdf_preserves_page_references(tmp_path: Path) -> None:
     assert document.segments[0].page == 1
     assert document.segments[0].source_location == "page 1"
     assert "POL 3124" in document.segments[0].text
+
+
+def test_docx_assessments_use_term_year_and_preserve_split_runs(tmp_path: Path) -> None:
+    from zipfile import ZipFile
+    path = tmp_path / "syllabus.docx"
+    with ZipFile(path, "w") as archive:
+        archive.writestr("word/document.xml", """<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+        <w:p><w:r><w:t>LSR 1100-A00</w:t></w:r></w:p>
+        <w:p><w:r><w:t>Session: Fall 20</w:t></w:r><w:r><w:t>26</w:t></w:r></w:p>
+        <w:p><w:r><w:t>October 15 LECTURE 6: The Concept of Play</w:t></w:r></w:p>
+        <w:p><w:r><w:t>QUIZ 1 AT 9:00PM (ON ALL READINGS OF OCTOBER 15 ONLY)</w:t></w:r></w:p>
+        <w:tbl><w:tr><w:tc><w:p><w:r><w:t>QUIZ 1 (OCTOBER 15)</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>10%</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+        <w:p><w:r><w:t>FINAL EXAM (DATE TO BE DETERMINED) 30%</w:t></w:r></w:p>
+        </w:body></w:document>""")
+    result = extract_syllabus(path, course_id="LSR 1100-A00")
+    assert result.identity_status == "matched"
+    assignments = [c for c in result.candidates if c.entity_type == "assignment"]
+    deadlines = [c for c in result.candidates if c.entity_type == "deadline"]
+    assert len(assignments) == 2
+    assert len(deadlines) == 1
+    assert deadlines[0].entity["date"] == "2026-10-15"
+    assert deadlines[0].entity["time"] == "21:00"
+    assert assignments[0].entity["weight"] == "10%"
+    assert assignments[1].entity["deadline"] is None
+    assert deadlines[0].confidence == "likely"
+    assert deadlines[0].evidence.source_location.startswith("line ")
+
+
+def test_pdf_assessment_lines_merge_table_and_prose_without_page_sized_tasks() -> None:
+    from academia_os.extraction.models import SourceDocument, SourceSegment
+    from academia_os.extraction.syllabus import _formatted_assessments
+    document = SourceDocument("syllabus.pdf", "application/pdf", (
+        SourceSegment("POL2108A\nFall Term 2026", page=1),
+        SourceSegment("First Essay (mandatory) 25% October 8\nSecond Essay (mandatory) 25% November 12\nFinal Exam (mandatory) 30% TBA", page=3),
+        SourceSegment("Essay One (due October 8th at 2:30 p.m.) should be 4-6 pages. Essay Two (due November 12 at 2:30 p.m.) should be 6-8 pages.\nLate essays will be penalized 5 percent per day.", page=4),
+    ), "pypdf-text", "hash")
+    candidates, warnings = _formatted_assessments(document, "POL2108A", False)
+    deadlines = {c.entity["title"]: c for c in candidates if c.entity_type == "deadline"}
+    assert len([c for c in candidates if c.entity_type == "assignment"]) == 3
+    assert deadlines["First Essay"].entity["date"] == "2026-10-08"
+    assert deadlines["First Essay"].entity["time"] == "14:30"
+    assert deadlines["First Essay"].evidence.source_location == "page 4"
+    assert deadlines["Second Essay"].entity["date"] == "2026-11-12"
+    assert not warnings
+
+
+def test_formatted_syllabus_without_term_year_does_not_invent_dates() -> None:
+    from academia_os.extraction.models import SourceDocument, SourceSegment
+    from academia_os.extraction.syllabus import _formatted_assessments
+    document = SourceDocument("syllabus.pdf", "application/pdf", (SourceSegment("First Essay 25% October 8", page=1),), "pypdf-text", "hash")
+    candidates, warnings = _formatted_assessments(document, "POL2108A", True)
+    assert len(candidates) == 1
+    assert candidates[0].entity["deadline"] is None
+    assert candidates[0].confidence == "unverified"
+    assert warnings

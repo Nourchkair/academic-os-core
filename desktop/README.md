@@ -17,7 +17,7 @@ npm run dev
 
 The browser preview intentionally shows a connection state if the local Tauri/CLI bridge is absent. It does not fabricate course data. The packaged shell calls the installed `academia` executable through a narrow allow-listed command bridge.
 
-Native packaging is currently a development foundation. `frontend/src-tauri/tauri.conf.json` has `bundle.active: false`; signing, notarization, Python/CLI sidecar packaging, and release installers remain future work.
+The macOS distribution path uses a Tauri bundle with the local CLI as an architecture-matched sidecar, a DMG, and signed in-app updates. Beta builds use a dedicated Academia self-signed code-signing identity plus a separate Tauri updater key; they are not Apple Developer ID signed or notarized, so first launch can require a Gatekeeper approval. See [the desktop release and MCP guide](../docs/desktop-release-and-mcp.md). The release workflow builds Apple Silicon and Intel draft releases. Windows and Linux packaging are not configured yet.
 
 ## Legacy compatibility app
 
