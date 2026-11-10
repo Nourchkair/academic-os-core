@@ -161,6 +161,9 @@ function App() {
   const refresh = async (allowDuringMigration = false) => {
     if (migrationBusy && !allowDuringMigration) return
     const sequence = ++refreshSequence.current
+    let backgroundLoadStarted = false
+    loadingBackgroundData.current = true
+    setSemesterLoading(false)
     try {
       setError(null)
       const next = await api.status()
@@ -199,7 +202,7 @@ function App() {
       // Keep first paint independent of the slower Library and intake scans.
       // Run these CLI calls one at a time because the packaged one-file CLI has
       // a costly cold start and multiple simultaneous launches can stall app startup.
-      loadingBackgroundData.current = true
+      backgroundLoadStarted = true
       void (async () => {
         try {
           try {
@@ -232,25 +235,36 @@ function App() {
       if (reason instanceof BridgeUnavailableError) setError(reason.message)
       else await beginOnboarding()
     } finally {
-      if (sequence === refreshSequence.current) setBooting(false)
+      if (sequence === refreshSequence.current) {
+        setBooting(false)
+        if (!backgroundLoadStarted) loadingBackgroundData.current = false
+      }
     }
   }
 
   const changeSemester = async (semester: string) => {
+    const sequence = ++refreshSequence.current
+    loadingBackgroundData.current = true
     try {
       setSemesterLoading(true)
       setError(null)
       const courseData = await api.courses(semester)
+      if (sequence !== refreshSequence.current) return
       const taskData = await api.tasks(semester)
+      if (sequence !== refreshSequence.current) return
       const libraryData = await api.library({ semester })
+      if (sequence !== refreshSequence.current) return
       setSelectedSemester(semester)
       setCourses(courseData)
       setTasks(taskData)
       setLibraryItems(libraryData)
     } catch (reason) {
-      setError(`The ${semester} workspace could not be loaded: ${String(reason)}`)
+      if (sequence === refreshSequence.current) setError(`The ${semester} workspace could not be loaded: ${String(reason)}`)
     } finally {
-      setSemesterLoading(false)
+      if (sequence === refreshSequence.current) {
+        setSemesterLoading(false)
+        loadingBackgroundData.current = false
+      }
     }
   }
 
