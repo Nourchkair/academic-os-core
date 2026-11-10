@@ -125,6 +125,7 @@ export const api = {
   chat: <T>(payload: Record<string, unknown>) => isTauriEnvironment() ? invoke<string>('academia_chat', { payload }).then((raw) => JSON.parse(raw) as T) : browserChat(payload) as Promise<T>,
   chatProviders: <T>() => isTauriEnvironment() ? command<T>('study', ['providers']) : fetch('/api/v1/chat/providers').then(readJsonResponse<T>),
   status: () => command<StatusPayload>('status'),
+  startupStatus: () => command<StatusPayload>('status', ['--fast']),
   courses: (semester?: string) => command<Course[]>('courses', semester ? ['--semester', semester] : []),
   tasks: (semester?: string) => command<Task[]>('tasks', semester ? ['--semester', semester] : []),
   agentCourseContext: (courseId: string, semester: string) => command<{ current_state?: { open_tasks?: Task[] } }>('agent', ['context', '--scope', 'course', '--course', courseId, '--semester', semester, '--detail', 'deep']),

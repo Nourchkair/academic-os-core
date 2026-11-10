@@ -26,6 +26,17 @@ type ActionMode = 'import' | 'migration'
 
 type TooltipSide = 'top' | 'right' | 'bottom' | 'left'
 type TooltipState = { text: string; side: TooltipSide; left: number; top: number; arrow: number; ready: boolean }
+const STARTUP_CACHE_KEY = 'academia.desktop.startup-cache.v1'
+
+function readStartupCache(): StatusPayload | null {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(STARTUP_CACHE_KEY) || 'null') as StatusPayload | null
+    if (!value || value.workspace?.workspace_exists !== true || !value.workspace.academic_root || !value.workspace.semester) return null
+    return value
+  } catch {
+    return null
+  }
+}
 
 function AppTooltipLayer() {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
@@ -131,29 +142,29 @@ function AppTooltipLayer() {
 }
 
 function App() {
+  const [cachedStartup] = useState(readStartupCache)
   const [view, setView] = useState<View>('home')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('academia.sidebar.collapsed') === 'true')
-  const [status, setStatus] = useState<StatusPayload | null>(null)
-  const [courses, setCourses] = useState<Course[]>([])
-  const [tasks, setTasks] = useState<Task[]>([])
+  const [status, setStatus] = useState<StatusPayload | null>(cachedStartup)
+  const [courses, setCourses] = useState<Course[]>(cachedStartup?.workspace.courses || [])
+  const [tasks, setTasks] = useState<Task[]>(cachedStartup?.workspace.tasks || [])
   const [activity, setActivity] = useState<ActivityEvent[]>([])
   const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([])
   const [inbox, setInbox] = useState<ProcessingRecord[]>([])
-  const [selectedSemester, setSelectedSemester] = useState('')
+  const [selectedSemester, setSelectedSemester] = useState(cachedStartup?.workspace.semester || '')
   const [studyResumeRequest, setStudyResumeRequest] = useState<StudyResumeRequest | null>(null)
   const [studyChatRequest, setStudyChatRequest] = useState<StudyChatRequest | null>(null)
   const [semesterLoading, setSemesterLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [onboarding, setOnboarding] = useState(false)
   const [setupCandidates, setSetupCandidates] = useState<import('./types').WorkspaceCandidate[]>([])
-  const [booting, setBooting] = useState(true)
+  const [booting, setBooting] = useState(!cachedStartup)
   const [migrationBusy, setMigrationBusy] = useState(false)
   const [actionMode, setActionMode] = useState<ActionMode | null>(null)
   const [actionCourseId, setActionCourseId] = useState<string | undefined>()
   const [courseOpenRequest, setCourseOpenRequest] = useState<{ id: string; courseId: string } | null>(null)
   const chatNavRef = useRef<HTMLDetailsElement>(null)
   const refreshSequence = useRef(0)
-  const validatedWorkspaceRoot = useRef<string | null>(null)
   const loadingBackgroundData = useRef(false)
   const chatMenuItems: { view: View; label: string; icon: string }[] = [
     { view: 'home', label: 'Home', icon: '⌂' },
@@ -173,7 +184,7 @@ function App() {
     }
   }
 
-  const refresh = async (allowDuringMigration = false) => {
+  const refresh = async (allowDuringMigration = false, fastFirstPaint = false) => {
     if (migrationBusy && !allowDuringMigration) return
     const sequence = ++refreshSequence.current
     let backgroundLoadStarted = false
@@ -181,25 +192,38 @@ function App() {
     setSemesterLoading(false)
     try {
       setError(null)
-      const next = await api.status()
+      let next: StatusPayload
+      if (fastFirstPaint && !isTauriEnvironment()) {
+        try { next = await api.startupStatus() } catch { next = await api.status() }
+      } else {
+        next = fastFirstPaint ? await api.startupStatus() : await api.status()
+      }
       if (!next.workspace.workspace_exists) {
         if (allowDuringMigration) throw new Error('The workspace disappeared while refreshing.')
         await beginOnboarding()
         return
       }
-      if (validatedWorkspaceRoot.current !== next.workspace.academic_root) {
+      // Current desktop builds include the two cheap workspace recognition
+      // markers in `status`. Older browser dashboards may not, so retain the
+      // full inspection fallback only for those clients.
+      if (next.workspace.workspace_recognized === false) {
+        if (allowDuringMigration) throw new Error('The workspace was not recognized while refreshing.')
+        await beginOnboarding()
+        return
+      }
+      if (next.workspace.workspace_recognized === undefined) {
         const inspected = await api.workspaceInspect(next.workspace.academic_root)
         if (!inspected.recognized) {
           if (allowDuringMigration) throw new Error('The workspace was not recognized while refreshing.')
           await beginOnboarding()
           return
         }
-        validatedWorkspaceRoot.current = next.workspace.academic_root
       }
       if (sequence !== refreshSequence.current) return
       const available = new Set([next.workspace.semester, ...next.workspace.available_semesters])
       const targetSemester = selectedSemester && available.has(selectedSemester) ? selectedSemester : next.workspace.semester
       setStatus(next)
+      try { window.localStorage.setItem(STARTUP_CACHE_KEY, JSON.stringify(next)) } catch { /* Storage is only a startup optimization. */ }
       setSelectedSemester(targetSemester)
       if (targetSemester === next.workspace.semester) {
         setCourses(next.workspace.courses)
@@ -220,6 +244,18 @@ function App() {
       backgroundLoadStarted = true
       void (async () => {
         try {
+          if (fastFirstPaint) {
+            const fresh = await api.status()
+            if (sequence !== refreshSequence.current) return
+            if (fresh.workspace.workspace_exists && fresh.workspace.workspace_recognized !== false) {
+              setStatus(fresh)
+              try { window.localStorage.setItem(STARTUP_CACHE_KEY, JSON.stringify(fresh)) } catch { /* Storage is only a startup optimization. */ }
+              if (targetSemester === fresh.workspace.semester) {
+                setCourses(fresh.workspace.courses)
+                setTasks(fresh.workspace.tasks)
+              }
+            }
+          }
           try {
             const activityData = await api.activity()
             if (sequence !== refreshSequence.current) return
@@ -284,7 +320,7 @@ function App() {
   }
 
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
-  useEffect(() => { void refresh() }, [])
+  useEffect(() => { void refresh(false, true) }, [])
 
   useEffect(() => {
     let mounted = true
