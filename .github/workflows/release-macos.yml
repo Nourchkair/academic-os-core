@@ -83,7 +83,9 @@ jobs:
           # Keep the release unpublished until the signed bundled CLI has
           # started successfully on both macOS architectures.
           releaseDraft: true
-          args: --bundles dmg
+          # Build the DMG installer and Tauri's signed .app updater archive.
+          args: --bundles dmg,app
+          assetNamePattern: '[name]_[arch]_[platform].[ext]'
       - name: Verify the signed bundled CLI reads a workspace
         shell: bash
         run: |
@@ -121,6 +123,26 @@ jobs:
     needs: package
     runs-on: ubuntu-latest
     steps:
+      - name: Verify both signed updater targets are available
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          manifest_dir="$RUNNER_TEMP/academia-updater-manifest"
+          mkdir -p "$manifest_dir"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \\
+            --pattern latest.json --dir "$manifest_dir"
+          manifest="$manifest_dir/latest.json"
+          expected_version="${RELEASE_TAG#v}"
+          jq -e --arg version "$expected_version" '
+            .version == $version and
+            .platforms["darwin-aarch64"].url != null and
+            .platforms["darwin-aarch64"].signature != null and
+            .platforms["darwin-x86_64"].url != null and
+            .platforms["darwin-x86_64"].signature != null
+          ' "$manifest" >/dev/null
+
       - name: Publish the draft release after both architectures pass
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
