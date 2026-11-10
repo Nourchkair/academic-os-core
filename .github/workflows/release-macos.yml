@@ -88,12 +88,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app="$(find frontend/src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' -print -quit)"
-          if [ -z "$app" ]; then
-            echo "Tauri did not produce a macOS app bundle" >&2
+          dmg="$(find frontend/src-tauri/target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)"
+          if [ -z "$dmg" ]; then
+            echo "Tauri did not produce a macOS disk image" >&2
             exit 1
           fi
-          "$app/Contents/MacOS/academia" --help
+
+          # Tauri removes its temporary .app bundle after packaging. Mount and
+          # exercise the exact signed app that will be delivered in the DMG.
+          mount_point="$(mktemp -d "${RUNNER_TEMP:-/tmp}/academia-dmg.XXXXXX")"
+          cleanup() {
+            hdiutil detach "$mount_point" -quiet || true
+            rmdir "$mount_point" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mount_point"
+
+          cli="$mount_point/Academia OS.app/Contents/MacOS/academia"
+          if [ ! -x "$cli" ]; then
+            echo "The signed Academia CLI is missing from the packaged DMG" >&2
+            exit 1
+          fi
+          "$cli" --help
       - name: Remove the temporary beta signing keychain
         if: always() && steps.beta-sign.outputs.keychain-path != ''
         env:
