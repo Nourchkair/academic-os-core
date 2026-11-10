@@ -75,19 +75,38 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ steps.beta-sign.outputs.identity }}
-          # The Python sidecar's embedded runtime has its own signature. Keep
-          # PyInstaller's ad-hoc signature so macOS library validation does not
-          # reject Python when the app is signed with our self-signed identity.
-          TAURI_SKIP_SIDECAR_SIGNATURE_CHECK: "true"
         with:
           projectPath: frontend
           tagName: ${{ inputs.release_tag || github.ref_name }}
           releaseName: Academia OS ${{ inputs.release_tag || github.ref_name }}
           releaseBody: Academia OS beta DMGs and signed in-app update artifacts. The app is not notarized; first launch may require a Gatekeeper approval.
-          releaseDraft: false
+          # Keep the release unpublished until the signed bundled CLI has
+          # started successfully on both macOS architectures.
+          releaseDraft: true
           args: --bundles dmg
+      - name: Verify the signed bundled CLI starts
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$(find frontend/src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' -print -quit)"
+          if [ -z "$app" ]; then
+            echo "Tauri did not produce a macOS app bundle" >&2
+            exit 1
+          fi
+          "$app/Contents/MacOS/academia" --help
       - name: Remove the temporary beta signing keychain
         if: always() && steps.beta-sign.outputs.keychain-path != ''
         env:
           KEYCHAIN_PATH: ${{ steps.beta-sign.outputs.keychain-path }}
         run: security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
+
+  publish:
+    name: Publish verified macOS release
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the draft release after both architectures pass
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
