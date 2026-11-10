@@ -75,6 +75,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ steps.beta-sign.outputs.identity }}
+          # The Python sidecar's embedded runtime has its own signature. Keep
+          # PyInstaller's ad-hoc signature so macOS library validation does not
+          # reject Python when the app is signed with our self-signed identity.
+          TAURI_SKIP_SIDECAR_SIGNATURE_CHECK: "true"
         with:
           projectPath: frontend
           tagName: ${{ inputs.release_tag || github.ref_name }}

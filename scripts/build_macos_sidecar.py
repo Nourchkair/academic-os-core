@@ -71,6 +71,14 @@ def main() -> int:
         shutil.copy2(produced, destination)
         destination.chmod(destination.stat().st_mode | 0o111)
 
+        # Fail the bundle build immediately if the frozen Python runtime cannot
+        # start on this macOS runner. This catches signing/library-validation
+        # problems before a DMG is published.
+        smoke = subprocess.run([str(destination), "--help"], capture_output=True, text=True, check=False)
+        if smoke.returncode:
+            detail = smoke.stderr.strip() or smoke.stdout.strip() or f"exit code {smoke.returncode}"
+            parser.error(f"Academia sidecar failed its startup check: {detail}")
+
     print(f"Built {destination}")
     return 0
 

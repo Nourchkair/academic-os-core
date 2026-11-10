@@ -151,7 +151,7 @@ function App() {
       setOnboarding(true)
       setError(null)
     } catch (reason) {
-      setError(reason instanceof BridgeUnavailableError ? reason.message : 'Open the Academia OS desktop app to begin setup.')
+      setError(reason instanceof BridgeUnavailableError ? reason.message : `Academia could not start its local service: ${reason instanceof Error ? reason.message : String(reason)}`)
     }
   }
 
@@ -320,9 +320,10 @@ function App() {
 }
 
 function ConnectionNotice({ message, onRetry }: { message: string; onRetry: () => void }) {
-  const technical = message.includes('desktop bridge') || message.includes('invoke') || message.includes('local dashboard') || message.includes('academia dashboard')
+  const sidecarFailure = message.startsWith('Academia could not start its local service:')
+  const technical = sidecarFailure || message.includes('desktop bridge') || message.includes('invoke') || message.includes('local dashboard') || message.includes('academia dashboard')
   const localDashboard = !isTauriEnvironment() && technical
-  return <section className="connection-screen"><div className="connection-art">⌘</div><p className="eyebrow">Get started</p><h2>Connect your local workspace</h2><p>{localDashboard ? <>Start <code>academia</code> in a terminal, then retry. Your academic files stay on this computer and the browser connects only to that local dashboard.</> : technical ? 'Open the Academia OS desktop app to load your courses, tasks, academic library, and activity.' : message}</p><button className="primary-button" onClick={onRetry}>Retry connection</button>{technical ? <details className="connection-help"><summary>Advanced connection details</summary><code>{localDashboard ? 'academia' : 'academia status --json'}</code><span>{localDashboard ? 'The browser dashboard is local-only. No academic files are sent to an external service.' : 'The packaged desktop app connects to the local Academia OS interface.'}</span></details> : null}</section>
+  return <section className="connection-screen"><div className="connection-art">⌘</div><p className="eyebrow">Get started</p><h2>Connect your local workspace</h2><p>{localDashboard ? <>Start <code>academia</code> in a terminal, then retry. Your academic files stay on this computer and the browser connects only to that local dashboard.</> : sidecarFailure ? 'The app could not start its bundled local service. Open the startup details below, then retry.' : technical ? 'Open the Academia OS desktop app to load your courses, tasks, academic library, and activity.' : message}</p><button className="primary-button" onClick={onRetry}>Retry connection</button>{technical ? <details className="connection-help"><summary>Advanced connection details</summary><code>{localDashboard ? 'academia' : sidecarFailure ? 'Academia OS bundled CLI startup' : 'academia status --json'}</code><span>{sidecarFailure ? message : localDashboard ? 'The browser dashboard is local-only. No academic files are sent to an external service.' : 'The packaged desktop app connects to the local Academia OS interface.'}</span></details> : null}</section>
 }
 
 function localDate(timezone: string) {
