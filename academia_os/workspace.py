@@ -185,10 +185,20 @@ def load_startup_snapshot(config: dict[str, Any]) -> dict[str, Any]:
     if index.is_file():
         try:
             cached = json.loads(index.read_text(encoding="utf-8"))
+            current_course_ids = {
+                str(record["id"])
+                for record in course_records(root / semester)
+            }
+            cached_course_ids = {
+                str(course.get("id"))
+                for course in cached.get("courses", [])
+                if isinstance(course, dict) and course.get("id")
+            } if isinstance(cached, dict) else set()
             if (
                 isinstance(cached, dict)
                 and cached.get("academic_root") == str(root)
                 and cached.get("semester") == semester
+                and cached_course_ids == current_course_ids
             ):
                 cached["workspace_exists"] = root.is_dir()
                 cached["workspace_recognized"] = (root / "ACADEMIC_OS_RULES.md").is_file() and (root / "COURSE_TEMPLATE").is_dir()
