@@ -131,7 +131,7 @@ jobs:
           set -euo pipefail
           manifest_dir="$RUNNER_TEMP/academia-updater-manifest"
           mkdir -p "$manifest_dir"
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \\
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
             --pattern latest.json --dir "$manifest_dir"
           manifest="$manifest_dir/latest.json"
           expected_version="${RELEASE_TAG#v}"
