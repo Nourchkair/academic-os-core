@@ -137,6 +137,9 @@ function App() {
   const [actionCourseId, setActionCourseId] = useState<string | undefined>()
   const [courseOpenRequest, setCourseOpenRequest] = useState<{ id: string; courseId: string } | null>(null)
   const chatNavRef = useRef<HTMLDetailsElement>(null)
+  const refreshSequence = useRef(0)
+  const validatedWorkspaceRoot = useRef<string | null>(null)
+  const loadingBackgroundData = useRef(false)
   const chatMenuItems: { view: View; label: string; icon: string }[] = [
     { view: 'home', label: 'Home', icon: '⌂' },
     { view: 'courses', label: 'Courses', icon: '◫' },
@@ -157,6 +160,7 @@ function App() {
 
   const refresh = async (allowDuringMigration = false) => {
     if (migrationBusy && !allowDuringMigration) return
+    const sequence = ++refreshSequence.current
     try {
       setError(null)
       const next = await api.status()
@@ -165,35 +169,70 @@ function App() {
         await beginOnboarding()
         return
       }
-      const inspected = await api.workspaceInspect(next.workspace.academic_root)
-      if (!inspected.recognized) {
-        if (allowDuringMigration) throw new Error('The workspace was not recognized while refreshing.')
-        await beginOnboarding()
-        return
+      if (validatedWorkspaceRoot.current !== next.workspace.academic_root) {
+        const inspected = await api.workspaceInspect(next.workspace.academic_root)
+        if (!inspected.recognized) {
+          if (allowDuringMigration) throw new Error('The workspace was not recognized while refreshing.')
+          await beginOnboarding()
+          return
+        }
+        validatedWorkspaceRoot.current = next.workspace.academic_root
       }
+      if (sequence !== refreshSequence.current) return
       const available = new Set([next.workspace.semester, ...next.workspace.available_semesters])
       const targetSemester = selectedSemester && available.has(selectedSemester) ? selectedSemester : next.workspace.semester
-      const [courseData, taskData, activityData, libraryData, inboxData] = await Promise.all([
-        api.courses(targetSemester),
-        api.tasks(targetSemester),
-        api.activity(),
-        api.library({ semester: targetSemester }),
-        api.inbox(),
-      ])
       setStatus(next)
       setSelectedSemester(targetSemester)
-      setCourses(courseData)
-      setTasks(taskData)
-      setActivity(activityData)
-      setLibraryItems(libraryData)
-      setInbox(inboxData)
+      if (targetSemester === next.workspace.semester) {
+        setCourses(next.workspace.courses)
+        setTasks(next.workspace.tasks)
+      } else {
+        const courseData = await api.courses(targetSemester)
+        const taskData = await api.tasks(targetSemester)
+        if (sequence !== refreshSequence.current) return
+        setCourses(courseData)
+        setTasks(taskData)
+      }
       setOnboarding(false)
+      setBooting(false)
+
+      // Keep first paint independent of the slower Library and intake scans.
+      // Run these CLI calls one at a time because the packaged one-file CLI has
+      // a costly cold start and multiple simultaneous launches can stall app startup.
+      loadingBackgroundData.current = true
+      void (async () => {
+        try {
+          try {
+            const activityData = await api.activity()
+            if (sequence !== refreshSequence.current) return
+            setActivity(activityData)
+          } catch (reason) {
+            if (sequence === refreshSequence.current) setError(`Recent activity could not be loaded: ${String(reason)}`)
+          }
+          try {
+            const libraryData = await api.library({ semester: targetSemester })
+            if (sequence !== refreshSequence.current) return
+            setLibraryItems(libraryData)
+          } catch (reason) {
+            if (sequence === refreshSequence.current) setError(`Course materials could not be loaded: ${String(reason)}`)
+          }
+          try {
+            const inboxData = await api.inbox()
+            if (sequence === refreshSequence.current) setInbox(inboxData)
+          } catch (reason) {
+            if (sequence === refreshSequence.current) setError(`Intake status could not be loaded: ${String(reason)}`)
+          }
+        } finally {
+          if (sequence === refreshSequence.current) loadingBackgroundData.current = false
+        }
+      })()
     } catch (reason) {
+      if (sequence !== refreshSequence.current) return
       if (allowDuringMigration) throw reason
       if (reason instanceof BridgeUnavailableError) setError(reason.message)
       else await beginOnboarding()
     } finally {
-      setBooting(false)
+      if (sequence === refreshSequence.current) setBooting(false)
     }
   }
 
@@ -201,7 +240,9 @@ function App() {
     try {
       setSemesterLoading(true)
       setError(null)
-      const [courseData, taskData, libraryData] = await Promise.all([api.courses(semester), api.tasks(semester), api.library({ semester })])
+      const courseData = await api.courses(semester)
+      const taskData = await api.tasks(semester)
+      const libraryData = await api.library({ semester })
       setSelectedSemester(semester)
       setCourses(courseData)
       setTasks(taskData)
@@ -219,13 +260,12 @@ function App() {
   useEffect(() => {
     let mounted = true
     const updateProcessing = () => {
-      if (document.visibilityState !== 'visible') return
+      if (!status || loadingBackgroundData.current || document.visibilityState !== 'visible') return
       void api.processingStatus().then((records) => {
         if (mounted) setInbox(records)
       }).catch(() => {})
     }
-    updateProcessing()
-    const timer = window.setInterval(updateProcessing, 10_000)
+    const timer = window.setInterval(updateProcessing, 30_000)
     window.addEventListener('focus', updateProcessing)
     document.addEventListener('visibilitychange', updateProcessing)
     return () => {
@@ -234,7 +274,7 @@ function App() {
       window.removeEventListener('focus', updateProcessing)
       document.removeEventListener('visibilitychange', updateProcessing)
     }
-  }, [])
+  }, [status])
 
   useEffect(() => {
     const closeChatNavigation = (event: PointerEvent) => {

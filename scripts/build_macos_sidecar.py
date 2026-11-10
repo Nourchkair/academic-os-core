@@ -7,6 +7,7 @@ import argparse
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -71,13 +72,19 @@ def main() -> int:
         shutil.copy2(produced, destination)
         destination.chmod(destination.stat().st_mode | 0o111)
 
-        # Fail the bundle build immediately if the frozen Python runtime cannot
-        # start on this macOS runner. This catches signing/library-validation
-        # problems before a DMG is published.
-        smoke = subprocess.run([str(destination), "--help"], capture_output=True, text=True, check=False)
+        # Exercise an actual local-workspace command before packaging. The
+        # helper uses a disposable workspace and profile, never the user's data.
+        smoke = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "smoke_macos_sidecar.py"), str(destination)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
         if smoke.returncode:
             detail = smoke.stderr.strip() or smoke.stdout.strip() or f"exit code {smoke.returncode}"
-            parser.error(f"Academia sidecar failed its startup check: {detail}")
+            parser.error(f"Academia sidecar failed its workspace status check: {detail}")
+        print(smoke.stdout.strip())
 
     print(f"Built {destination}")
     return 0

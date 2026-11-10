@@ -84,7 +84,7 @@ jobs:
           # started successfully on both macOS architectures.
           releaseDraft: true
           args: --bundles dmg
-      - name: Verify the signed bundled CLI starts
+      - name: Verify the signed bundled CLI reads a workspace
         shell: bash
         run: |
           set -euo pipefail
@@ -109,7 +109,7 @@ jobs:
             echo "The signed Academia CLI is missing from the packaged DMG" >&2
             exit 1
           fi
-          "$cli" --help
+          python scripts/smoke_macos_sidecar.py "$cli"
       - name: Remove the temporary beta signing keychain
         if: always() && steps.beta-sign.outputs.keychain-path != ''
         env:
