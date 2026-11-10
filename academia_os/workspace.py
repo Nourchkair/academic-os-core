@@ -19,11 +19,15 @@ def state_root(config: dict[str, Any]) -> Path:
     return root
 
 
-def _course_summary(path: Path, *, material_count: int = 0) -> dict[str, Any]:
+def _course_summary(path: Path, *, material_count: int = 0, count_inbox_files: bool = True) -> dict[str, Any]:
     name = path.name
     code = name.split(" - ", 1)[0].strip() if " - " in name else name.split()[0]
     inbox = path / "00_INBOX"
-    inbox_count = sum(1 for item in inbox.rglob("*") if item.is_file() and item.name not in {".gitkeep", ".DS_Store"}) if inbox.is_dir() else 0
+    inbox_count = (
+        sum(1 for item in inbox.rglob("*") if item.is_file() and item.name not in {".gitkeep", ".DS_Store"})
+        if count_inbox_files and inbox.is_dir()
+        else 0
+    )
     status_file = path / "01_COURSE" / "Course_Status.md"
     return {
         "id": name,
@@ -90,7 +94,14 @@ def _domain_tasks(root: Path, course_ids: set[str]) -> list[dict[str, Any]]:
     return sorted(tasks, key=lambda task: (task["completed"], task.get("due_date") or "9999", task.get("due_time") or "", task["title"]))
 
 
-def build_workspace_snapshot(config: dict[str, Any], *, persist: bool = True, semester_override: str | None = None) -> dict[str, Any]:
+def build_workspace_snapshot(
+    config: dict[str, Any],
+    *,
+    persist: bool = True,
+    semester_override: str | None = None,
+    include_material: bool = True,
+    count_inbox_files: bool = True,
+) -> dict[str, Any]:
     normalized = validate_config(config)
     root = Path(normalized["academic"]["root_directory"]).expanduser().resolve()
     semester = semester_override or normalized["academic"]["semester"]
@@ -104,7 +115,7 @@ def build_workspace_snapshot(config: dict[str, Any], *, persist: bool = True, se
     ) if root.is_dir() else []
     courses = []
     tasks: list[dict[str, Any]] = []
-    materials = list_material(root, semester)
+    materials = list_material(root, semester) if include_material else []
     material_counts: dict[str, int] = {}
     for item in materials:
         course_id = item.get("course_id")
@@ -113,7 +124,13 @@ def build_workspace_snapshot(config: dict[str, Any], *, persist: bool = True, se
     if semester_root.is_dir():
         for record in course_records(semester_root):
             candidate = Path(str(record["path"]))
-            courses.append(_course_summary(candidate, material_count=material_counts.get(candidate.name, 0)))
+            courses.append(
+                _course_summary(
+                    candidate,
+                    material_count=material_counts.get(candidate.name, 0),
+                    count_inbox_files=count_inbox_files,
+                )
+            )
             tasks.extend(_extract_tasks(candidate / "01_COURSE" / "Course_Status.md", candidate.name))
     tasks.extend(_domain_tasks(root, {course["id"] for course in courses}))
     # The template checklist is onboarding guidance, not academic workload. Actual
@@ -134,6 +151,9 @@ def build_workspace_snapshot(config: dict[str, Any], *, persist: bool = True, se
         "inbox_count": sum(1 for item in materials if item.get("intake_status") == "inbox"),
         "review_count": sum(1 for item in courses if item["review_required"]),
         "workspace_exists": root.is_dir(),
+        # The desktop startup check only needs these two marker checks. Keep this
+        # cheap so it can avoid running the full, recursive workspace inspection.
+        "workspace_recognized": (root / "ACADEMIC_OS_RULES.md").is_file() and (root / "COURSE_TEMPLATE").is_dir(),
     }
     if persist:
         JsonStateStore(root / ".academia" / "index.json").write(snapshot)
@@ -149,3 +169,36 @@ def load_workspace_snapshot(config: dict[str, Any]) -> dict[str, Any]:
         except (OSError, ValueError):
             pass
     return build_workspace_snapshot(config)
+
+
+def load_startup_snapshot(config: dict[str, Any]) -> dict[str, Any]:
+    """Return a cheap cached or lightweight snapshot for the desktop first paint.
+
+    Full Library and inbox scans happen after the app is interactive. The cache is
+    accepted only for the configured root and active semester, and its marker
+    checks are refreshed directly from the filesystem.
+    """
+    normalized = validate_config(config)
+    root = Path(normalized["academic"]["root_directory"]).expanduser().resolve()
+    semester = normalized["academic"]["semester"]
+    index = root / ".academia" / "index.json"
+    if index.is_file():
+        try:
+            cached = json.loads(index.read_text(encoding="utf-8"))
+            if (
+                isinstance(cached, dict)
+                and cached.get("academic_root") == str(root)
+                and cached.get("semester") == semester
+            ):
+                cached["workspace_exists"] = root.is_dir()
+                cached["workspace_recognized"] = (root / "ACADEMIC_OS_RULES.md").is_file() and (root / "COURSE_TEMPLATE").is_dir()
+                return cached
+        except (OSError, ValueError):
+            pass
+
+    return build_workspace_snapshot(
+        normalized,
+        persist=False,
+        include_material=False,
+        count_inbox_files=False,
+    )

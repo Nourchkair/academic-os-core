@@ -26,7 +26,7 @@ from .recommendations import get_playbook, get_recipe, list_playbooks, list_reco
 from .review import ReviewQueue
 from .semester import resolve_current_semester
 from .settings import preview_config, update_config
-from .workspace import build_workspace_snapshot
+from .workspace import build_workspace_snapshot, load_startup_snapshot
 from .workflow import ApprovalWorkflow
 from .workflow_preferences import WorkflowPreferencesStore
 from .web import DEFAULT_HOST, DEFAULT_PORT, serve_dashboard, validate_loopback_host
@@ -102,7 +102,12 @@ def _emit(value: Any, *, as_json: bool, human: Callable[[Any], str] | None = Non
 
 
 def _status(args: argparse.Namespace) -> dict[str, Any]:
-    config, snapshot, profile_path = _context(args)
+    if getattr(args, "fast", False):
+        profile_path = _profile_path(args)
+        config = load_config(profile_path)
+        snapshot = load_startup_snapshot(config)
+    else:
+        config, snapshot, profile_path = _context(args)
     snapshot["tasks"] = _coursework_tasks(snapshot)
     state_root = Path(snapshot["academic_root"]) / ".academia"
     reviews = ReviewQueue(state_root / "review.json").list()
@@ -407,6 +412,8 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("status", "courses", "today", "tasks", "inbox", "activity", "agents", "capabilities"):
         command = sub.add_parser(name)
         command.add_argument("--json", action="store_true")
+        if name == "status":
+            command.add_argument("--fast", action="store_true", help="Use the local workspace index for a quick desktop first paint")
         if name in {"courses", "tasks"}:
             command.add_argument("--semester", help="Read courses from a specific semester folder")
     process = sub.add_parser("process", help="Manage local background text extraction")

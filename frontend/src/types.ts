@@ -80,6 +80,7 @@ export type WorkspaceSnapshot = {
   inbox_count: number
   review_count: number
   workspace_exists: boolean
+  workspace_recognized?: boolean
 }
 
 export type ReviewItem = {
