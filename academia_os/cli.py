@@ -12,7 +12,6 @@ from typing import Any, Callable
 from .acquisition import browser_access_policy, capability_report, configured_watched_folders, import_file, scan_watched_folder, validate_import_destination
 from .assignment_history import add_assignment_history, apply_history_to_tasks, list_assignment_history, update_assignment_history
 from .agent import _sanitize_value, build_agent_attention, build_agent_capabilities, build_agent_changes, build_agent_context
-from .artifacts import create_generated_artifact
 from .actions import ActionStore
 from .activity import ActivityLog
 from .attachment import assess_profile, attach_workspace, backup_profile, inspect_workspace
@@ -474,18 +473,6 @@ def build_parser() -> argparse.ArgumentParser:
     workflow_set.add_argument("--external-setup-notes", default=argparse.SUPPRESS)
     workflow_set.add_argument("--updated-by", default="user", help="Audit attribution: user or agent:<name>")
     workflow_set.add_argument("--json", action="store_true")
-    artifact = sub.add_parser("artifact", help="Create safe AI-generated secondary academic material")
-    artifact_sub = artifact.add_subparsers(dest="artifact_command", required=True)
-    artifact_create = artifact_sub.add_parser("create", help="Create a new Markdown artifact in Academia's generated-material location")
-    artifact_create.add_argument("--course", dest="course_id", required=True)
-    artifact_create.add_argument("--semester", help="Semester containing the course; defaults to the active semester")
-    artifact_create.add_argument("--kind", required=True, help="Artifact kind such as study_guide or reading_summary")
-    artifact_create.add_argument("--title", required=True)
-    artifact_create.add_argument("--content-file", required=True, help="UTF-8 Markdown/text file, or '-' to read stdin")
-    artifact_create.add_argument("--source", action="append", default=[], help="Workspace file reference; may be repeated")
-    artifact_create.add_argument("--domain-ref", action="append", default=[], help="Evidence-backed domain entity id; may be repeated")
-    artifact_create.add_argument("--created-by", help="Optional audit attribution such as codex, hermes, or claude")
-    artifact_create.add_argument("--json", action="store_true")
     semester = sub.add_parser("semester", help="Resolve the current semester using the shared calendar and timezone policy")
     semester.add_argument("--timezone", default="UTC")
     semester.add_argument("--json", action="store_true")
@@ -539,7 +526,9 @@ def build_parser() -> argparse.ArgumentParser:
     history_update.add_argument("--actor", default="user")
     history_update.add_argument("--json", action="store_true")
     library = sub.add_parser("library", help="List visible material in the active semester")
-    library.add_argument("--category", choices=("all", "syllabi", "readings", "notes", "generated", "imports", "other"), default="all")
+    library.add_argument("--category", choices=("all", "syllabi", "readings", "lectures", "assessments", "notes", "other"), default="all")
+    library.add_argument("--location", choices=("all", "inbox", "organized"), default="all")
+    library.add_argument("--processing-status", choices=("all", "not_processed", "in_progress", "processed", "failed", "untracked"), default="all")
     library.add_argument("--course", dest="course_id")
     library.add_argument("--query", default="")
     library.add_argument("--semester", help="Read material from a specific semester folder")
@@ -639,7 +628,7 @@ def main(argv: list[str] | None = None) -> int:
             return serve(profile=args.profile)
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"process", "study", "chat", "courses", "today", "tasks", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "workflow", "artifact", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
+        if args.command in {"process", "study", "chat", "courses", "today", "tasks", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -843,31 +832,6 @@ def dispatch(args: argparse.Namespace) -> int:
     if args.command == "workflow":
         _emit(_workflow_preferences(args), as_json=args.json)
         return 0
-    if args.command == "artifact":
-        if args.artifact_command != "create":
-            raise ValueError(f"unsupported artifact command: {args.artifact_command}")
-        config, snapshot, _ = _context(args)
-        if args.content_file == "-":
-            content = sys.stdin.read()
-        else:
-            content_path = Path(args.content_file).expanduser()
-            if content_path.is_symlink() or not content_path.is_file():
-                raise ValueError("artifact content-file must be a regular local text file or '-'")
-            content = content_path.read_text(encoding="utf-8")
-        workspace_root = Path(snapshot["academic_root"]).expanduser().resolve()
-        value = create_generated_artifact(
-            workspace_root,
-            semester=args.semester or snapshot["semester"],
-            course_id=args.course_id,
-            kind=args.kind,
-            title=args.title,
-            content=content,
-            source_refs=args.source,
-            domain_refs=args.domain_ref,
-            created_by=args.created_by,
-        )
-        _emit(value, as_json=args.json)
-        return 0
     if args.command == "semester":
         _emit({"semester": resolve_current_semester(timezone_name=args.timezone), "timezone": args.timezone}, as_json=args.json)
         return 0
@@ -932,7 +896,7 @@ def dispatch(args: argparse.Namespace) -> int:
     if args.command == "library":
         _, snapshot, _ = _semester_context(args)
         items = list_material(Path(snapshot["academic_root"]), snapshot["semester"])
-        _emit(filter_material(items, category=args.category, course_id=args.course_id, query=args.query), as_json=args.json); return 0
+        _emit(filter_material(items, category=args.category, location=args.location, processing_status=args.processing_status, course_id=args.course_id, query=args.query), as_json=args.json); return 0
     if args.command == "file-preview":
         _, snapshot, _ = _semester_context(args)
         value = preview_file(args.source, workspace_root=Path(snapshot["academic_root"]), semester=snapshot["semester"], include_image_data=args.include_image_data)

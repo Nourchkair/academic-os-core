@@ -83,8 +83,10 @@ jobs:
           # Keep the release unpublished until the signed bundled CLI has
           # started successfully on both macOS architectures.
           releaseDraft: true
-          args: --bundles dmg
-      - name: Verify the signed bundled CLI starts
+          # Include the .app bundle target so Tauri produces the signed updater
+          # archive in addition to the user-facing DMG installer.
+          args: --bundles dmg,app
+      - name: Verify the signed bundled CLI reads a workspace
         shell: bash
         run: |
           set -euo pipefail
@@ -109,7 +111,7 @@ jobs:
             echo "The signed Academia CLI is missing from the packaged DMG" >&2
             exit 1
           fi
-          "$cli" --help
+          python scripts/smoke_macos_sidecar.py "$cli"
       - name: Remove the temporary beta signing keychain
         if: always() && steps.beta-sign.outputs.keychain-path != ''
         env:
@@ -121,6 +123,25 @@ jobs:
     needs: package
     runs-on: ubuntu-latest
     steps:
+      - name: Verify both signed updater targets are available
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          manifest_dir="$RUNNER_TEMP/academia-updater-manifest"
+          mkdir -p "$manifest_dir"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern latest.json --dir "$manifest_dir"
+          manifest="$manifest_dir/latest.json"
+          jq -e '
+            .version != null and
+            .platforms["darwin-aarch64"].url != null and
+            .platforms["darwin-aarch64"].signature != null and
+            .platforms["darwin-x86_64"].url != null and
+            .platforms["darwin-x86_64"].signature != null
+          ' "$manifest" >/dev/null
+
       - name: Publish the draft release after both architectures pass
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -48,7 +48,7 @@ def test_library_lists_current_semester_material_with_transparent_categories(tmp
         ("Required reading.pdf", "readings"),
         ("Course Outline - Updated.docx", "syllabi"),
         ("Week 1 notes.md", "notes"),
-        ("Lecture 2.pptx", "notes"),
+        ("Lecture 2.pptx", "lectures"),
         ("downloaded-material.pdf", "other"),
         ("unknown-material.pdf", "other"),
     }
@@ -56,9 +56,9 @@ def test_library_lists_current_semester_material_with_transparent_categories(tmp
     assert next(item for item in items if item["name"] == "Syllabus Fall 2026.pdf")["intake_status"] == "organized"
     assert next(item for item in items if item["name"] == "Week 1 notes.md")["intake_status"] == "organized"
     assert next(item for item in items if item["name"] == "Required reading.pdf" and item["intake_status"] == "inbox")["category"] == "readings"
-    intake_items = filter_material(items, category="imports")
+    intake_items = filter_material(items, location="inbox")
     assert {item["name"] for item in intake_items} == {"Required reading.pdf", "Chapter 3 Leisure.md", "Course Outline - Updated.docx", "Lecture 2.pptx", "downloaded-material.pdf", "unknown-material.pdf"}
-    assert {item["category"] for item in intake_items} == {"readings", "syllabi", "notes", "other"}
+    assert {item["category"] for item in intake_items} == {"readings", "syllabi", "lectures", "other"}
     assert next(item for item in items if item["name"] == "unknown-material.pdf")["course_id"] is None
     assert next(item for item in items if item["name"] == "unknown-material.pdf")["provenance"] is None
     assert next(item for item in items if item["name"] == "unknown-material.pdf")["intake_status"] == "inbox"

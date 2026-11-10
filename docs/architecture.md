@@ -15,7 +15,6 @@ academia_os/                       agent-neutral core and CLI
 ├── agent.py                        bounded Agent Context, attention, changes, capabilities
 ├── recommendations.py              validated Agent Setup Playbook registry (legacy module name retained)
 ├── workflow_preferences.py          validated local student workflow overrides
-├── artifacts.py                    create-only AI-generated secondary material + registry
 ├── provenance.py                  labels + source verification
 ├── review.py                      durable Review Queue
 ├── activity.py                    durable append-only activity
@@ -38,7 +37,7 @@ templates/University/              readable academic workspace template
 
 ## Source of truth and projections
 
-The user’s workspace remains the human-readable source of truth. `.academia/` is local structured state: rebuildable indexes, acquisition/provenance records, generated-artifact registry, review/activity records, processing records, and proposals. Indexes can be rebuilt from the workspace; they are not a database dump that makes files inaccessible.
+The user’s workspace remains the human-readable source of truth. `.academia/` is local structured state: rebuildable indexes, acquisition/provenance records, Review/Activity records, processing records, and proposals. Indexes can be rebuilt from the workspace; they are not a database dump that makes files inaccessible.
 
 ## Shared local core and two supported host paths
 
@@ -50,18 +49,18 @@ Conversation · provider choice · MCP clients   Conversation · provider/tool e
                      ▼                            ▼
                  SHARED ACADEMIA INTERFACE
           Local context · evidence · provenance · Review
-          safe imports · study records · generated artifacts
+          safe imports · Study records
                               │
                               ▼
                     ACADEMIC WORKSPACE
-       Human-readable originals · student material · AI-generated secondary material
+       Human-readable originals · student material · structured Study records
 
 DASHBOARD: visibility · browsing · status · Activity · Courses · Tasks · Settings
 ```
 
-The local core remains the source of academic state and safety policy. The CLI/API and local stdio MCP are shared interfaces; they do not create a parallel academic database or expose `.academia` internals. Context is deliberately bounded by scope (`workspace`, `semester`, `course`, or `today`) and detail (`compact`, `standard`, or `deep`). It returns identifiers, workspace-relative paths, evidence references, and safe-write locations rather than dumping source contents. The `sources.library_items` catalog is metadata-only and covers syllabi, readings, notes, generated material, and relevant imports within the bounded scope. Both a future in-app assistant and external agents should use these same contracts.
+The local core remains the source of academic state and safety policy. The CLI/API and local stdio MCP are shared interfaces; they do not create a parallel academic database or expose `.academia` internals. Context is deliberately bounded by scope (`workspace`, `semester`, `course`, or `today`) and detail (`compact`, `standard`, or `deep`). It returns identifiers, workspace-relative paths, evidence references, and supported action information rather than dumping source contents. The `sources.library_items` catalog is metadata-only and covers syllabi, readings, lectures, assessments, notes, other material, inbox location, and processing status within the bounded scope. Retired `AI_GENERATED` document folders are excluded. Both a future in-app assistant and external agents should use these same contracts.
 
-The local MCP currently exposes bounded reads, host-gated file import, structured Review decisions, a separate executor for already-approved supported domain changes, and create-only AI-generated course artifacts. Review decisions must match an executable choice returned by `academia agent attention`; Activity identifies the caller as `agent:mcp`. The MCP server cannot verify that a human confirmation dialog was shown, so each compatible host must obtain confirmation of the exact choice and effect before calling a write tool. It does not connect to browser, email, calendar, or other external services. Dashboard Study chat can invoke the user's signed-in Codex CLI subscription, but its model tools are disabled and it is not an MCP client. Claude subscription OAuth cannot be routed through Academia under Anthropic's current restrictions; Claude Code remains usable as an external host. Full in-app MCP-client/tool orchestration remains planned. External Codex or another compatible host can connect to Academia MCP and its own separately authorized tools.
+The local MCP currently exposes bounded reads, host-gated file import, structured Review decisions, and a separate executor for already-approved supported domain changes. It no longer exposes a generated-document writer. Study sets and practice are created through the Study interface. Review decisions must match an executable choice returned by `academia agent attention`; Activity identifies the caller as `agent:mcp`. The MCP server cannot verify that a human confirmation dialog was shown, so each compatible host must obtain confirmation of the exact choice and effect before calling a write tool. It does not connect to browser, email, calendar, or other external services. Dashboard Study chat can invoke the user's signed-in Codex CLI subscription, but its model tools are disabled and it is not an MCP client. Claude subscription OAuth cannot be routed through Academia under Anthropic's current restrictions; Claude Code remains usable as an external host. Full in-app MCP-client/tool orchestration remains planned. External Codex or another compatible host can connect to Academia MCP and its own separately authorized tools.
 
 `academia agent playbooks --json` and `academia agent playbook PLAYBOOK_ID --json` expose the static Agent Setup Playbook registry. The registry separates implemented Academia capabilities from portable workflow guidance. Reading it is side-effect free: it does not inspect Gmail, calendars, course portals, browsers, research services, communities, or schedulers; it does not create integrations or store their state. External hosts use their own configured tools. A future in-app assistant may use user-enabled MCP connections, but it must report only services that are actually configured and authorized. The older `recommendations` and `recipe` commands remain compatibility aliases.
 
@@ -71,7 +70,7 @@ The local MCP currently exposes bounded reads, host-gated file import, structure
 
 `agent changes` reads append-only Activity oldest-first after an Activity ID or ISO timestamp cursor and returns a new cursor. Reusing the returned cursor is idempotent. Activity remains a record of changes the core actually performed, not reads or chat messages.
 
-`artifacts.py` owns the safe generated-material boundary. `academia artifact create` can write only Markdown under a recognized course’s lazy `06_KNOWLEDGE/AI_GENERATED/` directory. Each record is `AI-GENERATED`, `authoritative: false`, source-linked when the kind is source-derived, and stored in `.academia/artifacts.json` for library/dashboard visibility. Course identifiers accept the canonical ID, code, or exact course/display name. Source references are validated structurally: a course subtree records its actual course ID, a semester-level `00_INBOX` source records `course_id: null`, and files outside recognized academic locations are rejected. There is no arbitrary destination, original-file overwrite, or create/update ambiguity. This pass intentionally implements create-only semantics.
+The separate generated-document artifact API has been removed. Study guides, quizzes, flashcards, and related practice are generated and saved as structured, cited Study sets through `academia study`; they remain non-authoritative student study records rather than standalone Library documents. Legacy files under `06_KNOWLEDGE/AI_GENERATED/` are excluded from Library and source discovery and have been removed from the configured three-course workspace.
 
 `academia_os.config` is the only canonical configuration model. It owns schema version 3, defaults, validation, atomic serialization, and v1/v2 migration. The installer, CLI, desktop compatibility app, and adapters consume it. Hermes is an optional `agents.hermes` adapter section, not a required core path. Pre-playbook integration/automation values are moved to `legacy_compatibility` and are never fresh-install defaults.
 

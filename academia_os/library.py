@@ -4,12 +4,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .artifacts import artifact_index
 from .processing import ProcessingStore
 from .state import JsonStateStore
 
 
-LIBRARY_CATEGORIES = ("syllabi", "readings", "notes", "generated", "imports", "other")
+LIBRARY_CATEGORIES = ("syllabi", "readings", "lectures", "assessments", "notes", "other")
+LIBRARY_LOCATIONS = ("all", "inbox", "organized")
+LIBRARY_PROCESSING_STATUSES = (
+    "all",
+    "not_processed",
+    "in_progress",
+    "processed",
+    "failed",
+    "untracked",
+)
 
 # These are workspace control files, not academic material. They remain available
 # through the workspace and agent interfaces but should not clutter Library.
@@ -44,25 +52,49 @@ _COURSE_CONTROL_FILES = frozenset(
 def _category(relative_path: Path) -> str:
     parts = [part.casefold() for part in relative_path.parts]
     filename = relative_path.name.casefold()
-    joined = "/".join(parts)
 
-    if "ai_generated" in parts:
-        return "generated"
     # Match common human-written variants such as "Course Outline", as well
     # as underscore and hyphen forms. This comes before broad knowledge-folder
     # rules so a verified outline is not mislabeled as ordinary notes.
     normalized_name = " ".join("".join(char if char.isalnum() else " " for char in filename).split())
-    if any(token in normalized_name for token in ("syllabus", "course guide", "course outline")):
+    if any(token in normalized_name for token in ("syllabus", "syllabi", "course guide", "course outline")):
         return "syllabi"
-    if "05_reference" in parts or any(token in joined for token in ("reading", "reference", "bibliography", "source_index")):
+    if "03_assignments" in parts or "04_exams" in parts or any(
+        token in normalized_name.split()
+        for token in ("assignment", "exam", "quiz", "test", "midterm", "final", "essay", "project", "presentation", "assessment")
+    ):
+        return "assessments"
+    if "02_lectures" in parts or any(
+        token in normalized_name.split()
+        for token in ("lecture", "lectures", "slide", "slides", "recording")
+    ):
+        return "lectures"
+    if "05_reference" in parts or any(
+        token in normalized_name.split()
+        for token in ("reading", "readings", "reference", "references", "bibliography", "chapter")
+    ) or "source index" in normalized_name:
         return "readings"
     if "source_verification" in parts:
         return "notes"
-    if "note" not in normalized_name and "chapter" in normalized_name:
-        return "readings"
-    if any(part in {"02_weeks", "04_exams", "06_knowledge"} for part in parts) or any(token in joined for token in ("note", "study", "lecture", "review")):
+    if any(part in {"02_weeks", "06_knowledge"} for part in parts) or any(
+        token in normalized_name.split()
+        for token in ("note", "notes", "study", "review", "summary", "guide", "verification")
+    ):
         return "notes"
     return "other"
+
+
+def _processing_bucket(item: dict[str, Any]) -> str:
+    status = str(item.get("processing_status", "")).upper()
+    if status == "FAILED":
+        return "failed"
+    if status in {"PROCESSING", "VERIFIED"}:
+        return "in_progress"
+    if status in {"DETECTED", "PENDING"}:
+        return "not_processed"
+    if status == "ACKNOWLEDGED":
+        return "processed"
+    return "not_processed" if item.get("intake_status") == "inbox" else "untracked"
 
 
 def _intake_status(relative_path: Path) -> str:
@@ -123,7 +155,6 @@ def list_material(workspace_root: Path, semester: str) -> list[dict[str, Any]]:
     semester_root = root / semester
     if not semester_root.is_dir():
         return []
-    artifacts = artifact_index(root)
     acquisitions = _acquisition_index(root)
     processing_records = {
         str(Path(record.source_path).expanduser().resolve()): record
@@ -142,11 +173,12 @@ def list_material(workspace_root: Path, semester: str) -> list[dict[str, Any]]:
             continue
         if not _is_material(path, relative):
             continue
+        if any(part.casefold() == "ai_generated" for part in relative.parts):
+            continue
         try:
             stat = path.stat()
         except OSError:
             continue
-        artifact = artifacts.get(relative.as_posix())
         acquisition = acquisitions.get(relative.as_posix())
         semester_relative = path.relative_to(semester_root)
         base_category = _category(semester_relative)
@@ -159,18 +191,13 @@ def list_material(workspace_root: Path, semester: str) -> list[dict[str, Any]]:
                 "relative_path": relative.as_posix(),
                 "semester": semester,
                 "course_id": _course_id(semester_root, path),
-                "category": "generated" if artifact else base_category,
+                "category": base_category,
                 "intake_status": intake_status,
                 "extension": path.suffix.lower(),
                 "size": stat.st_size,
                 "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
-                "provenance": artifact.get("provenance") if artifact else (acquisition.get("provenance") if acquisition else None),
-                "source_type": "AI-generated" if artifact else (acquisition.get("source_type") if acquisition else ("Imported" if intake_status == "inbox" else "Workspace material")),
-                "artifact_id": artifact.get("id") if artifact else None,
-                "artifact_kind": artifact.get("kind") if artifact else None,
-                "created_by": artifact.get("created_by") if artifact else None,
-                "authoritative": artifact.get("authoritative") if artifact else None,
-                "source_refs": artifact.get("source_refs", []) if artifact else [],
+                "provenance": acquisition.get("provenance") if acquisition else None,
+                "source_type": acquisition.get("source_type") if acquisition else ("Imported" if intake_status == "inbox" else "Workspace material"),
                 **({
                     "processing_status": processing_records[str(resolved)].status.value,
                     "extraction_status": (processing_records[str(resolved)].verification or {}).get("extraction_status"),
@@ -184,16 +211,24 @@ def filter_material(
     items: list[dict[str, Any]],
     *,
     category: str = "all",
+    location: str = "all",
+    processing_status: str = "all",
     course_id: str | None = None,
     query: str = "",
 ) -> list[dict[str, Any]]:
     if category != "all" and category not in LIBRARY_CATEGORIES:
         raise ValueError(f"unsupported library category: {category}")
+    if location not in LIBRARY_LOCATIONS:
+        raise ValueError(f"unsupported library location: {location}")
+    if processing_status not in LIBRARY_PROCESSING_STATUSES:
+        raise ValueError(f"unsupported library processing status: {processing_status}")
     normalized_query = query.strip().casefold()
     filtered = [
         item
         for item in items
-        if (category == "all" or (item.get("intake_status") == "inbox" if category == "imports" else item.get("category") == category))
+        if (category == "all" or item.get("category") == category)
+        and (location == "all" or item.get("intake_status") == location)
+        and (processing_status == "all" or _processing_bucket(item) == processing_status)
         and (course_id is None or item.get("course_id") == course_id)
         and (not normalized_query or normalized_query in f"{item.get('name', '')} {item.get('relative_path', '')}".casefold())
     ]

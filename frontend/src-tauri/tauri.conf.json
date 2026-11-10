@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Academia OS",
-  "version": "0.4.4",
+  "productName": "AcademiaOS",
+  "version": "0.4.6",
   "identifier": "com.academia.os",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -10,12 +10,19 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{"title": "Academia OS", "width": 1280, "height": 840, "minWidth": 980, "minHeight": 660}],
+    "windows": [{"title": "AcademiaOS", "width": 1280, "height": 840, "minWidth": 980, "minHeight": 660}],
     "security": {"csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost"}
   },
   "bundle": {
     "active": true,
     "targets": ["dmg"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "externalBin": ["binaries/academia"],
     "createUpdaterArtifacts": true,
     "macOS": {

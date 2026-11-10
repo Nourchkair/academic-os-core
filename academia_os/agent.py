@@ -123,13 +123,11 @@ def _compact_library_item(item: dict[str, Any]) -> dict[str, Any]:
             "course_id",
             "category",
             "intake_status",
+            "processing_status",
             "provenance",
             "source_type",
         )
     }
-    for key in ("artifact_id", "artifact_kind", "created_by", "authoritative", "source_refs"):
-        if item.get(key) is not None:
-            result[key] = item[key]
     return result
 
 
@@ -624,14 +622,6 @@ def build_agent_context(config: dict[str, Any], snapshot: dict[str, Any], *, sco
             "evidence_references": evidence_refs,
         },
         "capabilities": _capability_view(),
-        "safe_write_locations": {
-            "generated_artifacts": [
-                {"course_id": item["id"], "relative_directory": f"{current_semester}/{item['id']}/06_KNOWLEDGE/AI_GENERATED", "create_only": True}
-                for item in scoped_courses[:_limit(detail, "courses")]
-            ],
-            "controlled_by": "academia",
-            "original_files_writable_through_artifact_api": False,
-        },
     }
     if course is not None:
         context["course"] = _compact_course(course, root)

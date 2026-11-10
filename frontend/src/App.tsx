@@ -14,7 +14,7 @@ import type { ActivityEvent, Course, CourseworkHistoryRecord, CourseworkKind, Li
 
 const nav = [
   { id: 'home', label: 'Home', icon: '⌂' },
-  { id: 'chat', label: 'Study chat', icon: '◉' },
+  { id: 'chat', label: 'Study chat', icon: 'study-chat' },
   { id: 'tasks', label: 'Tasks', icon: '✓' },
   { id: 'activity', label: 'Activity', icon: '◷' },
 ] as const
@@ -33,12 +33,13 @@ function AppTooltipLayer() {
 
   useEffect(() => {
     let hovered: HTMLElement | null = null
-    let focused: HTMLElement | null = null
+    let suppressed: HTMLElement | null = null
     let frame = 0
-    const activeTarget = () => focused || hovered
+    const activeTarget = () => hovered
     const hide = () => { window.cancelAnimationFrame(frame); setTooltip(null) }
     const show = () => {
       const target = activeTarget()
+      if (target && target === suppressed) { hide(); return }
       const text = target?.dataset.tooltip?.trim()
       if (!target?.isConnected || !text) { hide(); return }
       const sideAttr = target.dataset.tooltipSide
@@ -73,33 +74,47 @@ function AppTooltipLayer() {
       })
     }
     const nearestTooltip = (target: EventTarget | null) => target instanceof Element ? target.closest<HTMLElement>('[data-tooltip]') : null
-    const onPointerOver = (event: PointerEvent) => { hovered = nearestTooltip(event.target); show() }
+    const onPointerOver = (event: PointerEvent) => {
+      const target = nearestTooltip(event.target)
+      if (target !== suppressed) suppressed = null
+      hovered = target
+      show()
+    }
     const onPointerOut = (event: PointerEvent) => {
       const from = nearestTooltip(event.target)
       const to = nearestTooltip(event.relatedTarget)
-      if (from && from !== to && hovered === from) { hovered = null; show() }
+      if (from && from !== to) {
+        if (suppressed === from) suppressed = null
+        if (hovered === from) { hovered = null; show() }
+      }
     }
-    const onFocusIn = (event: FocusEvent) => { focused = nearestTooltip(event.target); show() }
-    const onFocusOut = (event: FocusEvent) => {
-      const from = nearestTooltip(event.target)
-      const to = nearestTooltip(event.relatedTarget)
-      if (from && from !== to && focused === from) { focused = null; show() }
+    const onPointerDown = (event: PointerEvent) => {
+      const target = nearestTooltip(event.target)
+      if (!target) return
+      suppressed = target
+      hide()
+    }
+    const onClick = (event: MouseEvent) => {
+      const target = nearestTooltip(event.target)
+      if (!target) return
+      suppressed = target
+      hide()
     }
     const onViewportChange = () => { if (activeTarget()) show() }
     const observer = new MutationObserver(() => { if (activeTarget()) show() })
     observer.observe(document.body, { attributes: true, attributeFilter: ['data-tooltip', 'data-tooltip-side'], subtree: true })
     document.addEventListener('pointerover', onPointerOver, true)
     document.addEventListener('pointerout', onPointerOut, true)
-    document.addEventListener('focusin', onFocusIn, true)
-    document.addEventListener('focusout', onFocusOut, true)
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('click', onClick, true)
     document.addEventListener('scroll', onViewportChange, true)
     window.addEventListener('resize', onViewportChange)
     return () => {
       observer.disconnect()
       document.removeEventListener('pointerover', onPointerOver, true)
       document.removeEventListener('pointerout', onPointerOut, true)
-      document.removeEventListener('focusin', onFocusIn, true)
-      document.removeEventListener('focusout', onFocusOut, true)
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('click', onClick, true)
       document.removeEventListener('scroll', onViewportChange, true)
       window.removeEventListener('resize', onViewportChange)
       window.cancelAnimationFrame(frame)
@@ -137,6 +152,9 @@ function App() {
   const [actionCourseId, setActionCourseId] = useState<string | undefined>()
   const [courseOpenRequest, setCourseOpenRequest] = useState<{ id: string; courseId: string } | null>(null)
   const chatNavRef = useRef<HTMLDetailsElement>(null)
+  const refreshSequence = useRef(0)
+  const validatedWorkspaceRoot = useRef<string | null>(null)
+  const loadingBackgroundData = useRef(false)
   const chatMenuItems: { view: View; label: string; icon: string }[] = [
     { view: 'home', label: 'Home', icon: '⌂' },
     { view: 'courses', label: 'Courses', icon: '◫' },
@@ -157,6 +175,10 @@ function App() {
 
   const refresh = async (allowDuringMigration = false) => {
     if (migrationBusy && !allowDuringMigration) return
+    const sequence = ++refreshSequence.current
+    let backgroundLoadStarted = false
+    loadingBackgroundData.current = true
+    setSemesterLoading(false)
     try {
       setError(null)
       const next = await api.status()
@@ -165,51 +187,99 @@ function App() {
         await beginOnboarding()
         return
       }
-      const inspected = await api.workspaceInspect(next.workspace.academic_root)
-      if (!inspected.recognized) {
-        if (allowDuringMigration) throw new Error('The workspace was not recognized while refreshing.')
-        await beginOnboarding()
-        return
+      if (validatedWorkspaceRoot.current !== next.workspace.academic_root) {
+        const inspected = await api.workspaceInspect(next.workspace.academic_root)
+        if (!inspected.recognized) {
+          if (allowDuringMigration) throw new Error('The workspace was not recognized while refreshing.')
+          await beginOnboarding()
+          return
+        }
+        validatedWorkspaceRoot.current = next.workspace.academic_root
       }
+      if (sequence !== refreshSequence.current) return
       const available = new Set([next.workspace.semester, ...next.workspace.available_semesters])
       const targetSemester = selectedSemester && available.has(selectedSemester) ? selectedSemester : next.workspace.semester
-      const [courseData, taskData, activityData, libraryData, inboxData] = await Promise.all([
-        api.courses(targetSemester),
-        api.tasks(targetSemester),
-        api.activity(),
-        api.library({ semester: targetSemester }),
-        api.inbox(),
-      ])
       setStatus(next)
       setSelectedSemester(targetSemester)
-      setCourses(courseData)
-      setTasks(taskData)
-      setActivity(activityData)
-      setLibraryItems(libraryData)
-      setInbox(inboxData)
+      if (targetSemester === next.workspace.semester) {
+        setCourses(next.workspace.courses)
+        setTasks(next.workspace.tasks)
+      } else {
+        const courseData = await api.courses(targetSemester)
+        const taskData = await api.tasks(targetSemester)
+        if (sequence !== refreshSequence.current) return
+        setCourses(courseData)
+        setTasks(taskData)
+      }
       setOnboarding(false)
+      setBooting(false)
+
+      // Keep first paint independent of the slower Library and intake scans.
+      // Run these CLI calls one at a time because the packaged one-file CLI has
+      // a costly cold start and multiple simultaneous launches can stall app startup.
+      backgroundLoadStarted = true
+      void (async () => {
+        try {
+          try {
+            const activityData = await api.activity()
+            if (sequence !== refreshSequence.current) return
+            setActivity(activityData)
+          } catch (reason) {
+            if (sequence === refreshSequence.current) setError(`Recent activity could not be loaded: ${String(reason)}`)
+          }
+          try {
+            const libraryData = await api.library({ semester: targetSemester })
+            if (sequence !== refreshSequence.current) return
+            setLibraryItems(libraryData)
+          } catch (reason) {
+            if (sequence === refreshSequence.current) setError(`Course materials could not be loaded: ${String(reason)}`)
+          }
+          try {
+            const inboxData = await api.inbox()
+            if (sequence === refreshSequence.current) setInbox(inboxData)
+          } catch (reason) {
+            if (sequence === refreshSequence.current) setError(`Intake status could not be loaded: ${String(reason)}`)
+          }
+        } finally {
+          if (sequence === refreshSequence.current) loadingBackgroundData.current = false
+        }
+      })()
     } catch (reason) {
+      if (sequence !== refreshSequence.current) return
       if (allowDuringMigration) throw reason
       if (reason instanceof BridgeUnavailableError) setError(reason.message)
       else await beginOnboarding()
     } finally {
-      setBooting(false)
+      if (sequence === refreshSequence.current) {
+        setBooting(false)
+        if (!backgroundLoadStarted) loadingBackgroundData.current = false
+      }
     }
   }
 
   const changeSemester = async (semester: string) => {
+    const sequence = ++refreshSequence.current
+    loadingBackgroundData.current = true
     try {
       setSemesterLoading(true)
       setError(null)
-      const [courseData, taskData, libraryData] = await Promise.all([api.courses(semester), api.tasks(semester), api.library({ semester })])
+      const courseData = await api.courses(semester)
+      if (sequence !== refreshSequence.current) return
+      const taskData = await api.tasks(semester)
+      if (sequence !== refreshSequence.current) return
+      const libraryData = await api.library({ semester })
+      if (sequence !== refreshSequence.current) return
       setSelectedSemester(semester)
       setCourses(courseData)
       setTasks(taskData)
       setLibraryItems(libraryData)
     } catch (reason) {
-      setError(`The ${semester} workspace could not be loaded: ${String(reason)}`)
+      if (sequence === refreshSequence.current) setError(`The ${semester} workspace could not be loaded: ${String(reason)}`)
     } finally {
-      setSemesterLoading(false)
+      if (sequence === refreshSequence.current) {
+        setSemesterLoading(false)
+        loadingBackgroundData.current = false
+      }
     }
   }
 
@@ -219,13 +289,12 @@ function App() {
   useEffect(() => {
     let mounted = true
     const updateProcessing = () => {
-      if (document.visibilityState !== 'visible') return
+      if (!status || loadingBackgroundData.current || document.visibilityState !== 'visible') return
       void api.processingStatus().then((records) => {
         if (mounted) setInbox(records)
       }).catch(() => {})
     }
-    updateProcessing()
-    const timer = window.setInterval(updateProcessing, 10_000)
+    const timer = window.setInterval(updateProcessing, 30_000)
     window.addEventListener('focus', updateProcessing)
     document.addEventListener('visibilitychange', updateProcessing)
     return () => {
@@ -234,7 +303,7 @@ function App() {
       window.removeEventListener('focus', updateProcessing)
       document.removeEventListener('visibilitychange', updateProcessing)
     }
-  }, [])
+  }, [status])
 
   useEffect(() => {
     const closeChatNavigation = (event: PointerEvent) => {
@@ -272,7 +341,7 @@ function App() {
   }, [])
   const clearCourseOpenRequest = useCallback(() => setCourseOpenRequest(null), [])
 
-  if (booting) return <main className="connection-screen"><div className="connection-art">✦</div><p className="eyebrow">Academia OS</p><h2>Checking your local workspace</h2><p>Your academic files stay on this computer while we check whether setup is already complete.</p></main>
+  if (booting) return <main className="connection-screen"><div className="connection-art">✦</div><p className="eyebrow">AcademiaOS</p><h2>Checking your local workspace</h2><p>Your academic files stay on this computer while we check whether setup is already complete.</p></main>
   if (onboarding) return <Onboarding candidates={setupCandidates} onComplete={refresh} onMigration={async () => { await refresh(); setOnboarding(false); setView('home'); setActionMode('migration') }} />
   if (error && !status) return <ConnectionNotice message={error} onRetry={() => void refresh()} />
 
@@ -284,18 +353,23 @@ function App() {
   return <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'chat' ? 'chat-mode' : ''}`}>
     {view !== 'chat' && <aside className="sidebar" aria-label="Application sidebar">
       <div className="sidebar-heading">
-        <button className="brand" onClick={() => navigate('home')} aria-label="Academia OS home" data-tooltip={sidebarCollapsed ? 'Academia OS home' : undefined} data-tooltip-side={sidebarCollapsed ? 'right' : undefined}>
-          <span className="brand-mark">A</span><span className="brand-wordmark"><strong>Academia</strong><span>OS</span></span>
+        <button className="brand" onClick={() => {
+          if (sidebarCollapsed) {
+            window.localStorage.setItem('academia.sidebar.collapsed', 'false')
+            setSidebarCollapsed(false)
+          } else navigate('home')
+        }} aria-label={sidebarCollapsed ? 'Expand sidebar' : 'AcademiaOS home'} data-tooltip={sidebarCollapsed ? 'Expand sidebar' : undefined} data-tooltip-side={sidebarCollapsed ? 'right' : undefined}>
+          <span className="brand-mark"><img src="/academia-logo.png" alt="" /><span className="brand-expand-overlay" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M9 4.5v15M14 9l3 3-3 3" /></svg></span></span><span className="brand-wordmark"><strong>Academia</strong><span>OS</span></span>
         </button>
-        <button className="sidebar-collapse" onClick={() => setSidebarCollapsed((collapsed) => {
+        {!sidebarCollapsed && <button className="sidebar-collapse" onClick={() => setSidebarCollapsed((collapsed) => {
           const next = !collapsed
           window.localStorage.setItem('academia.sidebar.collapsed', String(next))
           return next
-        })} aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} data-tooltip={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} data-tooltip-side="right">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d={sidebarCollapsed ? 'M9 4.5v15M14 9l3 3-3 3' : 'M9 4.5v15M15 9l-3 3 3 3'} /></svg>
-        </button>
+        })} aria-label="Collapse sidebar" data-tooltip="Collapse sidebar" data-tooltip-side="right">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M9 4.5v15M15 9l-3 3 3 3" /></svg>
+        </button>}
       </div>
-      <nav aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={`nav-item ${view === item.id || (item.id === 'home' && view === 'courses') ? 'active' : ''}`} onClick={() => navigate(item.id)} disabled={migrationBusy} data-tooltip={sidebarCollapsed ? item.label : undefined} data-tooltip-side={sidebarCollapsed ? 'right' : undefined}><span className="nav-icon">{item.icon}</span><span className="nav-label">{item.label}</span></button>)}</nav>
+      <nav aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={`nav-item ${view === item.id || (item.id === 'home' && view === 'courses') ? 'active' : ''}`} onClick={() => navigate(item.id)} disabled={migrationBusy} data-tooltip={sidebarCollapsed ? item.label : undefined} data-tooltip-side={sidebarCollapsed ? 'right' : undefined}><span className="nav-icon">{item.id === 'chat' ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.2a8 8 0 0 1-8 8H5l1.4-3.1A8 8 0 1 1 20 11.2Z" /><path d="M8.5 9.5h7m-7 3h5" /></svg> : item.icon}</span><span className="nav-label">{item.label}</span></button>)}</nav>
       <div className="sidebar-bottom">
         <button className={`profile-button ${view === 'settings' ? 'active' : ''}`} onClick={() => navigate('settings')} disabled={migrationBusy} aria-label="Open profile and settings" data-tooltip="Settings" data-tooltip-side="right">
           <span className="profile-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.2" /><path d="M5.5 19c.6-3.1 2.9-4.8 6.5-4.8s5.9 1.7 6.5 4.8" /></svg></span>
@@ -458,16 +532,29 @@ const activityFilters: { id: ActivityFilter; label: string }[] = [
 function ActivityView({ activity, processing, onNavigate }: { activity: ActivityEvent[]; processing: ProcessingRecord[]; onNavigate: (view: View) => void }) {
   const [filter, setFilter] = useState<ActivityFilter>('all')
   const [showArchive, setShowArchive] = useState(false)
+  const [retentionNow, setRetentionNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setRetentionNow(Date.now()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
   const currentProcessing = processing
     .filter((record) => record.status.toUpperCase() !== 'ACKNOWLEDGED')
     .map(toProcessingActivity)
   const entries = [...collapseResolvedProcessingFailures(activity, processing), ...currentProcessing]
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
-  const archiveAge = 30 * 24 * 60 * 60 * 1000
-  const cutoff = Date.now() - archiveAge
+  const recentWindow = 3 * 24 * 60 * 60 * 1000
+  const archiveWindow = 90 * 24 * 60 * 60 * 1000
+  const now = retentionNow
   const isOpenAttention = (event: ActivityEvent) => ['not_processed', 'in_progress', 'failed'].includes(getActivityFilter(event))
-  const recentEntries = entries.filter((event) => isOpenAttention(event) || !Number.isFinite(Date.parse(event.created_at)) || Date.parse(event.created_at) >= cutoff)
-  const archivedEntries = entries.filter((event) => !isOpenAttention(event) && Number.isFinite(Date.parse(event.created_at)) && Date.parse(event.created_at) < cutoff)
+  const recentEntries = entries.filter((event) => {
+    if (isOpenAttention(event) || !Number.isFinite(Date.parse(event.created_at))) return true
+    return now - Date.parse(event.created_at) < recentWindow
+  })
+  const archivedEntries = entries.filter((event) => {
+    if (isOpenAttention(event) || !Number.isFinite(Date.parse(event.created_at))) return false
+    const age = now - Date.parse(event.created_at)
+    return age >= recentWindow && age < archiveWindow
+  })
   const selectedEntries = showArchive ? archivedEntries : recentEntries
   const counts = Object.fromEntries(activityFilters.map(({ id }) => [id, id === 'all' ? selectedEntries.length : selectedEntries.filter((event) => getActivityFilter(event) === id).length])) as Record<ActivityFilter, number>
   const visible = selectedEntries.filter((event) => filter === 'all' || getActivityFilter(event) === filter)
@@ -487,7 +574,7 @@ function ActivityView({ activity, processing, onNavigate }: { activity: Activity
       : 'Matching events will appear here when Academia OS records them.'
 
   return <div className="page-stack">
-    <PageIntro eyebrow="Audit trail" title="Activity" subtitle="Current and unresolved items stay visible. Resolved activity stays in the recent list for 30 days, then moves to the archive; the underlying audit history is preserved." />
+    <PageIntro eyebrow="Audit trail" title="Activity" subtitle="Unresolved items stay visible until handled. Resolved activity stays in Recent for 3 days, then moves to Archive for up to 90 days. The full local audit history is preserved." />
     <section className="activity-page-panel">
       <div className="section-heading">
         <div><p className="eyebrow">{showArchive ? 'Archived activity' : 'Workspace activity'}</p><h3>{visible.length ? `${visible.length} item${visible.length === 1 ? '' : 's'} shown` : emptyTitle[filter]}</h3></div>
@@ -580,9 +667,10 @@ function getActivityFilter(event: ActivityEvent): Exclude<ActivityFilter, 'all'>
   const type = event.event_type.toLowerCase()
   const status = String(event.details.status || '').toUpperCase()
   if (type === 'processing.recovered') return 'other'
+  if (status === 'FAILED') return 'failed'
   if (type === 'file.processed' || status === 'ACKNOWLEDGED') return 'processed'
   if (type === 'file.imported') return 'imported'
-  if (/processing_failed|action\.failed|\.failed$|unsupported/.test(type) || status === 'FAILED') return 'failed'
+  if (/processing_failed|action\.failed|\.failed$|unsupported/.test(type)) return 'failed'
   if (type === 'processing.current') return status === 'PENDING' || status === 'DETECTED' ? 'not_processed' : 'in_progress'
   if (/processing|\.pending$/.test(type)) return 'in_progress'
   return 'other'

@@ -32,7 +32,7 @@ For each recognized semester, the reusable template includes a semester-level `0
 
 ## Shared assistant and external-agent operating model
 
-Academia OS is a local-first academic operating layer with two host paths: dashboard Study chat and compatible external agents such as Codex or Claude. Both must use the same Academia interfaces for academic context, evidence, provenance, permissions, safe actions, generated artifacts, and audit history. Dashboard Study chat currently invokes the user's installed Codex CLI signed in with ChatGPT. Do not route Claude subscription OAuth through Academia: Anthropic reserves that sign-in for Claude Code and native Anthropic apps. Claude Code may still connect as a separate external agent. Full MCP-client orchestration and external browser, Gmail, calendar, or portal connectors are not implemented; never claim that Study chat has those tools.
+Academia OS is a local-first academic operating layer with two host paths: dashboard Study chat and compatible external agents such as Codex or Claude. Both must use the same Academia interfaces for academic context, evidence, provenance, permissions, safe actions, structured Study records, and audit history. Dashboard Study chat currently invokes the user's installed Codex CLI signed in with ChatGPT. Do not route Claude subscription OAuth through Academia: Anthropic reserves that sign-in for Claude Code and native Anthropic apps. Claude Code may still connect as a separate external agent. Full MCP-client orchestration and external browser, Gmail, calendar, or portal connectors are not implemented; never claim that Study chat has those tools.
 
 Keep these product layers separate:
 
@@ -46,7 +46,7 @@ Academia OS owns local academic state, student preferences, provenance, Review, 
 
 Academia must not claim Gmail, calendar, Brightspace, Canvas, Moodle, Blackboard, Omni, browser, scheduler, Reddit, web-search, or other external access merely because a playbook mentions it. The current app has no such connectors. A future connector must be explicitly configured and authorized, report its actual status, use least-privilege scopes, and preserve service-specific safety rules.
 
-Agents must use the structured interface first and retrieve source content only when the context bundle identifies a relevant source. The bounded `sources.library_items` catalog includes metadata for syllabi, readings, notes, generated artifacts, and relevant imports; it includes `id`, name, workspace-relative path, course ownership, category, provenance, source type, and artifact metadata, never file bodies by default. Do not recursively inspect the Markdown tree or read `.academia` files directly to reconstruct state.
+Agents must use the structured interface first and retrieve source content only when the context bundle identifies a relevant source. The bounded `sources.library_items` catalog includes metadata for syllabi, readings, lectures, assessments, notes, and other material; it includes `id`, name, workspace-relative path, course ownership, document category, inbox/organized location, current processing status when available, provenance, and source type, never file bodies by default. The Library omits the retired `AI_GENERATED` document folders. Do not recursively inspect the Markdown tree or read `.academia` files directly to reconstruct state.
 
 Recommended request loop:
 
@@ -145,7 +145,8 @@ academia extract syllabus /path/to/syllabus.pdf --course "COURSE ID" --json
 academia extract syllabus /path/to/syllabus.pdf --course "COURSE ID" --verified-current --apply --json
 academia domain --json
 academia library --semester "Fall 2026" --json
-academia library --semester "Fall 2026" --category imports --json
+academia library --semester "Fall 2026" --location inbox --json
+academia library --semester "Fall 2026" --category lectures --processing-status processed --json
 academia file-preview /path/to/semester-file.pdf --semester "Fall 2026" --json
 academia settings show --json
 academia inbox --json
@@ -169,13 +170,12 @@ academia agent context --scope today --detail compact --json
 academia agent context --scope course --course "COURSE ID" --detail standard --json
 academia agent attention --json
 academia agent changes --since CURSOR --json
-academia artifact create --course "COURSE ID" --kind study_guide --title "Week 5 Study Guide" --content-file /tmp/guide.md --source "Fall 2026/COURSE ID/05_REFERENCE/week-5.md" --created-by codex --json
 academia verify-source --requested requested.json --retrieved retrieved.json --json
 ```
 
 JSON output is the preferred agent context format. Human-readable output is for users. Any agent command that accepts `--course` resolves the exact canonical course ID, course code, or exact course name/display name to the same canonical course object. Unknown and ambiguous identifiers fail with a structured error; they never fall back to workspace-wide results.
 
-`academia mcp serve` exposes a local MCP interface over stdio for compatible hosts. Read tools use bounded structured interfaces; Library previews require an exact workspace-relative Library ID and are revalidated by `academia file-preview`. Narrow write tools support host-gated local-file import, an exact executable Review decision, a separate supported execution for an already-approved Review item, and create-only AI-generated artifacts. The server cannot verify that a human confirmation was displayed; compatible hosts must obtain confirmation for the exact decision or file and destination before calling write tools. The Review decision tool rejects choices that do not exactly match an executable choice from current `academia agent attention` output. Review execution is limited to an already-approved linked `domain_change` action. Activity records identify MCP-initiated decisions and execution as `agent:mcp`. Imports preserve the original and start supported local extraction. The server opens no network listener and has no external-service connectors.
+`academia mcp serve` exposes a local MCP interface over stdio for compatible hosts. Read tools use bounded structured interfaces; Library previews require an exact workspace-relative Library ID and are revalidated by `academia file-preview`. Narrow write tools support host-gated local-file import, an exact executable Review decision, and a separate supported execution for an already-approved Review item. The server cannot verify that a human confirmation was displayed; compatible hosts must obtain confirmation for the exact decision or file and destination before calling write tools. The Review decision tool rejects choices that do not exactly match an executable choice from current `academia agent attention` output. Review execution is limited to an already-approved linked `domain_change` action. Activity records identify MCP-initiated decisions and execution as `agent:mcp`. Imports preserve the original and start supported local extraction. Study sets and practice are managed through the Study interface. The server opens no network listener and has no external-service connectors.
 
 ## Allowed behavior
 
@@ -186,14 +186,11 @@ An agent may, when operating through the user-approved local interface:
 - import a specific local file through MCP only after the assistant host has asked the student to confirm the exact file and recognized inbox destination;
 - create a plan or action proposal;
 - create structured source-linked study sets and record student practice through `academia study`;
-- create Markdown AI-generated secondary material through `academia artifact create`; the destination is always a recognized course’s `06_KNOWLEDGE/AI_GENERATED/` directory;
-- create that same source-linked material through the create-only MCP artifact tool when the student requests saving it;
-- attach workspace source references or evidence-backed domain references to generated material;
 - update rebuildable indexes and append activity records;
 - perform non-destructive, verified file copies when the user has approved the proposal;
 - prepare a settings diff for the user to review.
 
-Generated artifacts are Markdown/text secondary material. They are recorded with `provenance: AI-GENERATED`, `authoritative: false`, an optional `created_by` audit label, and source/domain references. Artifact creation is create-only in this pass: it cannot update, rename, delete, or overwrite an existing artifact or any ORIGINAL, USER-CREATED, or EXTERNAL material. Use a new artifact when a guide needs a revised version.
+AI-created study aids belong in the structured Study workspace as source-linked sets and practice records. Academia does not expose a separate course-document generation or artifact-writing interface. Study data remains AI-generated and non-authoritative, with citations and student practice preserved in the course Study store.
 
 ## Approval boundaries
 

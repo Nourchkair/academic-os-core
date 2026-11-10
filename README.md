@@ -2,7 +2,7 @@
 
 [Visit the Academia OS website](https://academia-os.nearbykestrel1.chatgpt.site) · [Check GitHub Releases for app downloads](https://github.com/Nourchkair/academic-os-core/releases)
 
-Academia OS is a **local-first academic operating layer** for a student’s computer. It supports external agents such as Codex and Hermes, and its dashboard Study chat currently uses the user's signed-in Codex CLI. Academia OS owns the human-readable workspace, academic state, evidence, provenance, permissions, safe actions, generated secondary material, and audit trail. The in-app chat does not yet call external MCP tools such as browser, Gmail, or calendar.
+Academia OS is a **local-first academic operating layer** for a student’s computer. It supports external agents such as Codex and Hermes, and its dashboard Study chat currently uses the user's signed-in Codex CLI. Academia OS owns the human-readable workspace, academic state, evidence, provenance, permissions, safe actions, structured Study records, and audit trail. The in-app chat does not yet call external MCP tools such as browser, Gmail, or calendar.
 
 It is **not** a Hermes product. Hermes is one optional adapter. Academia OS works without Hermes, Codex, ChatGPT/Work, Claude, browser automation, or a school account connection.
 
@@ -21,7 +21,7 @@ provider choice · MCP client         provider and tool environment
                          │
                          ▼
               human-readable academic workspace
-        originals · student material · AI-generated material
+        originals · student material · structured Study records
 
 Dashboard: observability · browsing · status · Activity · settings
 ```
@@ -165,7 +165,6 @@ academia agent context --scope semester --detail standard --json
 academia agent context --scope course --course "POL 2103 - Politics" --detail compact --json
 academia agent attention --json
 academia agent changes --since CURSOR --json
-academia artifact create --course "POL 2103 - Politics" --kind study_guide --title "Week 4 Study Guide" --content-file /tmp/week-4-guide.md --source "Fall 2026/POL 2103 - Politics/05_REFERENCE/week-4-reading.md" --created-by codex --json
 academia import /path/to/file.pdf --destination /path/to/workspace/Fall\ 2026/COURSE/00_INBOX --json
 academia import /path/to/unknown-file.pdf --destination /path/to/workspace/Fall\ 2026/00_INBOX --uncertain --json
 academia watch --json  # one-shot scan of configured folders
@@ -235,19 +234,7 @@ Scopes are `workspace`, `semester`, `course`, and `today`. Detail modes are `com
 
 `academia agent changes --since CURSOR --json` returns append-only Activity events oldest-first and a `next_cursor`. Reusing the cursor is idempotent. Academia accepts an Activity event ID or ISO timestamp as a cursor and does not store chat-session state.
 
-Authorized agents can create secondary academic material without arbitrary filesystem writes:
-
-```bash
-academia artifact create \
-  --course "POL 2103 - Politics" \
-  --kind study_guide \
-  --title "Week 4 Study Guide" \
-  --content-file /tmp/week-4-guide.md \
-  --source "Fall 2026/POL 2103 - Politics/05_REFERENCE/week-4-reading.md" \
-  --created-by codex --json
-```
-
-The create-only command writes Markdown under `<semester>/<course>/06_KNOWLEDGE/AI_GENERATED/`, creates that directory lazily, records `.academia/artifacts.json`, preserves source references, and appends Activity with optional `agent:<name>` attribution. Generated material is always `AI-GENERATED` and `authoritative: false`; it cannot overwrite originals or external imports. Source-derived kinds such as `study_guide`, `reading_summary`, `practice_questions`, `exam_review`, `source_notes`, and `assignment_outline` require at least one workspace source or domain reference. A revised guide should be created as a new artifact in this pass; update/delete operations are intentionally not implemented.
+Study practice is created and saved through `academia study` and the Courses → Study workspace. Academia no longer exposes a separate generated-document Library category or an artifact-writing command. Agents can still explain material in chat or create cited, structured practice sets in Study when the student asks.
 
 ### Browser dashboard
 
@@ -301,7 +288,7 @@ Manual imports of PDF, DOCX, PPTX, plain text, Markdown, and common image files 
 ### How dashboard data is calculated
 
 - **Courses** are recognized folders in the configured active-semester directory that contain `01_COURSE/`. A course card also reports visible material counted from that course.
-- **Library** lists visible files in the active semester while excluding `.academia/`, hidden files, and known workspace control files. Syllabi, readings, notes, and imports are navigation categories based on explicit folder/name signals; they are not authority claims.
+- **Library** lists visible files in the active semester while excluding `.academia/`, hidden files, and known workspace control files. Document types come from simple folder/name signals: syllabus/course-outline names are **Syllabi & guides**; `03_ASSIGNMENTS/`, `04_EXAMS/`, and assignment/exam/quiz/essay/project names are **Assignments & exams**; `02_LECTURES/` and lecture/slide/recording names are **Lectures**; `05_REFERENCE/` and chapter/reading/reference names are **Readings**; `02_WEEKS/`, `06_KNOWLEDGE/`, and note/review/study/summary names are **Notes & study aids**; anything without a matching signal is **Other**. The first matching rule wins. This is metadata-based navigation, not AI classification or an authority claim. Inbox/organized location and current processing status are independent filters, so one item can be a reading, still in intake, and failed processing at the same time.
 - **Tasks** come from Markdown checkboxes in a course’s `01_COURSE/Course_Status.md` and from structured `assignment`/`deadline` entities in `.academia/domain.json`. Structured entities are created through syllabus extraction/reconciliation with evidence and confidence. DOCX assessment rows and PDF assessment lines retain source locations; yearless dates use only an explicitly named academic term year. Each assessment appears once, with its deadline time and grade weight. User-confirmed `Submitted`, `Graded`, or `Completed` records in the course’s `03_ASSIGNMENTS/Assignment_History.json` close a matching task while preserving the original deadline evidence. Home and Tasks show upcoming dates, and Tasks includes a next-seven-days filter. Unknown dates and unrecorded completion stay visible. Academia OS does not turn arbitrary filenames or prose into tasks.
 - **Inbox / intake** contains files present in course or semester `00_INBOX/` folders. Running `academia inbox` detects pre-existing files into the retryable processing state machine. Detection alone does not classify, move, or delete a file.
 - **Review** contains only explicit `.academia/review.json` items, such as uncertain imports, source conflicts, or approval-required actions. An unprocessed inbox file is shown as intake until a deliberate Review item is created.
@@ -396,7 +383,7 @@ An email address or local path can be normal in a private workspace; it should b
 
 ## Review and activity
 
-Uncertain source matches, deadline conflicts, and approval-required changes remain durable structured Review records under `.academia/review.json` for agent and CLI workflows. Action-linked records contain the exact `action_proposal_id`; approving one approves that proposal, and it resolves only after execution and verification. Activity events are append-only JSON lines under `.academia/activity.jsonl`. The current dashboard does not yet present a built-in Review queue; that is part of the in-app assistant host work. Activity remains the user-facing audit trail of changes the core actually made.
+Uncertain source matches, deadline conflicts, and approval-required changes remain durable structured Review records under `.academia/review.json` for agent and CLI workflows. Action-linked records contain the exact `action_proposal_id`; approving one approves that proposal, and it resolves only after execution and verification. Activity events are append-only JSON lines under `.academia/activity.jsonl`. In the dashboard, unresolved activity remains in Recent; resolved items appear in Recent for 3 days and Archive for up to 90 days. Older items leave the UI, while the local audit log remains available for agent sync and audit history. The current dashboard does not yet present a built-in Review queue; that is part of the in-app assistant host work. Activity remains the user-facing audit trail of changes the core actually made.
 
 ## Desktop application
 
@@ -410,7 +397,7 @@ npm run build
 npm run dev
 ```
 
-It is a React + TypeScript application with a Tauri 2 shell and a typed bridge to the `academia` CLI. It includes profile-free first-run onboarding, existing-workspace inspection/attachment, fresh-workspace setup, Home, semester-scoped **Courses**, Tasks, Activity, and local Settings views. Courses is also the academic library: choose a semester, open a class, then browse Syllabi & guides, Readings & references, Notes & study aids, Imported material, and other files with bounded read-only previews for supported text, PDF, DOCX, and PPTX files. The top-right profile badge opens a panel for Import material or **Migrate older material** instead of adding separate navigation sections. Settings edits local profile/workspace/import preferences, with playbook preferences sharing the CLI contract. Study chat invokes the installed Codex CLI; provider connection settings and external-service connectors are not yet implemented. The migration view scans an explicitly selected legacy folder, previews every destination, supports selected copy by default, and gates destructive Move behind an additional confirmation. Import uses the native Tauri file picker and drag/drop paths while delegating copying, processing, provenance, Activity, and uncertainty records to the existing CLI/core. The local stdio MCP supports bounded reads, host-gated file import, executable-choice-validated Review decisions, separate execution for already-approved supported domain changes, and create-only AI artifacts. It cannot verify that a host showed a confirmation, and has no browser/email/calendar connection. The macOS distribution path bundles the local CLI and MCP server and supports signed in-app updates. Beta builds use an Academia-specific self-signed code identity and a separate Tauri updater key; they are not notarized, so first launch may require a Gatekeeper approval. The workflow creates draft Apple Silicon and Intel releases. See [the desktop release and MCP guide](docs/desktop-release-and-mcp.md). Windows and Linux packaging remain future work. The old Tkinter app remains as a compatibility fallback while the new shell matures.
+It is a React + TypeScript application with a Tauri 2 shell and a typed bridge to the `academia` CLI. It includes profile-free first-run onboarding, existing-workspace inspection/attachment, fresh-workspace setup, Home, semester-scoped **Courses**, Tasks, Activity, and local Settings views. Courses is also the academic library: choose a semester, open a class, then browse Syllabi & guides, Readings & references, Lectures, Assignments & exams, Notes & study aids, and other files with bounded read-only previews for supported text, PDF, DOCX, and PPTX files. Folder location (intake or organized) and processing status are separate filters. The top-right profile badge opens a panel for Import material or **Migrate older material** instead of adding separate navigation sections. Settings edits local profile/workspace/import preferences, with playbook preferences sharing the CLI contract. Study chat invokes the installed Codex CLI; provider connection settings and external-service connectors are not yet implemented. The migration view scans an explicitly selected legacy folder, previews every destination, supports selected copy by default, and gates destructive Move behind an additional confirmation. Import uses the native Tauri file picker and drag/drop paths while delegating copying, processing, provenance, Activity, and uncertainty records to the existing CLI/core. The local stdio MCP supports bounded reads, host-gated file import, executable-choice-validated Review decisions, and separate execution for already-approved supported domain changes. It cannot verify that a host showed a confirmation, and has no browser/email/calendar connection. Study practice and saved sets are handled in the Study workspace; the app does not create separate AI-generated Library documents. The macOS distribution path bundles the local CLI and MCP server and supports signed in-app updates. Beta builds use an Academia-specific self-signed code identity and a separate Tauri updater key; they are not notarized, so first launch may require a Gatekeeper approval. The workflow creates draft Apple Silicon and Intel releases. See [the desktop release and MCP guide](docs/desktop-release-and-mcp.md). Windows and Linux packaging remain future work. The old Tkinter app remains as a compatibility fallback while the new shell matures.
 
 ## Optional agents
 

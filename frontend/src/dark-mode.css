@@ -195,7 +195,7 @@ a { color: #242424; }
   .empty-mark, .connection-art { background: #333333; color: #cacaca; }
   .course-code, .course-tag, .course-material-count, .library-file-meta small,
   .row-status, .complete-dot, .history-edit-button, .history-file-preview-link,
-  .history-artifact-link, .library-file-meta em.generated-badge { color: #c8c8c8; }
+  .history-artifact-link { color: #c8c8c8; }
   .row-status.warm, .review-dot, .confidence { color: #bfbfbf; }
   .history-status.status-submitted, .history-status.status-graded,
   .history-status.status-completed { background: #343434; color: #cacaca; }
@@ -257,6 +257,7 @@ a { color: #242424; }
   .coursework-editor input, .coursework-editor select, .coursework-editor textarea,
   .setup-field input, .setup-field select,
   .library-filters select, .chat-source-search, .study-source-filter,
+  .material-filter select,
   .study-workspace input:not([type=checkbox]), .study-workspace textarea,
   .study-workspace select {
     background-color: #191919;
@@ -534,6 +535,9 @@ a { color: #242424; }
     border-color: #505050;
     color: var(--text-strong);
   }
+  .material-category-card strong { color: var(--text-strong); }
+  .material-category-card > span:not(.material-category-icon) { color: var(--text-muted); }
+  .material-category-card b { color: #c8c8c8; }
   .library-tile.selected { background: #2c2c2c; border-color: #565656; }
   .activity-retention-switch { background: #252525; border-color: #414141; }
   .activity-retention-switch button:hover, .activity-retention-switch button.active { background: #353535; color: #ededed; }
@@ -572,8 +576,9 @@ a { color: #242424; }
   .selected-file strong, .result-row strong, .import-results h3 { color: #e0e0e0; }
   .selected-file small, .result-row small { color: #aaa; }
   .course-material-count { background: #303030; border-color: #484848; color: #d8d8d8; }
+  .material-filter > span { color: #a0a0a0; }
+  .material-filter select:focus-visible { border-color: #777; box-shadow: 0 0 0 3px #333; }
   .library-file-meta em { background: #303030; border: 1px solid #464646; color: #d0d0d0; }
-  .library-file-meta em.generated-badge { background: #343434; border-color: #4b4b4b; color: #e0e0e0; }
   .chat-rail-toggle { background: #292929; border-color: #444; color: #d0d0d0; }
   .chat-rail-toggle:hover { background: #3a3a3a; border-color: #5d5d5d; color: #f0f0f0; }
 }
