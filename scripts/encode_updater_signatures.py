@@ -33,9 +33,14 @@ def unwrap_signature(value: str, target: str) -> tuple[str, bool]:
         or not lines[0].startswith("untrusted comment:")
         or not lines[1].startswith("R")
         or not lines[2].startswith("trusted comment:")
-        or not lines[3].startswith("R")
     ):
         raise ValueError(f"{target} does not contain a complete minisign .sig payload")
+    try:
+        global_signature = base64.b64decode(lines[3], validate=True)
+    except binascii.Error as exc:
+        raise ValueError(f"{target} has an invalid Minisign global signature") from exc
+    if len(global_signature) != 64:
+        raise ValueError(f"{target} has an invalid Minisign global signature length")
     return decoded, wrapped
 
 
