@@ -69,13 +69,13 @@ def _category(relative_path: Path) -> str:
         for token in ("lecture", "lectures", "slide", "slides", "recording")
     ):
         return "lectures"
+    if "source_verification" in parts:
+        return "notes"
     if "05_reference" in parts or any(
         token in normalized_name.split()
         for token in ("reading", "readings", "reference", "references", "bibliography", "chapter")
     ) or "source index" in normalized_name:
         return "readings"
-    if "source_verification" in parts:
-        return "notes"
     if any(part in {"02_weeks", "06_knowledge"} for part in parts) or any(
         token in normalized_name.split()
         for token in ("note", "notes", "study", "review", "summary", "guide", "verification")
