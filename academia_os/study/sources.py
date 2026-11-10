@@ -168,7 +168,7 @@ def retrieve(root: Path, semester: str, course: str, *, source_ids: list[str] | 
     if not deep and len(selected) > 12:
         raise ValueError("select at most 12 study sources per request")
     if not source_ids:
-        selected = [item for item in available if item['category'] != 'generated'][:MAX_DEEP_SOURCES if deep else 12]
+        selected = available[:MAX_DEEP_SOURCES if deep else 12]
     terms = set(re.findall(r'[a-z0-9]{2,}', query.casefold())) - SEARCH_STOP_WORDS
     heap: list[tuple[int, int, dict[str, Any]]] = []
     unranked_chunks: list[dict[str, Any]] = []
@@ -179,12 +179,12 @@ def retrieve(root: Path, semester: str, course: str, *, source_ids: list[str] | 
     sequence = 0
     ocr_page_budget = MAX_STUDY_OCR_PAGES
     ocr_deadline = time.monotonic() + MAX_STUDY_OCR_SECONDS
-    non_generated_count = len([item for item in available if item['category'] != 'generated'])
-    if not source_ids and non_generated_count > (MAX_DEEP_SOURCES if deep else 12):
+    available_count = len(available)
+    if not source_ids and available_count > (MAX_DEEP_SOURCES if deep else 12):
         if deep:
-            warnings.append(f"Deep topic search examined the first {MAX_DEEP_SOURCES} non-generated course sources; narrow the class selection to search beyond that set.")
+            warnings.append(f"Deep topic search examined the first {MAX_DEEP_SOURCES} course sources; narrow the class selection to search beyond that set.")
         else:
-            warnings.append('Topic search examined the first 12 non-generated course sources. Select specific Library IDs to search other material.')
+            warnings.append('Topic search examined the first 12 course sources. Select specific Library IDs to search other material.')
     for item in selected:
         path = safe_path(root, Path(item['path']))
         try:

@@ -188,7 +188,7 @@ def test_agent_capabilities_are_machine_readable_and_categorized(tmp_path: Path)
     allowed_ids = {item["id"] for item in value["allowed_directly"]}
     prohibited_ids = {item["id"] for item in value["prohibited"]}
     assert "read_structured_context" in allowed_ids
-    assert "create_ai_generated_artifact" in allowed_ids
+    assert "create_ai_generated_artifact" not in allowed_ids
     assert "record_user_confirmed_coursework" in allowed_ids
     assert "school_submission" in prohibited_ids
     assert "authentication" in prohibited_ids

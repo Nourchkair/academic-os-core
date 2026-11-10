@@ -101,7 +101,8 @@ def test_research_community_practice_and_visual_recipes_declare_authority() -> N
     assert research["authority_notes"]
     assert community["authority_notes"]["authority"] == "non_authoritative_context"
     assert community["authority_notes"]["cannot_establish"]
-    assert "academia artifact create" in practice["academia_interfaces"]
+    assert "academia study" in practice["academia_interfaces"]
+    assert "academia artifact create" not in practice["academia_interfaces"]
     assert "provenance" in " ".join(practice["safety_rules"]).lower()
     assert visual["authority_notes"]["default"] == "supplementary_unless_official"
 

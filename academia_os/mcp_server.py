@@ -10,9 +10,9 @@ from urllib.parse import urlsplit, urlunsplit
 from pathlib import Path
 from typing import Any
 
+from .library import filter_material
 from .version import __version__
 
-# Allow a 2 MB artifact body even when an MCP client JSON-escapes its text.
 _MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 _PROTOCOL_VERSION = "2024-11-05"
 
@@ -113,11 +113,13 @@ _TOOLS = [
     ),
     _tool(
         "academia_library",
-        "List up to 100 bounded Library records by course, category, or search text. Returns metadata, not file bodies.",
+        "List up to 100 bounded Library records by course, document type, inbox location, processing status, or search text. Returns metadata, not file bodies.",
         {
             "semester": {"type": "string", "description": "Optional exact semester folder name."},
             "course": {"type": "string", "description": "Optional exact course ID, code, or name."},
-            "category": {"type": "string", "enum": ["all", "syllabi", "readings", "notes", "generated", "imports", "other"]},
+            "category": {"type": "string", "enum": ["all", "syllabi", "readings", "lectures", "assessments", "notes", "other"]},
+            "location": {"type": "string", "enum": ["all", "inbox", "organized"]},
+            "processing_status": {"type": "string", "enum": ["all", "not_processed", "in_progress", "processed", "failed", "untracked"]},
             "query": {"type": "string"},
             "limit": {"type": "integer", "minimum": 1, "maximum": 100},
         },
@@ -150,21 +152,6 @@ _TOOLS = [
             "source_url": {"type": "string", "description": "Optional source page URL for provenance; query strings and fragments are removed."},
         },
         ["source_path", "target_id"],
-        annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
-    ),
-    _tool(
-        "academia_create_artifact",
-        "Create a new AI-generated Markdown artifact in a recognized course. This is create-only and cannot overwrite existing material. Use it only when the student asks to save generated material; source-derived kinds require exact workspace-relative source references.",
-        {
-            "course": {"type": "string", "description": "Exact course id, code, or name."},
-            "semester": {"type": "string", "description": "Optional exact semester folder name."},
-            "kind": {"type": "string", "enum": ["study_guide", "reading_summary", "practice_questions", "study_plan", "exam_review", "class_notes", "source_notes", "assignment_outline", "working_draft", "other"]},
-            "title": {"type": "string"},
-            "content": {"type": "string", "description": "Markdown/text body, at most 2 MB."},
-            "sources": {"type": "array", "items": {"type": "string"}, "description": "Optional workspace-relative Library item ids."},
-            "domain_refs": {"type": "array", "items": {"type": "string"}, "description": "Optional evidence-backed local domain ids."},
-        },
-        ["course", "kind", "title", "content"],
         annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
     ),
 ]
@@ -365,8 +352,14 @@ def _call_tool(name: str, values: Any, profile: Path | None) -> Any:
         return _run_cli(args, profile)
     if name == "academia_library":
         category = values.get("category", "all")
-        if category not in {"all", "syllabi", "readings", "notes", "generated", "imports", "other"}:
+        if not isinstance(category, str) or category not in {"all", "syllabi", "readings", "lectures", "assessments", "notes", "other"}:
             raise McpError("Use a supported Library category.")
+        location = values.get("location", "all")
+        if not isinstance(location, str) or location not in {"all", "inbox", "organized"}:
+            raise McpError("Use a supported Library location.")
+        processing_status = values.get("processing_status", "all")
+        if not isinstance(processing_status, str) or processing_status not in {"all", "not_processed", "in_progress", "processed", "failed", "untracked"}:
+            raise McpError("Use a supported Library processing status.")
         limit = values.get("limit", 100)
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
             raise McpError("Library limit must be an integer from 1 to 100.")
@@ -378,13 +371,15 @@ def _call_tool(name: str, values: Any, profile: Path | None) -> Any:
         library = context.get("sources", {}).get("library_items", []) if isinstance(context, dict) else []
         if not isinstance(library, list):
             raise McpError("Academia returned an invalid bounded Library catalog.", -32000)
-        query = str(values.get("query", "")).strip().casefold()
-        selected = [
-            item for item in library
-            if isinstance(item, dict)
-            and (category == "all" or (item.get("intake_status") == "inbox" if category == "imports" else item.get("category") == category))
-            and (not query or query in f"{item.get('name', '')} {item.get('relative_path', '')}".casefold())
-        ]
+        if any(not isinstance(item, dict) for item in library):
+            raise McpError("Academia returned an invalid bounded Library catalog.", -32000)
+        selected = filter_material(
+            library,
+            category=category,
+            location=location,
+            processing_status=processing_status,
+            query=str(values.get("query", "")),
+        )
         material_count = context.get("workspace", {}).get("material_count", len(library))
         return {
             "items": selected[:limit],
@@ -442,28 +437,6 @@ def _call_tool(name: str, values: Any, profile: Path | None) -> Any:
         _optional(args, "--source-label", source_label)
         result = _run_cli(args, profile)
         return {"import": result, "target": selected, "original_preserved": True, "processing_status": result.get("processing_status") if isinstance(result, dict) else None}
-    if name == "academia_create_artifact":
-        course = values.get("course")
-        kind = values.get("kind")
-        title = values.get("title")
-        content = values.get("content")
-        if not all(isinstance(value, str) and value.strip() for value in (course, kind, title, content)):
-            raise McpError("course, kind, title, and content must be non-empty strings.")
-        if len(content.encode("utf-8")) > 2 * 1024 * 1024:
-            raise McpError("artifact content exceeds the 2 MB limit.")
-        sources = values.get("sources", [])
-        domain_refs = values.get("domain_refs", [])
-        if not isinstance(sources, list) or len(sources) > 100 or not all(isinstance(item, str) and item.strip() for item in sources):
-            raise McpError("sources must be an array of at most 100 non-empty Library ids.")
-        if not isinstance(domain_refs, list) or len(domain_refs) > 100 or not all(isinstance(item, str) and item.strip() for item in domain_refs):
-            raise McpError("domain_refs must be an array of at most 100 non-empty ids.")
-        args = ["artifact", "create", "--course", course, "--kind", kind, "--title", title, "--content-file", "-", "--created-by", "mcp"]
-        _optional(args, "--semester", values.get("semester"))
-        for source_ref in sources:
-            args.extend(["--source", source_ref])
-        for domain_ref in domain_refs:
-            args.extend(["--domain-ref", domain_ref])
-        return _run_cli(args, profile, input_text=content)
     raise McpError(f"Unknown Academia MCP tool: {name}")
 
 
@@ -489,7 +462,7 @@ def _handle(message: Any, profile: Path | None) -> dict[str, Any] | None:
             "protocolVersion": protocol,
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": {"name": "academia-os", "title": "Academia OS", "version": __version__},
-            "instructions": "Academia tools read bounded local academic context. Source bodies are available only through exact Library item ids. Before importing, ask the student to confirm the exact file and inbox; the server cannot verify that a host displayed this confirmation. Review decisions must match an exact executable choice and be confirmed by the student; execution is a separate call allowed only for an already-approved supported action. Imports preserve originals and may start local extraction. Create generated material only when the student requests it. School websites remain read-only: do not submit coursework, message staff, authenticate, or access credentials.",
+            "instructions": "Academia tools read bounded local academic context. Source bodies are available only through exact Library item ids. Before importing, ask the student to confirm the exact file and inbox; the server cannot verify that a host displayed this confirmation. Review decisions must match an exact executable choice and be confirmed by the student; execution is a separate call allowed only for an already-approved supported action. Imports preserve originals and may start local extraction. Study sets and practice are managed through Academia's Study interface. School websites remain read-only: do not submit coursework, message staff, authenticate, or access credentials.",
         })
     if method == "ping":
         return _response(request_id, {})

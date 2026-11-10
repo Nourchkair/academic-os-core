@@ -6,10 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 from academia_os.actions import ActionStore, ActionType
-from academia_os.artifacts import create_generated_artifact
 from academia_os.processing import ProcessingStore
 from academia_os.review import ReviewQueue
 from academia_os.workflow import ApprovalWorkflow
@@ -168,7 +165,7 @@ def test_context_redacts_sensitive_keys_without_destroying_academic_language(tmp
     assert item["evidence"][0]["password"] == "[REDACTED]"
 
 
-def test_context_source_catalog_includes_metadata_categories_without_bodies(tmp_path: Path) -> None:
+def test_context_source_catalog_excludes_retired_generated_documents(tmp_path: Path) -> None:
     _, root, profile = prepared_workspace(tmp_path)
     course = root / "Fall 2026" / "POL 2103 - Politics"
     syllabus = course / "01_COURSE" / "syllabus.md"
@@ -176,16 +173,9 @@ def test_context_source_catalog_includes_metadata_categories_without_bodies(tmp_
     note = course / "02_WEEKS" / "week-4-notes.md"
     note.parent.mkdir()
     note.write_text("NOTE BODY MUST NOT APPEAR", encoding="utf-8")
-    create_generated_artifact(
-        root,
-        semester="Fall 2026",
-        course_id="POL 2103",
-        kind="study_guide",
-        title="Generated guide",
-        content="GENERATED BODY MUST NOT APPEAR",
-        source_refs=[str(syllabus)],
-        created_by="codex",
-    )
+    legacy_generated = course / "06_KNOWLEDGE" / "AI_GENERATED"
+    legacy_generated.mkdir(parents=True)
+    (legacy_generated / "generated-guide.md").write_text("GENERATED BODY MUST NOT APPEAR", encoding="utf-8")
 
     result = run_cli(profile, "agent", "context", "--scope", "course", "--course", "POL 2103", "--detail", "deep", "--json")
 
@@ -193,64 +183,11 @@ def test_context_source_catalog_includes_metadata_categories_without_bodies(tmp_
     value = json.loads(result.stdout)
     catalog = value["sources"]["library_items"]
     categories = {item["category"] for item in catalog}
-    assert {"syllabi", "readings", "notes", "generated"}.issubset(categories)
+    assert {"syllabi", "readings", "notes"}.issubset(categories)
+    assert "generated" not in categories
     for item in catalog:
         assert set(item) >= {"id", "name", "relative_path", "course_id", "category", "provenance", "source_type"}
     assert "SYLLABUS BODY MUST NOT APPEAR" not in result.stdout
     assert "NOTE BODY MUST NOT APPEAR" not in result.stdout
     assert "GENERATED BODY MUST NOT APPEAR" not in result.stdout
-
-
-def test_cross_course_and_semester_inbox_sources_keep_structural_course_identity(tmp_path: Path) -> None:
-    _, root, _ = prepared_workspace(tmp_path)
-    other_course = root / "Fall 2026" / "ECO 2110 - Economics"
-    (other_course / "01_COURSE").mkdir(parents=True)
-    (other_course / "05_REFERENCE").mkdir()
-    other_source = other_course / "05_REFERENCE" / "economics-reading.md"
-    other_source.write_text("economics source", encoding="utf-8")
-    semester_source = root / "Fall 2026" / "00_INBOX" / "unassigned.md"
-    semester_source.parent.mkdir()
-    semester_source.write_text("unassigned source", encoding="utf-8")
-
-    cross_course = create_generated_artifact(
-        root,
-        semester="Fall 2026",
-        course_id="POL 2103",
-        kind="study_guide",
-        title="Cross-course guide",
-        content="cross-course synthesis",
-        source_refs=[str(other_source)],
-        created_by="codex",
-    )
-    semester_level = create_generated_artifact(
-        root,
-        semester="Fall 2026",
-        course_id="Politics",
-        kind="study_guide",
-        title="Inbox guide",
-        content="semester-level synthesis",
-        source_refs=[str(semester_source)],
-        created_by="codex",
-    )
-
-    assert cross_course["source_refs"][0]["course_id"] == other_course.name
-    assert cross_course["source_refs"][0]["course_id"] != cross_course["course_id"]
-    assert semester_level["source_refs"][0]["course_id"] is None
-
-
-def test_artifact_rejects_files_outside_recognized_academic_locations(tmp_path: Path) -> None:
-    _, root, _ = prepared_workspace(tmp_path)
-    outside = tmp_path / "outside.md"
-    outside.write_text("outside", encoding="utf-8")
-
-    with pytest.raises(ValueError, match="recognized academic"):
-        create_generated_artifact(
-            root,
-            semester="Fall 2026",
-            course_id="POL 2103",
-            kind="study_guide",
-            title="Unsafe source",
-            content="body",
-            source_refs=[str(outside)],
-            created_by="codex",
-        )
+    assert all("AI_GENERATED" not in item["relative_path"] for item in catalog)

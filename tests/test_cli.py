@@ -48,7 +48,7 @@ def test_library_command_lists_material_in_the_active_semester(tmp_path: Path) -
     announcement = next(item for item in items if item["name"] == "announcement.pdf")
     assert announcement["category"] == "other"
     assert announcement["intake_status"] == "inbox"
-    intake = run_cli(tmp_path, "library", "--category", "imports", "--json")
+    intake = run_cli(tmp_path, "library", "--location", "inbox", "--json")
     assert intake.returncode == 0, intake.stderr
     assert any(item["name"] == "announcement.pdf" for item in json.loads(intake.stdout))
 

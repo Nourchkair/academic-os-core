@@ -78,8 +78,8 @@ jobs:
         with:
           projectPath: frontend
           tagName: ${{ inputs.release_tag || github.ref_name }}
-          releaseName: Academia OS ${{ inputs.release_tag || github.ref_name }}
-          releaseBody: Academia OS beta DMGs and signed in-app update artifacts. The app is not notarized; first launch may require a Gatekeeper approval.
+          releaseName: AcademiaOS ${{ inputs.release_tag || github.ref_name }}
+          releaseBody: AcademiaOS beta DMGs and signed in-app update artifacts. The app is not notarized; first launch may require a Gatekeeper approval.
           # Keep the release unpublished until the signed bundled CLI has
           # started successfully on both macOS architectures.
           releaseDraft: true
@@ -106,7 +106,7 @@ jobs:
           trap cleanup EXIT
           hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mount_point"
 
-          cli="$mount_point/Academia OS.app/Contents/MacOS/academia"
+          cli="$mount_point/AcademiaOS.app/Contents/MacOS/academia"
           if [ ! -x "$cli" ]; then
             echo "The signed Academia CLI is missing from the packaged DMG" >&2
             exit 1

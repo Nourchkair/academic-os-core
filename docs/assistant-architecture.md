@@ -7,7 +7,7 @@ Academia OS remains a local-first academic system. It supports two ways to use a
 1. **In-app Study chat:** The dashboard invokes the user's installed Codex CLI session. The student selects a model and only explicitly submitted context is sent to that provider. Claude subscription OAuth is not offered in Academia because Anthropic reserves it for Claude Code and other native Anthropic apps; Claude Code can connect as a separate external agent. External MCP connections are not wired into Study chat yet.
 2. **External agent:** Codex, Claude, or another compatible host connects to Academia OS through its local CLI/MCP interface and uses its own provider and tools.
 
-Both paths must use the same academic context, import, study, artifact, Review, provenance, and Activity contracts. There must not be separate academic logic or a second academic database for the assistant.
+Both paths must use the same academic context, import, Study, Review, provenance, and Activity contracts. There must not be separate academic logic or a second academic database for the assistant.
 
 ## Components
 
@@ -21,7 +21,7 @@ Dashboard assistant UI
 Shared Academia CLI/API/services  ◀── Codex / Claude / other external hosts
   ├─ bounded academic context and Library access
   ├─ import and processing lifecycle
-  ├─ Study domain and generated artifacts
+  ├─ Study domain and saved practice
   ├─ Review / approval / verification
   └─ Activity and provenance
           │
@@ -69,7 +69,7 @@ The portal browser connector and in-app tool orchestration are future work. The 
 
 ### Stage 1 — Shared tool contracts
 
-**In progress.** The local MCP provides bounded context reads, exact inbox targets, a host-gated local-file import contract with processing status, executable-choice-validated Review decisions, separate execution for already-approved supported domain changes, processing-status reads, and create-only generated artifacts. Activity attributes MCP-initiated actions to `agent:mcp`. Hosts still own the confirmation UI because the stdio server cannot prove that a human saw a prompt.
+**In progress.** The local MCP provides bounded context reads, exact inbox targets, a host-gated local-file import contract with processing status, executable-choice-validated Review decisions, separate execution for already-approved supported domain changes, and processing-status reads. It has no generated-document writer; saved practice goes through the Study interface. Activity attributes MCP-initiated actions to `agent:mcp`. Hosts still own the confirmation UI because the stdio server cannot prove that a human saw a prompt.
 
 Remaining within this stage: ensure import/artefact actions have clear student confirmation in each compatible host and expose actionable Review workflows consistently.
 

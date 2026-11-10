@@ -45,18 +45,13 @@ export type LibraryItem = {
   relative_path: string
   semester: string
   course_id?: string | null
-  category: 'syllabi' | 'readings' | 'notes' | 'generated' | 'imports' | 'other'
+  category: 'syllabi' | 'readings' | 'lectures' | 'assessments' | 'notes' | 'other'
   intake_status?: 'inbox' | 'organized'
   extension: string
   size: number
   modified_at: string
   provenance?: string | null
   source_type?: string
-  artifact_id?: string | null
-  artifact_kind?: string | null
-  created_by?: string | null
-  authoritative?: boolean | null
-  source_refs?: Array<Record<string, unknown>>
   processing_status?: 'DETECTED' | 'PENDING' | 'PROCESSING' | 'VERIFIED' | 'ACKNOWLEDGED' | 'FAILED'
   extraction_status?: string | null
 }

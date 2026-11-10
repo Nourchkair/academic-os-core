@@ -100,7 +100,7 @@ def test_health_endpoint_advertises_agent_transport_command(tmp_path: Path) -> N
 
     assert status == 200
     assert "agent" in json.loads(payload)["commands"]
-    assert "artifact" in json.loads(payload)["commands"]
+    assert "artifact" not in json.loads(payload)["commands"]
     assert "history" in json.loads(payload)["commands"]
 
 

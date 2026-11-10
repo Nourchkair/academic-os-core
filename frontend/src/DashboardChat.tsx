@@ -208,7 +208,6 @@ export function DashboardChat({ courses, items, semester, onResumeStudySession, 
   const [excludedCourseSourceIds, setExcludedCourseSourceIds] = useState<string[]>([])
   const [lastRetrievedSourceIds, setLastRetrievedSourceIds] = useState<string[]>([])
   const [academicContext, setAcademicContext] = useState<CourseAcademicContext | null>(null)
-  const [refreshingStudyContext, setRefreshingStudyContext] = useState(false)
   const [sourceFilter, setSourceFilter] = useState('')
   const [sourcePickerFilter, setSourcePickerFilter] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -273,23 +272,6 @@ export function DashboardChat({ courses, items, semester, onResumeStudySession, 
   const selectedSourceIdSet = useMemo(() => new Set(selectedItems.map((item) => item.id)), [selectedItems])
   const lastRetrievedSourceIdSet = useMemo(() => new Set(lastRetrievedSourceIds), [lastRetrievedSourceIds])
   const academicContextLoading = Boolean(courseId && academicContext?.courseId !== courseId)
-  const visibleAcademicContext = academicContext?.courseId === courseId ? academicContext : null
-  const refreshStudyContext = async () => {
-    if (!courseId) return
-    setRefreshingStudyContext(true)
-    try {
-      const overview = await api.study<StudyOverview>(['overview', '--course', courseId, ...(semester ? ['--semester', semester] : [])])
-      const sessionDetails = await Promise.allSettled((overview.sessions ?? []).slice(-6).map((session) => api.study<{ id: string; score?: { correct: number; graded: number; self_assessed: number } }>([
-        'session', '--course', courseId, ...(semester ? ['--semester', semester] : []), '--session', session.id,
-      ])))
-      const scores = new Map(sessionDetails.flatMap((result) => result.status === 'fulfilled' ? [[result.value.id, result.value.score] as const] : []))
-      setAcademicContext((current) => current?.courseId === courseId ? { ...current, study: { ...overview, sessions: overview.sessions?.map((session) => ({ ...session, score: scores.get(session.id) })) } } : current)
-    } catch (reason) {
-      setError(`Study records could not be refreshed. ${String(reason)}`)
-    } finally {
-      setRefreshingStudyContext(false)
-    }
-  }
   const filteredItems = useMemo(() => {
     const query = sourceFilter.trim().toLocaleLowerCase()
     return readableItems.filter((item) => {
@@ -334,8 +316,7 @@ export function DashboardChat({ courses, items, semester, onResumeStudySession, 
   const modelOptions = activeProvider?.models ?? []
   const defaultModel = activeProvider?.default_model ?? ''
   const isAvailable = Boolean(activeProvider?.available)
-  const providerNotice = activeProvider?.notice ?? 'Checking local provider sign-in…'
-  const statusLabel = `${activeProvider?.name ?? provider} · ${providerNotice}`
+  const statusLabel = `${activeProvider?.name ?? provider} · ${isAvailable ? 'connected' : 'not connected'}`
   const thinkingOptions = effortOptions
 
   useEffect(() => {
@@ -800,27 +781,6 @@ export function DashboardChat({ courses, items, semester, onResumeStudySession, 
     <section className={`chat-workspace ${!sourcesOpen ? 'sources-collapsed' : ''} ${!studioOpen ? 'studio-collapsed' : ''}`} aria-label="Study chat workspace">
       {sourcesOpen ? <aside className="chat-sources-panel" aria-label="Sources in this chat">
         <header className="chat-panel-heading"><div><p className="eyebrow">Context</p><h3>Sources</h3></div><div className="chat-panel-actions"><button className="chat-source-bulk-toggle" type="button" onClick={toggleAllVisibleSources} disabled={!filteredItems.length} aria-label={`${allVisibleSourcesSelected ? 'Uncheck' : 'Check'} all ${sourceFilter ? 'matching ' : ''}sources`} data-tooltip={`${allVisibleSourcesSelected ? 'Uncheck' : 'Check'} all ${sourceFilter ? 'matching ' : ''}sources`} data-tooltip-side="bottom"><span>{allVisibleSourcesSelected ? 'Uncheck all' : 'Check all'}</span><small>{availableSourceCount} available</small></button><button className="chat-panel-collapse" onClick={() => setSourcesOpen(false)} aria-label="Collapse sources panel" data-tooltip="Collapse sources" data-tooltip-side="bottom">‹</button></div></header>
-        <p className="chat-panel-note">{course ? `Checked sources for ${course.code} are searched for citable passages. Study records below can tailor the chat, but are not source citations.` : 'Choose a class or add sources. Checked materials provide citable passages; saved study records are available after you select a class.'}</p>
-        <section className="chat-study-context" aria-label="Automatically included class study context">
-          <header><strong>Class study context</strong><span>{course ? 'Included automatically' : 'Select a class'}</span>{visibleAcademicContext && <button type="button" disabled={refreshingStudyContext} onClick={() => void refreshStudyContext()}>{refreshingStudyContext ? 'Checking…' : 'Refresh'}</button>}</header>
-          {!course ? <p>Choose a course in the composer to include its saved practice, notes, exam scope, and coursework history.</p>
-            : academicContextLoading ? <p role="status">Loading this class’s study records…</p>
-              : !visibleAcademicContext ? <p>Class records could not be loaded. Chat will not assume there are no upcoming assessments.</p>
-                : <>
-                  <div className="chat-study-context-metrics"><span><strong>{visibleAcademicContext.study?.due_count ?? 0}</strong><small>due reviews</small></span><span><strong>{visibleAcademicContext.study?.attempt_count ?? 0}</strong><small>practice attempts</small></span><span><strong>{visibleAcademicContext.study?.annotations?.length ?? 0}</strong><small>study notes</small></span></div>
-                  <details><summary>Included records</summary><ul>
-                    <li><strong>Saved exam scope</strong><span>{(visibleAcademicContext.study?.exams ?? []).length ? (visibleAcademicContext.study?.exams ?? []).slice(0, 2).map((exam) => `${exam.title}${exam.date ? ` · ${exam.date}` : ''}`).join('; ') : 'No saved exam scope'}</span></li>
-                    <li><strong>Topics marked to revisit</strong><span>{(visibleAcademicContext.study?.topics ?? []).filter((entry) => entry.needs_review).slice(0, 3).map((entry) => entry.topic).join(', ') || 'None recorded'}</span></li>
-                    <li><strong>Recent practice</strong><span>{(visibleAcademicContext.study?.sessions ?? []).slice(-3).reverse().map((entry) => `${entry.title}${entry.score?.graded ? ` · ${entry.score.correct}/${entry.score.graded} checked correct` : ''}${entry.score?.self_assessed ? ` · ${entry.score.self_assessed} self-assessments` : ''}`).join('; ') || 'None recorded'}</span></li>
-                    <li><strong>Open course tasks</strong><span>{visibleAcademicContext.tasks.filter((task) => !task.completed).slice(0, 2).map((task) => `${task.title}${task.due_date ? ` · ${task.due_date}` : ''}`).join('; ') || 'None recorded'}</span></li>
-                    <li><strong>Active coursework history</strong><span>{visibleAcademicContext.history.filter((entry) => entry.status === 'planned' || entry.status === 'in_progress').slice(0, 2).map((entry) => `${entry.title} · ${entry.status}`).join('; ') || 'None recorded'}</span></li>
-                    <li><strong>Recent coursework history</strong><span>{visibleAcademicContext.history.slice().sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 2).map((entry) => `${entry.title} · ${entry.status}${entry.grade ? ` · ${entry.grade} as recorded` : ''}`).join('; ') || 'None recorded'}</span></li>
-                    <li><strong>Recent study notes</strong><span>{(visibleAcademicContext.study?.annotations ?? []).slice(-3).reverse().map((note) => `${note.topic || note.kind.replaceAll('_', ' ')}${note.stale_source ? ` · source ${note.stale_source.reason}` : ''}`).join(', ') || 'None recorded'}</span></li>
-                  </ul></details>
-                  {visibleAcademicContext.unavailable.length > 0 && <p className="chat-study-context-warning">Some records could not be checked: {visibleAcademicContext.unavailable.join(', ')}.</p>}
-                  <p className="chat-study-context-footnote">These records personalize study help; factual claims still need a checked source passage or attachment.</p>
-                </>}
-        </section>
         <label className="chat-source-search"><span aria-hidden="true">⌕</span><input ref={sourceFilterRef} value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} placeholder={course ? `Find ${course.code} sources` : 'Find class sources'} aria-label="Search Academia sources" /></label>
           {draft.trim() && <section className="chat-source-plan" aria-live="polite"><header><strong>Full-text source search</strong><span>{selectedItems.length} selected</span></header><p>Every selected source’s extractable text is searched. Relevant passages with page locations are supplied to the chat, and any extraction limits are reported.</p></section>}
         <div className="chat-source-groups">
@@ -834,7 +794,7 @@ export function DashboardChat({ courses, items, semester, onResumeStudySession, 
                 return <label className={`chat-source-row ${isAvailable ? 'selected' : ''} ${wasRetrieved ? 'retrieved' : ''}`} key={item.id}>
                 <input type="checkbox" checked={isAvailable} onChange={() => toggleSource(item.id)} aria-label={`${isAvailable ? item.course_id === courseId ? 'Exclude' : 'Remove' : 'Add'} ${item.name} ${isAvailable && item.course_id === courseId ? 'from' : 'in'} this chat`} />
                 <span className="chat-source-file-icon" aria-hidden="true">{item.extension.replace('.', '').slice(0, 3).toUpperCase()}</span>
-                <span className="chat-source-copy"><strong>{item.name}</strong><small>{wasRetrieved ? 'Searched for latest reply · ' : ''}{item.category === 'imports' ? 'Intake' : item.category} · {item.extension.toUpperCase()}</small></span>
+                <span className="chat-source-copy"><strong>{item.name}</strong><small>{wasRetrieved ? 'Searched for latest reply · ' : ''}{item.category.replaceAll('_', ' ')}{item.intake_status === 'inbox' ? ' · Intake' : ''} · {item.extension.toUpperCase()}</small></span>
               </label>})}
             </section>
           })}
@@ -851,7 +811,6 @@ export function DashboardChat({ courses, items, semester, onResumeStudySession, 
         </div>
         <div className="chat-composer-wrap">
           {error && <p className="chat-error" role="alert">{error}</p>}
-          <p className={`chat-provider-note ${isAvailable ? '' : 'disconnected'}`} role="status"><strong>{activeProvider?.name ?? 'AI provider'}:</strong> {providerNotice} Submitted messages may include your conversation, selected class records and source excerpts, and attached files.</p>
           {showAttachMenu && <div className="chat-attach-menu" role="menu" aria-label="Add to this chat">
             <button role="menuitem" onClick={() => { setShowAttachMenu(false); fileInputRef.current?.click() }}><span>↑</span><span><strong>Add a file to this chat</strong><small>Images, PDF, DOCX, PPTX, and text · 12 MB each</small></span></button>
             <button role="menuitem" onClick={() => { setShowAttachMenu(false); setShowSourcePicker(true) }}><span>▤</span><span><strong>Add Academia sources</strong><small>Choose materials from any class</small></span></button>
@@ -888,7 +847,7 @@ export function DashboardChat({ courses, items, semester, onResumeStudySession, 
       <ChatStudyStudio courses={courses} course={course} items={readableItems} selectedSourceIds={selectedItems.map((item) => item.id)} semester={semester} provider={provider} model={model || defaultModel || undefined} isVisible={studioOpen} onCollapse={() => setStudioOpen(false)} chatRequest={chatStudyRequest} onChatRequestComplete={onChatStudyRequestComplete} />
       {!studioOpen && <aside className="chat-study-panel chat-collapsed-rail studio-collapsed-rail" aria-label="Study modes panel collapsed"><button className="chat-rail-toggle" type="button" onClick={() => setStudioOpen(true)} aria-label="Expand study modes panel" data-tooltip="Studio" data-tooltip-side="left">‹</button></aside>}
     </section>
-    {showSourcePicker && <div className="chat-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowSourcePicker(false) }}><section className="chat-dialog chat-source-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="chat-source-picker-title"><header><div><p className="eyebrow">Add to this chat</p><h3 id="chat-source-picker-title">Choose Academia sources</h3><p>{course ? `Browse materials outside ${course.code}. They’ll be attached only to this chat.` : 'Choose material from any class to add to this chat.'}</p></div><button className="chat-dialog-close" onClick={() => setShowSourcePicker(false)} aria-label="Close source picker">×</button></header><label className="chat-source-search"><span aria-hidden="true">⌕</span><input value={sourcePickerFilter} onChange={(event) => setSourcePickerFilter(event.target.value)} placeholder="Search other classes and sources" aria-label="Search sources to add" /></label><div className="chat-picker-source-groups">{pickerGroups.map(([groupId, group]) => <section className="chat-source-group" key={groupId}><header><strong>{group.name}</strong><span>{group.items.filter((item) => sourceIds.includes(item.id)).length} added</span></header>{group.items.map((item) => <label className={`chat-source-row ${sourceIds.includes(item.id) ? 'selected' : ''}`} key={item.id}><input type="checkbox" checked={sourceIds.includes(item.id)} onChange={() => toggleSource(item.id)} aria-label={`${sourceIds.includes(item.id) ? 'Remove' : 'Add'} ${item.name} ${sourceIds.includes(item.id) ? 'from' : 'to'} this chat`} /><span className="chat-source-file-icon" aria-hidden="true">{item.extension.replace('.', '').slice(0, 3).toUpperCase()}</span><span className="chat-source-copy"><strong>{item.name}</strong><small>{item.category === 'imports' ? 'Intake' : item.category} · {item.extension.toUpperCase()}</small></span></label>)}</section>)}{!pickerGroups.length && <div className="chat-sources-empty"><strong>No sources found</strong><p>Try another search or import material into a class first.</p></div>}</div><footer><span>{selectedItems.filter((item) => item.course_id !== courseId).length} additional source{selectedItems.filter((item) => item.course_id !== courseId).length === 1 ? '' : 's'} attached</span><button className="primary-button" onClick={() => setShowSourcePicker(false)}>Done</button></footer></section></div>}
+    {showSourcePicker && <div className="chat-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowSourcePicker(false) }}><section className="chat-dialog chat-source-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="chat-source-picker-title"><header><div><p className="eyebrow">Add to this chat</p><h3 id="chat-source-picker-title">Choose Academia sources</h3><p>{course ? `Browse materials outside ${course.code}. They’ll be attached only to this chat.` : 'Choose material from any class to add to this chat.'}</p></div><button className="chat-dialog-close" onClick={() => setShowSourcePicker(false)} aria-label="Close source picker">×</button></header><label className="chat-source-search"><span aria-hidden="true">⌕</span><input value={sourcePickerFilter} onChange={(event) => setSourcePickerFilter(event.target.value)} placeholder="Search other classes and sources" aria-label="Search sources to add" /></label><div className="chat-picker-source-groups">{pickerGroups.map(([groupId, group]) => <section className="chat-source-group" key={groupId}><header><strong>{group.name}</strong><span>{group.items.filter((item) => sourceIds.includes(item.id)).length} added</span></header>{group.items.map((item) => <label className={`chat-source-row ${sourceIds.includes(item.id) ? 'selected' : ''}`} key={item.id}><input type="checkbox" checked={sourceIds.includes(item.id)} onChange={() => toggleSource(item.id)} aria-label={`${sourceIds.includes(item.id) ? 'Remove' : 'Add'} ${item.name} ${sourceIds.includes(item.id) ? 'from' : 'to'} this chat`} /><span className="chat-source-file-icon" aria-hidden="true">{item.extension.replace('.', '').slice(0, 3).toUpperCase()}</span><span className="chat-source-copy"><strong>{item.name}</strong><small>{item.category.replaceAll('_', ' ')}{item.intake_status === 'inbox' ? ' · Intake' : ''} · {item.extension.toUpperCase()}</small></span></label>)}</section>)}{!pickerGroups.length && <div className="chat-sources-empty"><strong>No sources found</strong><p>Try another search or import material into a class first.</p></div>}</div><footer><span>{selectedItems.filter((item) => item.course_id !== courseId).length} additional source{selectedItems.filter((item) => item.course_id !== courseId).length === 1 ? '' : 's'} attached</span><button className="primary-button" onClick={() => setShowSourcePicker(false)}>Done</button></footer></section></div>}
     {historyOpen && <div className="chat-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setHistoryOpen(false) }}><section className="chat-dialog chat-history-dialog" role="dialog" aria-modal="true" aria-labelledby="chat-history-title">
       <header><div><p className="eyebrow">Pick up where you left off</p><h3 id="chat-history-title">Chat & study history</h3><p>Conversations are saved in this browser on this device and stay until you delete them or clear browser data. Saved practice sessions remain in the class workspace. File contents and image previews are not retained; reattach original files to use them again.</p></div><button className="chat-dialog-close" onClick={() => setHistoryOpen(false)} aria-label="Close chat and study history">×</button></header>
       <div className="chat-history-content">

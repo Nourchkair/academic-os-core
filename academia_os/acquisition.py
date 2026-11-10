@@ -56,7 +56,6 @@ def capability_report() -> dict[str, Any]:
             {"id": "read_authorized_workspace_files", "label": "Read authorized academic files through bounded workspace interfaces", "mode": "direct"},
             {"id": "inspect_domain_state", "label": "Inspect evidence-backed domain state", "mode": "direct"},
             {"id": "inspect_review", "label": "Inspect unresolved Review decisions", "mode": "direct"},
-            {"id": "create_ai_generated_artifact", "label": "Create clearly marked AI-generated secondary material", "mode": "create_only"},
             {"id": "create_non_destructive_index", "label": "Create or rebuild non-destructive local indexes", "mode": "direct"},
             {"id": "study", "label": "Create cited study sets, run practice, record student answers and review progress through academia study", "mode": "shared_cli_api"},
             {"id": "read_activity_changes", "label": "Read append-only Activity changes with a cursor", "mode": "direct"},
@@ -78,7 +77,7 @@ def capability_report() -> dict[str, Any]:
             {"id": "payment", "label": "Payment capability is not implemented; agents must never infer payment authorization"},
             {"id": "authentication", "label": "Authenticate as the user or handle passwords/MFA"},
             {"id": "credential_access", "label": "Read cookies, session tokens, API keys, or hidden credentials"},
-            {"id": "arbitrary_original_overwrite", "label": "Overwrite ORIGINAL or EXTERNAL academic material through the artifact API"},
+            {"id": "arbitrary_original_overwrite", "label": "Overwrite ORIGINAL or EXTERNAL academic material through Academia's supported write interfaces"},
         ],
         "manual_import": {
             "status": "available",
@@ -89,7 +88,7 @@ def capability_report() -> dict[str, Any]:
             "status": "available",
             "transport": "local_stdio",
             "read_tools": ["workspace", "courses", "tasks", "agent_context", "attention", "review_item", "activity", "library", "file_preview", "processing_status", "import_targets"],
-            "write_tools": ["review_decide_after_student_confirmation", "review_execute_after_approval", "import_file_after_student_confirmation", "create_ai_generated_artifact"],
+            "write_tools": ["review_decide_after_student_confirmation", "review_execute_after_approval", "import_file_after_student_confirmation"],
             "external_connectors": "not_provided_by_core_mcp",
         },
         "watched_folders": {
