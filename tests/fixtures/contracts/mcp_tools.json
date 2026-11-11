@@ -1,0 +1,78 @@
+[
+  {
+    "name": "academia_status",
+    "required": []
+  },
+  {
+    "name": "academia_capabilities",
+    "required": []
+  },
+  {
+    "name": "academia_courses",
+    "required": []
+  },
+  {
+    "name": "academia_today",
+    "required": []
+  },
+  {
+    "name": "academia_tasks",
+    "required": []
+  },
+  {
+    "name": "academia_agent_context",
+    "required": []
+  },
+  {
+    "name": "academia_attention",
+    "required": []
+  },
+  {
+    "name": "academia_review_item",
+    "required": [
+      "review_id"
+    ]
+  },
+  {
+    "name": "academia_review_decide",
+    "required": [
+      "review_id",
+      "decision"
+    ]
+  },
+  {
+    "name": "academia_review_execute",
+    "required": [
+      "review_id"
+    ]
+  },
+  {
+    "name": "academia_activity_changes",
+    "required": []
+  },
+  {
+    "name": "academia_library",
+    "required": []
+  },
+  {
+    "name": "academia_read_library_item",
+    "required": [
+      "id"
+    ]
+  },
+  {
+    "name": "academia_processing_status",
+    "required": []
+  },
+  {
+    "name": "academia_import_targets",
+    "required": []
+  },
+  {
+    "name": "academia_import_file",
+    "required": [
+      "source_path",
+      "target_id"
+    ]
+  }
+]

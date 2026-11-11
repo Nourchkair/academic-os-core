@@ -1,0 +1,86 @@
+[
+  {
+    "disclosure": "local_only",
+    "name": "workspace.summary",
+    "permission": "read_local",
+    "side_effect": "none",
+    "version": 1
+  },
+  {
+    "disclosure": "local_only",
+    "name": "course.list",
+    "permission": "read_local",
+    "side_effect": "none",
+    "version": 1
+  },
+  {
+    "disclosure": "local_only",
+    "name": "course.get",
+    "permission": "read_local",
+    "side_effect": "none",
+    "version": 1
+  },
+  {
+    "disclosure": "local_only",
+    "name": "task.list",
+    "permission": "read_local",
+    "side_effect": "none",
+    "version": 1
+  },
+  {
+    "disclosure": "local_only",
+    "name": "library.list",
+    "permission": "read_local",
+    "side_effect": "none",
+    "version": 1
+  },
+  {
+    "disclosure": "hosted_model_eligible",
+    "name": "library.get",
+    "permission": "read_local",
+    "side_effect": "none",
+    "version": 1
+  },
+  {
+    "disclosure": "hosted_model_eligible",
+    "name": "library.search_passages",
+    "permission": "read_local",
+    "side_effect": "none",
+    "version": 1
+  },
+  {
+    "disclosure": "hosted_model_eligible",
+    "name": "study.overview",
+    "permission": "read_local",
+    "side_effect": "none",
+    "version": 1
+  },
+  {
+    "disclosure": "hosted_model_eligible",
+    "name": "study.exam_scope",
+    "permission": "read_local",
+    "side_effect": "none",
+    "version": 1
+  },
+  {
+    "disclosure": "local_only",
+    "name": "review.attention",
+    "permission": "read_local",
+    "side_effect": "none",
+    "version": 1
+  },
+  {
+    "disclosure": "local_only",
+    "name": "activity.changes",
+    "permission": "read_local",
+    "side_effect": "none",
+    "version": 1
+  },
+  {
+    "disclosure": "local_only",
+    "name": "context.get",
+    "permission": "read_local",
+    "side_effect": "none",
+    "version": 1
+  }
+]
