@@ -51,11 +51,41 @@ Use native tool calling from a local model server.
 
 **Risks:** requires a model/server the student has installed; few students do.
 
+## Probe results — 2026-11-11
+
+The app-server path started successfully against a disposable workspace with an
+isolated `CODEX_HOME` and a symlinked existing ChatGPT auth file:
+
+- `initialize` and `thread/start` succeeded.
+- The Academia MCP server launched with `mcp serve --read-only` and reported
+  `mcpServer/startupStatus/updated` → `ready`.
+- No academic file was modified.
+- No MCP tool call was reached because the model turn failed.
+
+The model gate failed with the installed CLI 0.139.0:
+
+| Model | Result |
+|---|---|
+| `gpt-5.5` | `model_not_found` for this ChatGPT account |
+| `gpt-5.4-mini` | `model_not_found` for this ChatGPT account |
+| `gpt-5.2` | `model_not_found` for this ChatGPT account |
+| `gpt-5.3-codex` | `model_not_found` via `codex exec`; app-server turn stalled/system-error |
+| `gpt-6-luna` | app-server warned “Model metadata not found” and stalled; `codex exec` returned `model_not_found` |
+
+`codex doctor` reports that **Codex 0.167.1 is available** while the installed
+client is **0.139.0**. The model names configured for the desktop app are newer
+than this CLI’s supported ChatGPT model set.
+
+**Gate status remains pending.** The next safe step is to update the Codex CLI
+or select a model supported by the installed client, then rerun the same
+disposable-workspace probe and verify one Academia MCP tool call.
+
 ## Gate checklist
 
 - [x] Local client detected and protocol schema inspected.
 - [x] Candidate provider paths identified.
 - [x] No unauthorized OAuth or API-billing path added.
+- [x] App-server handshake and read-only Academia MCP startup verified.
 - [ ] One live authenticated request with a verified provider.
 - [ ] Structured tool call observed end to end.
 - [ ] Streaming or progress events observed.
