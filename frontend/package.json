@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "eslint .",
     "tauri": "tauri",
     "bundle:sidecar": "python3 ../scripts/build_macos_sidecar.py"
@@ -30,12 +32,17 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2.2.0",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "eslint": "^10.10.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
-    "typescript-eslint": "^8.70.0"
+    "jsdom": "^25.0.1",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^3.2.4"
   },
   "overrides": {
     "katex": "$katex",
