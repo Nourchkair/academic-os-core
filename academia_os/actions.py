@@ -34,6 +34,30 @@ class ActionStatus(StrEnum):
 PROHIBITED_ACTIONS = {ActionType.SCHOOL_SUBMISSION, ActionType.SCHOOL_MESSAGE, ActionType.PAYMENT, ActionType.AUTHENTICATION}
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _operation(details: dict[str, Any]) -> dict[str, Any] | None:
+    value = details.get("operation")
+    return dict(value) if isinstance(value, dict) else None
+
+
+def _mark_operation(details: dict[str, Any], phase: str, *, attempts: int | None = None) -> dict[str, Any]:
+    updated = dict(details)
+    timestamp = _now()
+    operation = _operation(updated) or {}
+    operation.setdefault("id", str(uuid4()))
+    operation.setdefault("created_at", timestamp)
+    operation.setdefault("attempts", 0)
+    operation["phase"] = phase
+    operation["updated_at"] = timestamp
+    if attempts is not None:
+        operation["attempts"] = attempts
+    updated["operation"] = operation
+    return updated
+
+
 @dataclass
 class ActionProposal:
     id: str
@@ -66,8 +90,16 @@ class ActionStore:
         normalized = ActionType(action_type)
         if normalized in PROHIBITED_ACTIONS:
             raise PermissionError(f"Academia OS never performs {normalized.value} actions")
-        now = datetime.now(timezone.utc).isoformat()
-        proposal = ActionProposal(str(uuid4()), normalized.value, title, details or {}, ActionStatus.PROPOSED.value, requires_approval, now, now)
+        now = _now()
+        proposal_details = dict(details or {})
+        proposal_details.setdefault("operation", {
+            "id": str(uuid4()),
+            "phase": ActionStatus.PROPOSED.value,
+            "created_at": now,
+            "updated_at": now,
+            "attempts": 0,
+        })
+        proposal = ActionProposal(str(uuid4()), normalized.value, title, proposal_details, ActionStatus.PROPOSED.value, requires_approval, now, now)
         self.store.update_strict([], lambda raw: [*raw, asdict(proposal)])
         return proposal
 
@@ -96,7 +128,15 @@ class ActionStore:
     def reopen(self, proposal_id: str) -> ActionProposal:
         return self._transition(proposal_id, ActionStatus.PROPOSED, expected=ActionStatus.APPROVED)
 
-    def _transition(self, proposal_id: str, status: ActionStatus, *, reason: str | None = None, expected: ActionStatus | None = None) -> ActionProposal:
+    def _transition(
+        self,
+        proposal_id: str,
+        status: ActionStatus,
+        *,
+        reason: str | None = None,
+        expected: ActionStatus | None = None,
+        operation_phase: str | None = None,
+    ) -> ActionProposal:
         selected: list[ActionProposal] = []
 
         def transition(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -107,8 +147,10 @@ class ActionStore:
                 if expected is not None and item.status != expected.value:
                     raise ValueError(f"proposal is not {expected.value}: {item.status}")
                 item.status = status.value
-                item.updated_at = datetime.now(timezone.utc).isoformat()
+                item.updated_at = _now()
                 item.failure_reason = reason
+                if operation_phase is not None:
+                    item.details = _mark_operation(item.details, operation_phase)
                 items[index] = item
                 selected.append(item)
                 return [asdict(value) for value in items]
@@ -118,16 +160,81 @@ class ActionStore:
         return selected[0]
 
     def approve(self, proposal_id: str) -> ActionProposal:
-        return self._transition(proposal_id, ActionStatus.APPROVED, expected=ActionStatus.PROPOSED)
+        return self._transition(
+            proposal_id,
+            ActionStatus.APPROVED,
+            expected=ActionStatus.PROPOSED,
+            operation_phase=ActionStatus.APPROVED.value,
+        )
 
     def reject(self, proposal_id: str) -> ActionProposal:
-        return self._transition(proposal_id, ActionStatus.REJECTED, expected=ActionStatus.PROPOSED)
+        return self._transition(
+            proposal_id,
+            ActionStatus.REJECTED,
+            expected=ActionStatus.PROPOSED,
+            operation_phase=ActionStatus.REJECTED.value,
+        )
+
+    def begin_execution(self, proposal_id: str, *, recovery: bool = False) -> ActionProposal:
+        """Start or resume one execution attempt without duplicating completion."""
+        selected: list[ActionProposal] = []
+
+        def transition(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            items = [ActionProposal.from_dict(value) for value in raw]
+            for index, item in enumerate(items):
+                if item.id != proposal_id:
+                    continue
+                operation = _operation(item.details) or {}
+                if recovery:
+                    if item.status != ActionStatus.EXECUTED.value or operation.get("phase") != "executing":
+                        raise ValueError("proposal is not a recoverable interrupted execution")
+                elif item.status != ActionStatus.APPROVED.value:
+                    raise ValueError(f"proposal is not approved: {item.status}")
+                if not operation:
+                    # Legacy approved records predate operation metadata. Backfill
+                    # one deterministic operation before their first execution.
+                    operation = {
+                        "id": str(uuid4()),
+                        "phase": ActionStatus.APPROVED.value,
+                        "created_at": item.updated_at,
+                        "updated_at": item.updated_at,
+                        "attempts": 0,
+                    }
+                    item.details["operation"] = operation
+                item.status = ActionStatus.EXECUTED.value
+                item.updated_at = _now()
+                item.failure_reason = None
+                item.details = _mark_operation(
+                    item.details,
+                    "executing",
+                    attempts=int(operation.get("attempts", 0)) + 1,
+                )
+                operation = _operation(item.details) or {}
+                operation["started_at"] = item.updated_at
+                item.details["operation"] = operation
+                items[index] = item
+                selected.append(item)
+                return [asdict(value) for value in items]
+            raise KeyError(proposal_id)
+
+        self.store.update_strict([], transition)
+        return selected[0]
 
     def mark_executed(self, proposal_id: str) -> ActionProposal:
-        return self._transition(proposal_id, ActionStatus.EXECUTED, expected=ActionStatus.APPROVED)
+        return self.begin_execution(proposal_id)
 
     def verify(self, proposal_id: str) -> ActionProposal:
-        return self._transition(proposal_id, ActionStatus.VERIFIED, expected=ActionStatus.EXECUTED)
+        return self._transition(
+            proposal_id,
+            ActionStatus.VERIFIED,
+            expected=ActionStatus.EXECUTED,
+            operation_phase=ActionStatus.VERIFIED.value,
+        )
 
     def fail(self, proposal_id: str, reason: str) -> ActionProposal:
-        return self._transition(proposal_id, ActionStatus.FAILED, reason=reason)
+        return self._transition(
+            proposal_id,
+            ActionStatus.FAILED,
+            reason=reason,
+            operation_phase=ActionStatus.FAILED.value,
+        )

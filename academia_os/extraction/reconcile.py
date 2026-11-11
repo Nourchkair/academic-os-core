@@ -273,16 +273,24 @@ def execute_domain_change(proposal: ActionProposal, domain: DomainProjection) ->
             "evidence": details.get("new_evidence"),
         }]
     snapshots: list[tuple[str, str, dict[str, Any]]] = []
+    already_applied: list[dict[str, Any]] = []
     try:
         for update in updates:
             entity_type = str(update.get("entity_type"))
             entity_id = str(update.get("entity_id"))
+            field = str(update.get("field"))
             current = domain.get(entity_type, entity_id)
             snapshots.append((entity_type, entity_id, current))
+            if current.get(field) == update.get("after"):
+                # A previous attempt may have committed the value and then
+                # stopped before verification. Re-verifying is safe and avoids
+                # reporting a false failure on an idempotent retry.
+                already_applied.append({"entity_type": entity_type, "entity_id": entity_id, "field": field})
+                continue
             domain.update_field(
                 entity_type,
                 entity_id,
-                str(update.get("field")),
+                field,
                 update.get("after"),
                 expected_before=update.get("before"),
                 evidence=update.get("evidence"),
@@ -297,4 +305,4 @@ def execute_domain_change(proposal: ActionProposal, domain: DomainProjection) ->
         for entity_type, entity_id, previous in reversed(snapshots):
             domain.replace_raw(entity_type, entity_id, previous)
         raise
-    return {"verified": True, "reread": reread, "proposal_id": proposal.id}
+    return {"verified": True, "reread": reread, "already_applied": already_applied, "proposal_id": proposal.id}

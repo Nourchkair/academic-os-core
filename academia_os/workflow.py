@@ -41,6 +41,7 @@ class ApprovalWorkflow:
         review_details: dict[str, Any] | None = None,
     ) -> tuple[ActionProposal, ReviewItem]:
         proposal = self.actions.propose(action_type=action_type, title=title, details=details)
+        operation = proposal.details.get("operation") if isinstance(proposal.details.get("operation"), dict) else {}
         try:
             review = self.reviews.add(
                 kind=review_kind,
@@ -51,6 +52,8 @@ class ApprovalWorkflow:
                 details={
                     "action_type": proposal.action_type,
                     "proposal_details": dict(proposal.details),
+                    "operation_id": operation.get("id"),
+                    "operation_phase": operation.get("phase"),
                     **(review_details or {}),
                 },
             )
@@ -70,11 +73,16 @@ class ApprovalWorkflow:
         review = self.reviews.get(review_id)
         if review.action_proposal_id:
             proposal = self.actions.approve(review.action_proposal_id)
+            operation = proposal.details.get("operation") if isinstance(proposal.details.get("operation"), dict) else {}
             try:
                 updated = self.reviews.update(
                     review.id,
                     status=ReviewStatus.APPROVED,
-                    details=self._with_details(review, {"action_status": proposal.status}),
+                    details=self._with_details(review, {
+                        "action_status": proposal.status,
+                        "operation_id": operation.get("id") or review.details.get("operation_id"),
+                        "operation_phase": operation.get("phase") or "approved",
+                    }),
                 )
             except Exception:
                 self.actions.reopen(review.action_proposal_id)
@@ -93,10 +101,15 @@ class ApprovalWorkflow:
         review = self.reviews.get(review_id)
         if review.action_proposal_id:
             proposal = self.actions.reject(review.action_proposal_id)
+            operation = proposal.details.get("operation") if isinstance(proposal.details.get("operation"), dict) else {}
             updated = self.reviews.update(
                 review.id,
                 status=ReviewStatus.REJECTED,
-                details=self._with_details(review, {"action_status": proposal.status}),
+                details=self._with_details(review, {
+                    "action_status": proposal.status,
+                    "operation_id": operation.get("id") or review.details.get("operation_id"),
+                    "operation_phase": operation.get("phase") or "rejected",
+                }),
             )
             self.activity.append(
                 event_type="action.rejected",
@@ -114,12 +127,16 @@ class ApprovalWorkflow:
         rejection = is_review_rejection_decision(decision)
         status = ReviewStatus.REJECTED if rejection else ReviewStatus.APPROVED
         action_status: str | None = None
+        operation: dict[str, Any] = {}
         if review.action_proposal_id:
             proposal = self.actions.reject(review.action_proposal_id) if rejection else self.actions.approve(review.action_proposal_id)
             action_status = proposal.status
+            operation = proposal.details.get("operation") if isinstance(proposal.details.get("operation"), dict) else {}
         details = self._with_details(review, {"decision": decision, "decision_at": datetime.now(timezone.utc).isoformat()})
         if action_status is not None:
             details["action_status"] = action_status
+            details["operation_id"] = operation.get("id") or review.details.get("operation_id")
+            details["operation_phase"] = operation.get("phase") or ("rejected" if rejection else "approved")
         updated = self.reviews.update(review_id, status=status, details=details)
         self.activity.append(
             event_type="review.decided",
@@ -146,14 +163,34 @@ class ApprovalWorkflow:
         actor: str = "system",
     ) -> ActionProposal:
         proposal = self.actions.get(proposal_id)
-        if proposal.status != ActionStatus.APPROVED.value:
-            raise ValueError(f"proposal is not approved: {proposal.status}")
-        self.actions.mark_executed(proposal_id)
+        recovery = False
+        if proposal.status == ActionStatus.APPROVED.value:
+            pass
+        elif proposal.status == ActionStatus.EXECUTED.value:
+            operation = proposal.details.get("operation") if isinstance(proposal.details.get("operation"), dict) else {}
+            if operation.get("phase") != "executing":
+                raise ValueError("proposal was already executed; verification is incomplete and cannot be replayed automatically")
+            recovery = True
+        elif proposal.status == ActionStatus.VERIFIED.value:
+            raise ValueError("proposal is already verified; refusing to replay it")
+        else:
+            raise ValueError(f"proposal is not executable: {proposal.status}")
+
+        executed = self.actions.begin_execution(proposal_id, recovery=recovery)
+        operation = executed.details.get("operation") if isinstance(executed.details.get("operation"), dict) else {}
+        if recovery:
+            self.activity.append(
+                event_type="action.execution_resumed",
+                title=proposal.title,
+                details={"proposal_id": proposal_id, "operation_id": operation.get("id"), "attempt": operation.get("attempts")},
+                actor=actor,
+            )
         try:
-            verification = executor(proposal)
+            verification = executor(executed)
             if not isinstance(verification, dict):
                 raise TypeError("action executor must return a JSON object")
             verified = self.actions.verify(proposal_id)
+            verified_operation = verified.details.get("operation") if isinstance(verified.details.get("operation"), dict) else operation
         except Exception as exc:
             failed = self.actions.fail(proposal_id, str(exc))
             review = self.reviews.find_by_action_proposal_id(proposal_id)
@@ -161,12 +198,17 @@ class ApprovalWorkflow:
                 self.reviews.update(
                     review.id,
                     status=ReviewStatus.OPEN,
-                    details=self._with_details(review, {"action_status": failed.status, "failure_reason": str(exc)}),
+                    details=self._with_details(review, {
+                        "action_status": failed.status,
+                        "failure_reason": str(exc),
+                        "operation_id": operation.get("id") or review.details.get("operation_id"),
+                        "operation_phase": "failed",
+                    }),
                 )
             self.activity.append(
                 event_type="action.failed",
                 title=proposal.title,
-                details={"proposal_id": proposal_id, "failure_reason": str(exc)},
+                details={"proposal_id": proposal_id, "operation_id": operation.get("id"), "attempt": operation.get("attempts"), "failure_reason": str(exc)},
                 actor=actor,
             )
             raise
@@ -176,12 +218,17 @@ class ApprovalWorkflow:
             self.reviews.update(
                 review.id,
                 status=ReviewStatus.RESOLVED,
-                details=self._with_details(review, {"action_status": verified.status, "verification": verification}),
+                details=self._with_details(review, {
+                    "action_status": verified.status,
+                    "operation_id": verified_operation.get("id") or review.details.get("operation_id"),
+                    "operation_phase": "verified",
+                    "verification": verification,
+                }),
             )
         self.activity.append(
             event_type="action.verified",
             title=proposal.title,
-            details={"proposal_id": proposal_id, "verification": verification},
+            details={"proposal_id": proposal_id, "operation_id": verified_operation.get("id"), "attempt": verified_operation.get("attempts"), "verification": verification},
             actor=actor,
         )
         return verified
