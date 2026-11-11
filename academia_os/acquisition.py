@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-import shutil
+import hashlib
+import os
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,6 +10,7 @@ from typing import Any
 
 from .config import SEMESTER_PATTERN, validate_config
 from .processing import ProcessingStore, source_signature
+from .source_identity import SourceIdentityError, fingerprint
 from .state import JsonStateStore
 
 
@@ -172,6 +175,52 @@ def _record_acquisition(workspace_root: Path, destination: Path, metadata: dict[
     JsonStateStore(path).update_strict({"schema_version": 1, "records": {}}, transition)
 
 
+def _source_digest(source: Path) -> str:
+    try:
+        return fingerprint(source, max_bytes=1024 * 1024 * 1024)
+    except SourceIdentityError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _find_duplicate(destination_inbox: Path, digest: str) -> Path | None:
+    for candidate in sorted(destination_inbox.iterdir()):
+        if candidate.is_symlink() or not candidate.is_file() or candidate.name.startswith("."):
+            continue
+        try:
+            if _source_digest(candidate) == digest:
+                return candidate
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _copy_atomic(source: Path, destination: Path, digest: str) -> None:
+    stat = source.stat()
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{destination.name}.", dir=destination.parent)
+    temporary = Path(temporary_name)
+    copied_digest = hashlib.sha256()
+    try:
+        with source.open("rb") as source_handle, os.fdopen(descriptor, "wb") as target_handle:
+            descriptor = -1
+            while chunk := source_handle.read(1024 * 1024):
+                target_handle.write(chunk)
+                copied_digest.update(chunk)
+            target_handle.flush()
+            os.fsync(target_handle.fileno())
+        if copied_digest.hexdigest() != digest:
+            raise ValueError("source file changed during import; no destination file was committed")
+        os.chmod(temporary, stat.st_mode & 0o777)
+        os.utime(temporary, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        try:
+            os.link(temporary, destination, follow_symlinks=False)
+        except FileExistsError as exc:
+            raise ValueError("import destination appeared during copy; choose a new import") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
+
+
 def import_file(
     source: Path,
     destination_inbox: Path,
@@ -190,12 +239,29 @@ def import_file(
     if not source.is_file():
         raise FileNotFoundError(source)
     destination_inbox.mkdir(parents=True, exist_ok=True)
+    # Fail before copying anything if provenance state is already damaged.
+    acquisition_store = JsonStateStore(Path(workspace_root).expanduser().resolve() / ".academia" / "acquisition.json")
+    acquisition_store.read_strict({"schema_version": 1, "records": {}})
+    digest = _source_digest(source)
+    duplicate = _find_duplicate(destination_inbox, digest)
+    if duplicate is not None:
+        return {
+            "source_type": "browser_upload" if source_label is not None and source_label.startswith("browser-upload:") else "manual_file",
+            "original_file": source_label if source_label is not None else str(source),
+            "acquired_at": datetime.now(timezone.utc).isoformat(),
+            "destination": str(duplicate),
+            "provenance": "EXTERNAL",
+            "confidence": "unverified",
+            "source_sha256": digest,
+            "duplicate": True,
+            "duplicate_of": duplicate.relative_to(Path(workspace_root).expanduser().resolve()).as_posix(),
+        }
     destination = destination_inbox / source.name
     counter = 1
     while destination.exists():
         destination = destination_inbox / f"{source.stem} (import {counter}){source.suffix}"
         counter += 1
-    shutil.copy2(source, destination)
+    _copy_atomic(source, destination, digest)
     metadata = {
         "source_type": "browser_upload" if source_label is not None and source_label.startswith("browser-upload:") else "manual_file",
         "original_file": source_label if source_label is not None else str(source),
@@ -203,10 +269,15 @@ def import_file(
         "destination": str(destination),
         "provenance": "EXTERNAL",
         "confidence": "unverified",
+        "source_sha256": digest,
     }
     if source_label is not None:
         metadata["source_label"] = source_label
-    _record_acquisition(workspace_root, destination, metadata)
+    try:
+        _record_acquisition(workspace_root, destination, metadata)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
     if processing is not None:
         record = processing.detect(destination, signature=source_signature(destination))
         metadata["processing_record_id"] = record.id

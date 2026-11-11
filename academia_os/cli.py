@@ -1101,8 +1101,8 @@ def dispatch(args: argparse.Namespace) -> int:
             source_label=getattr(args, "source_label", None),
         )
         ActivityLog(workspace_root / ".academia" / "activity.jsonl").append(
-            event_type="file.imported",
-            title=f"Imported {Path(value['destination']).name}",
+            event_type="file.duplicate_skipped" if value.get("duplicate") else "file.imported",
+            title=f"Skipped duplicate {Path(value['destination']).name}" if value.get("duplicate") else f"Imported {Path(value['destination']).name}",
             details=value,
             source=value.get("source_label", str(args.source.expanduser().resolve())),
             confidence="unverified",
