@@ -130,6 +130,7 @@ export const api = {
   tasks: (semester?: string) => command<Task[]>('tasks', semester ? ['--semester', semester] : []),
   agentCourseContext: (courseId: string, semester: string) => command<{ current_state?: { open_tasks?: Task[] } }>('agent', ['context', '--scope', 'course', '--course', courseId, '--semester', semester, '--detail', 'deep']),
   review: () => command<ReviewItem[]>('review'),
+  reviewPendingExecution: () => command<ReviewItem[]>('review', ['list', '--pending-execution']),
   reviewAction: (action: 'approve' | 'reject' | 'resolve', itemId: string) => command<ReviewItem>('review', [action, itemId]),
   reviewDecision: (itemId: string, decision: string) => command<ReviewItem>('review', ['decide', itemId, decision]),
   reviewExecute: (itemId: string) => command<Record<string, unknown>>('review', ['execute', itemId]),

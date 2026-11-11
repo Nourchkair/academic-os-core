@@ -505,6 +505,7 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("decision", nargs="?", help="Typed decision such as use_new or choose_course:...")
     review.add_argument("--actor", choices=("user", "agent:mcp"), default="user", help="Audit attribution for a user-authorized review action")
     review.add_argument("--semester", help="Resolve course choices against a specific recognized semester")
+    review.add_argument("--pending-execution", action="store_true", help="Include approved action-linked items that still need execution")
     review.add_argument("--json", action="store_true")
     course = sub.add_parser("course")
     course.add_argument("course_id", nargs="?")
@@ -1128,7 +1129,10 @@ def dispatch(args: argparse.Namespace) -> int:
             else:
                 value = asdict(workflow.resolve_review(args.item_id))
         else:
-            value = [asdict(item) for item in queue.list()]
+            items = queue.list(include_resolved=bool(args.pending_execution))
+            if args.pending_execution:
+                items = [item for item in items if item.status.value in {"open", "approved"}]
+            value = [asdict(item) for item in items]
         _emit(value, as_json=args.json); return 0
     if args.command == "inbox":
         _, snapshot, _ = _context(args)

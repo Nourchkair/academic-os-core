@@ -7,19 +7,21 @@ import { DashboardChat } from './DashboardChat'
 import { HomeView } from './HomeView'
 import { getTaskUrgency, urgencyLabel } from './lib/task-urgency'
 import { Onboarding } from './Onboarding'
+import { ReviewView } from './ReviewView'
 import { SettingsView } from './SettingsView'
 import { api, BridgeUnavailableError, isTauriEnvironment } from './lib/api'
 import type { StudyChatRequest } from './lib/chat-history'
-import type { ActivityEvent, Course, CourseworkHistoryRecord, CourseworkKind, LibraryItem, ProcessingRecord, StatusPayload, Task } from './types'
+import type { ActivityEvent, Course, CourseworkHistoryRecord, CourseworkKind, LibraryItem, ProcessingRecord, ReviewItem, StatusPayload, Task } from './types'
 
 const nav = [
   { id: 'home', label: 'Home', icon: '⌂' },
+  { id: 'review', label: 'Review', icon: '⚖' },
   { id: 'chat', label: 'Study chat', icon: 'study-chat' },
   { id: 'tasks', label: 'Tasks', icon: '✓' },
   { id: 'activity', label: 'Activity', icon: '◷' },
 ] as const
 
-type View = 'home' | 'courses' | 'chat' | 'tasks' | 'activity' | 'settings'
+type View = 'home' | 'courses' | 'review' | 'chat' | 'tasks' | 'activity' | 'settings'
 type StudyResumeRequest = { courseId: string; sessionId: string }
 
 type ActionMode = 'import' | 'migration'
@@ -149,6 +151,9 @@ function App() {
   const [courses, setCourses] = useState<Course[]>(cachedStartup?.workspace.courses || [])
   const [tasks, setTasks] = useState<Task[]>(cachedStartup?.workspace.tasks || [])
   const [activity, setActivity] = useState<ActivityEvent[]>([])
+  const [reviews, setReviews] = useState<ReviewItem[]>([])
+  const [reviewBusy, setReviewBusy] = useState(false)
+  const [reviewError, setReviewError] = useState('')
   const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([])
   const [inbox, setInbox] = useState<ProcessingRecord[]>([])
   const [selectedSemester, setSelectedSemester] = useState(cachedStartup?.workspace.semester || '')
@@ -257,6 +262,13 @@ function App() {
             }
           }
           try {
+            const reviewData = await api.reviewPendingExecution()
+            if (sequence !== refreshSequence.current) return
+            setReviews(reviewData)
+          } catch (reason) {
+            if (sequence === refreshSequence.current) setReviewError(`Review decisions could not be loaded: ${String(reason)}`)
+          }
+          try {
             const activityData = await api.activity()
             if (sequence !== refreshSequence.current) return
             setActivity(activityData)
@@ -316,6 +328,36 @@ function App() {
         setSemesterLoading(false)
         loadingBackgroundData.current = false
       }
+    }
+  }
+
+  const decideReview = async (itemId: string, decision: string) => {
+    setReviewBusy(true)
+    setReviewError('')
+    try {
+      const updated = await api.reviewDecision(itemId, decision)
+      setReviews((current) => updated.status === 'approved' && updated.action_proposal_id
+        ? current.map((item) => item.id === itemId ? updated : item)
+        : current.filter((item) => item.id !== itemId))
+      try { setActivity(await api.activity()) } catch { /* Activity is a secondary audit refresh. */ }
+    } catch (reason) {
+      setReviewError(`The decision could not be recorded: ${String(reason)}`)
+    } finally {
+      setReviewBusy(false)
+    }
+  }
+
+  const executeReview = async (itemId: string) => {
+    setReviewBusy(true)
+    setReviewError('')
+    try {
+      await api.reviewExecute(itemId)
+      setReviews(await api.reviewPendingExecution())
+      try { setActivity(await api.activity()) } catch { /* Activity is a secondary audit refresh. */ }
+    } catch (reason) {
+      setReviewError(`The approved action could not be executed: ${String(reason)}`)
+    } finally {
+      setReviewBusy(false)
     }
   }
 
@@ -418,6 +460,7 @@ function App() {
       {view === 'chat' && <header className="topbar topbar-study-chat"><details className="chat-nav-dropdown" ref={chatNavRef}><summary aria-label="Open navigation menu"><span aria-hidden="true">☰</span><strong>Menu</strong><span className="chat-menu-caret" aria-hidden="true">⌄</span></summary><div className="chat-nav-menu" role="menu" aria-label="Main navigation">{chatMenuItems.map((item) => <button key={item.view} role="menuitem" data-tooltip={item.label} data-tooltip-side="right" onClick={() => setView(item.view)}><span aria-hidden="true">{item.icon}</span>{item.label}</button>)}</div></details></header>}
       {error && <p className="dashboard-inline-error" role="alert">{error}</p>}
       {view === 'home' && <HomeView status={status} courses={courses} tasks={tasks} activity={activity} inbox={inbox} semester={selectedSemester || status?.workspace.semester || ''} semesters={semesters} loading={semesterLoading} onSemesterChange={changeSemester} onOpenCourse={openCourse} onOpenIntake={() => openActionPanel('import')} onNavigate={navigate} />}
+      {view === 'review' && <ReviewView items={reviews} courses={courses} activity={activity} busy={reviewBusy} error={reviewError} onDecision={decideReview} onExecute={executeReview} />}
       {view === 'courses' && <CoursesView semesters={semesters} semester={selectedSemester || status?.workspace.semester || ''} courses={courses} items={libraryItems} inbox={inbox} loading={semesterLoading} onSemesterChange={changeSemester} onOpenActions={openActionPanel} onHistoryChanged={() => refresh()} studyResumeRequest={studyResumeRequest} onStudyResumeConsumed={clearStudyResumeRequest} onOpenStudyConversation={openStudyConversation} onStartStudyChat={startStudyChat} courseOpenRequest={courseOpenRequest} onCourseOpenConsumed={clearCourseOpenRequest} onBackHome={() => setView('home')} />}
       <div className={`chat-route-shell ${view === 'chat' ? 'active' : ''}`} aria-hidden={view !== 'chat'}><DashboardChat courses={courses} items={libraryItems} semester={selectedSemester || status?.workspace.semester || ''} onResumeStudySession={resumeStudySession} studyChatRequest={studyChatRequest} onStudyChatRequestConsumed={clearStudyChatRequest} /></div>
       {view === 'tasks' && <Tasks tasks={tasks} courses={courses} semester={selectedSemester || status?.workspace.semester || ''} timezone={status?.workspace.timezone} onNavigate={navigate} onChanged={() => refresh()} />}

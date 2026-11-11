@@ -16,7 +16,7 @@ type HomeViewProps = {
   onSemesterChange: (semester: string) => Promise<void>
   onOpenCourse: (courseId: string) => void
   onOpenIntake: () => void
-  onNavigate: (view: 'tasks' | 'activity' | 'settings') => void
+  onNavigate: (view: 'tasks' | 'activity' | 'settings' | 'review') => void
 }
 
 export function HomeView({ status, courses, tasks, activity, inbox, semester, semesters, loading, onSemesterChange, onOpenCourse, onOpenIntake, onNavigate }: HomeViewProps) {
@@ -76,7 +76,7 @@ export function HomeView({ status, courses, tasks, activity, inbox, semester, se
       </section>
 
       <div className="home-attention-column">
-        <section className="home-attention-card" data-tone={status?.review_count ? 'soon' : 'completed'}><div className="home-attention-icon" aria-hidden="true">!</div><div><p className="eyebrow">Open decisions</p><strong>{status?.review_count ?? 0}</strong><span>{status?.review_count ? 'Waiting for your input' : 'Nothing waiting for a decision'}</span></div></section>
+        <button type="button" className="home-attention-card home-attention-action" data-tone={status?.review_count ? 'soon' : 'completed'} onClick={() => onNavigate('review')}><div className="home-attention-icon" aria-hidden="true">!</div><div><p className="eyebrow">Open decisions</p><strong>{status?.review_count ?? 0}</strong><span>{status?.review_count ? 'Waiting for your input' : 'Nothing waiting for a decision'}</span></div><span className="home-attention-arrow" aria-hidden="true">→</span></button>
         <button type="button" className="home-attention-card home-attention-action" data-tone={pendingInbox.length ? 'soon' : 'completed'} onClick={() => onNavigate('activity')}><div className="home-attention-icon" aria-hidden="true">↓</div><div><p className="eyebrow">Intake</p><strong>{pendingInbox.length}</strong><span>{pendingInbox.length ? 'Items need review or processing' : 'No pending intake items'}</span></div><span className="home-attention-arrow" aria-hidden="true">→</span></button>
       </div>
     </div>

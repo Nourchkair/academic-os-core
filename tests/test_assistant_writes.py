@@ -172,6 +172,31 @@ def test_cli_propose_decide_execute_import(tmp_path: Path) -> None:
     assert (inbox / "lecture.md").read_text(encoding="utf-8") == "# Lecture\n"
 
 
+def test_cli_pending_execution_list_includes_approved_actions(tmp_path: Path) -> None:
+    config, root, profile = prepared_workspace(tmp_path)
+    inbox = root / "Fall 2026" / "POL 2103 - Politics" / "00_INBOX"
+    inbox.mkdir()
+    source = tmp_path / "lecture.md"
+    source.write_text("# Lecture\n", encoding="utf-8")
+    context = ReadContext.create(config, hosted_model_allowed=True)
+    proposal = propose_import(context, source_path=str(source), target_id="Fall 2026/POL 2103 - Politics/00_INBOX")
+    workflow, _, _ = stores(root)
+    workflow.approve_review(proposal["review_id"])
+    environment = {**os.environ, "PYTHONPATH": str(ROOT)}
+
+    listed = subprocess.run(
+        [sys.executable, "-m", "academia_os", "--profile", str(profile), "review", "list", "--pending-execution", "--json"],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+    )
+    assert listed.returncode == 0, listed.stderr
+    items = json.loads(listed.stdout)
+    assert [item["id"] for item in items] == [proposal["review_id"]]
+    assert items[0]["status"] == "approved"
+
+
 def test_cli_review_execute_runs_the_approved_import(tmp_path: Path) -> None:
     config, root, profile = prepared_workspace(tmp_path)
     inbox = root / "Fall 2026" / "POL 2103 - Politics" / "00_INBOX"

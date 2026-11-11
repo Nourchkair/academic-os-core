@@ -24,14 +24,15 @@ def test_settings_is_local_setup_only() -> None:
 def test_dashboard_has_semester_courses_library_and_activity_surfaces() -> None:
     source = (FRONTEND / "App.tsx").read_text(encoding="utf-8")
     assert "{ id: 'activity', label: 'Activity'" in source
+    assert "{ id: 'review', label: 'Review'" in source
     assert "function ActivityView" in source
+    assert "<ReviewView" in source
     assert "<CoursesView" in source
     assert "<ActionPanel" in source
     assert "profile-action" not in source
     assert "<HomeView" in source
     assert "{ id: 'library'" not in source
     assert "{ id: 'import'" not in source
-    assert "{ id: 'review'" not in source
     assert "const title = nav.find" not in source
     assert "<h1>{title}</h1>" not in source
 
