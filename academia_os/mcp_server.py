@@ -16,6 +16,11 @@ from .version import __version__
 
 _MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 _PROTOCOL_VERSION = "2024-11-05"
+_WRITE_TOOL_NAMES = frozenset({"academia_review_decide", "academia_review_execute", "academia_import_file"})
+
+
+def _tools_for_mode(read_only: bool) -> list[dict[str, Any]]:
+    return [tool for tool in _TOOLS if not read_only or tool["name"] not in _WRITE_TOOL_NAMES]
 
 
 def _tool(
@@ -260,11 +265,13 @@ def _optional(args: list[str], flag: str, value: Any) -> None:
         args.extend([flag, str(value)])
 
 
-def _call_tool(name: str, values: Any, profile: Path | None) -> Any:
+def _call_tool(name: str, values: Any, profile: Path | None, *, read_only: bool = False) -> Any:
     if not isinstance(values, dict):
         raise McpError("Tool arguments must be a JSON object.")
-    allowed = {item["name"] for item in _TOOLS}
+    allowed = {item["name"] for item in _tools_for_mode(read_only)}
     if name not in allowed:
+        if read_only and name in _WRITE_TOOL_NAMES:
+            raise McpError(f"Tool is disabled in read-only mode: {name}")
         raise McpError(f"Unknown Academia MCP tool: {name}")
 
     if name == "academia_status":
@@ -437,7 +444,7 @@ def _response(request_id: Any, result: Any) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
-def _handle(message: Any, profile: Path | None) -> dict[str, Any] | None:
+def _handle(message: Any, profile: Path | None, *, read_only: bool = False) -> dict[str, Any] | None:
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
         return {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid JSON-RPC request."}}
     request_id = message.get("id")
@@ -460,11 +467,11 @@ def _handle(message: Any, profile: Path | None) -> dict[str, Any] | None:
     if method == "ping":
         return _response(request_id, {})
     if method == "tools/list":
-        return _response(request_id, {"tools": _TOOLS})
+        return _response(request_id, {"tools": _tools_for_mode(read_only)})
     if method == "tools/call":
         name = params.get("name")
         try:
-            result = _call_tool(name, params.get("arguments", {}), profile)
+            result = _call_tool(name, params.get("arguments", {}), profile, read_only=read_only)
             return _response(request_id, {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]})
         except (McpError, OSError, subprocess.TimeoutExpired, TypeError, ValueError) as exc:
             error = exc if isinstance(exc, McpError) else McpError(str(exc), -32000)
@@ -475,7 +482,7 @@ def _handle(message: Any, profile: Path | None) -> dict[str, Any] | None:
     return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": f"Method not found: {method}"}}
 
 
-def serve(profile: Path | None = None) -> int:
+def serve(profile: Path | None = None, *, read_only: bool = False) -> int:
     """Read newline-delimited JSON-RPC from stdin and write protocol replies to stdout."""
     source = sys.stdin.buffer
     sink = sys.stdout.buffer
@@ -488,7 +495,7 @@ def serve(profile: Path | None = None) -> int:
         else:
             try:
                 request = json.loads(line)
-                message = _handle(request, profile)
+                message = _handle(request, profile, read_only=read_only)
             except json.JSONDecodeError:
                 message = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error."}}
         if message is not None:

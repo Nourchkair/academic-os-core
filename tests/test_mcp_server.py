@@ -42,11 +42,14 @@ EXPECTED_TOOLS = {
 class McpServer:
     """Spawn the real stdio server and speak newline-delimited JSON-RPC."""
 
-    def __init__(self, profile: Path) -> None:
+    def __init__(self, profile: Path, *, read_only: bool = False) -> None:
         environment = os.environ.copy()
         environment["PYTHONPATH"] = str(ROOT)
+        command = [sys.executable, "-m", "academia_os", "--profile", str(profile), "mcp", "serve"]
+        if read_only:
+            command.append("--read-only")
         self.process = subprocess.Popen(
-            [sys.executable, "-m", "academia_os", "--profile", str(profile), "mcp", "serve"],
+            command,
             cwd=ROOT,
             env=environment,
             stdin=subprocess.PIPE,
@@ -146,6 +149,24 @@ def call_error(server: McpServer, name: str, arguments: dict[str, Any] | None = 
 
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_read_only_mode_hides_and_rejects_write_tools(tmp_path: Path) -> None:
+    _, root, profile = prepared_workspace(tmp_path)
+    server = McpServer(profile, read_only=True)
+    try:
+        tools = server.request("tools/list")["result"]["tools"]
+        names = {tool["name"] for tool in tools}
+        assert names == EXPECTED_TOOLS - {
+            "academia_review_decide",
+            "academia_review_execute",
+            "academia_import_file",
+        }
+        error = call_error(server, "academia_review_decide", {"review_id": "missing", "decision": "use_new"})
+        assert "disabled in read-only mode" in error
+        assert call_json(server, "academia_status")["workspace"]["semester"] == "Fall 2026"
+    finally:
+        server.close()
 
 
 def test_initialize_and_ping(mcp: tuple[McpServer, Path, Path]) -> None:

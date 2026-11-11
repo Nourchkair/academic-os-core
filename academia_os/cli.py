@@ -615,7 +615,8 @@ def build_parser() -> argparse.ArgumentParser:
     migration_execute.add_argument("--json", action="store_true")
     mcp = sub.add_parser("mcp", help="Expose bounded local Academia tools over MCP stdio")
     mcp_sub = mcp.add_subparsers(dest="mcp_command", required=True)
-    mcp_sub.add_parser("serve", help="Run an MCP stdio server for an authorized local agent")
+    mcp_serve = mcp_sub.add_parser("serve", help="Run an MCP stdio server for an authorized local agent")
+    mcp_serve.add_argument("--read-only", action="store_true", help="Expose read tools only; disable all write tools")
     from .study.cli import add_parser as add_study_parser
     add_study_parser(sub)
     dashboard_chat = sub.add_parser("chat", help=argparse.SUPPRESS)
@@ -638,7 +639,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "mcp":
             from .mcp_server import serve
-            return serve(profile=args.profile)
+            return serve(profile=args.profile, read_only=bool(args.read_only))
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
         if args.command in {"process", "study", "chat", "courses", "today", "tasks", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
