@@ -162,6 +162,13 @@ _TOOLS = [
     ),
 ]
 
+# Read tools are side-effect free. Advertise the standard MCP read-only hint so
+# compatible hosts do not need a write-style approval prompt for local reads.
+for _tool_definition in _TOOLS:
+    if _tool_definition["name"] not in _WRITE_TOOL_NAMES:
+        _tool_definition.setdefault("annotations", {})
+        _tool_definition["annotations"].update({"readOnlyHint": True, "openWorldHint": False})
+
 
 class McpError(Exception):
     def __init__(self, message: str, code: int = -32602) -> None:

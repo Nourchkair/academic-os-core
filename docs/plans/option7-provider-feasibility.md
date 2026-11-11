@@ -1,10 +1,12 @@
 # Option 7 provider feasibility gate
 
-**Status:** Pending live verification. No model inference has been requested.
+**Status:** Read-only tool-using workflow passed with Codex 0.167.1 and
+`gpt-6-luna`. Write/approval provider integration remains Phase 3 work.
 
 ## Installed client
 
-- `codex` 0.139.0 at `/opt/homebrew/bin/codex`.
+- `codex` 0.167.1 at `/opt/homebrew/bin/codex` (updated from 0.139.0 during the
+  probe).
 - `codex app-server` is marked experimental but exposes `stdio`, `unix`, and websocket transports.
 - `codex app-server generate-json-schema` produced the local protocol schema bundle on 2026-11-11.
 
@@ -72,13 +74,28 @@ The model gate failed with the installed CLI 0.139.0:
 | `gpt-5.3-codex` | `model_not_found` via `codex exec`; app-server turn stalled/system-error |
 | `gpt-6-luna` | app-server warned “Model metadata not found” and stalled; `codex exec` returned `model_not_found` |
 
-`codex doctor` reports that **Codex 0.167.1 is available** while the installed
-client is **0.139.0**. The model names configured for the desktop app are newer
-than this CLI’s supported ChatGPT model set.
+`codex doctor` reported that Codex 0.167.1 was available while the installed
+client was 0.139.0. The model names configured for the desktop app were newer
+than that CLI’s supported ChatGPT model set.
 
-**Gate status remains pending.** The next safe step is to update the Codex CLI
-or select a model supported by the installed client, then rerun the same
-disposable-workspace probe and verify one Academia MCP tool call.
+## Success after updating to 0.167.1
+
+After updating Codex, the same isolated probe passed:
+
+- `gpt-6-luna` completed a live turn.
+- The model requested `academia_library` through the `academia` MCP server.
+- `item/mcpToolCall` started and completed with the Library result.
+- The model streamed `item/agentMessage/delta` events and answered exactly
+  `week-4-reading.md`.
+- Academic files remained unchanged.
+- Read tools carry `readOnlyHint: true`, so the read-only call did not require a
+  write-style approval prompt under `approvalPolicy: never`.
+- A second probe sent `turn/interrupt`; the turn completed with status
+  `interrupted` in 19 ms and academic files remained unchanged.
+
+The prior 0.139.0 `model_not_found` responses remain the recorded
+authentication/entitlement failure evidence. Rate-limit and malformed-tool-call
+behavior are still not exercised by this probe.
 
 ## Gate checklist
 
@@ -86,13 +103,18 @@ disposable-workspace probe and verify one Academia MCP tool call.
 - [x] Candidate provider paths identified.
 - [x] No unauthorized OAuth or API-billing path added.
 - [x] App-server handshake and read-only Academia MCP startup verified.
-- [ ] One live authenticated request with a verified provider.
-- [ ] Structured tool call observed end to end.
-- [ ] Streaming or progress events observed.
-- [ ] Cancellation/interrupt observed.
-- [ ] Auth failure, rate limit, timeout, and malformed tool call behavior recorded.
-- [ ] Exact disclosure and plan-usage behavior documented.
-- [ ] One disposable-workspace read-only workflow demonstrated.
+- [x] One live authenticated request with a verified provider (`gpt-6-luna`).
+- [x] Structured tool call observed end to end (`academia_library`).
+- [x] Streaming or progress events observed (agent deltas and MCP call events).
+- [x] Cancellation/interrupt observed (turn status `interrupted`).
+- [x] Authentication/entitlement failure observed (older CLI model mismatch).
+- [ ] Rate limit and malformed tool call behavior recorded.
+- [ ] Exact disclosure and plan-usage behavior documented beyond plan limits.
+- [x] One disposable-workspace read-only workflow demonstrated.
+
+**Gate decision:** read-only provider path is viable. The first-party Agent UI
+can proceed behind a feature flag, but must not be described as fully functional
+until Phase 3 write approvals and the remaining failure cases are tested.
 
 ## Decision rule
 

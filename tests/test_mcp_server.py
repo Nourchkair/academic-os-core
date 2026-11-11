@@ -192,6 +192,10 @@ def test_tools_list_is_stable_and_schemas_are_complete(mcp: tuple[McpServer, Pat
         assert isinstance(schema.get("required"), list)
         assert schema.get("additionalProperties") is False
         assert set(schema["required"]) <= set(schema["properties"])
+        if tool["name"] in {"academia_review_decide", "academia_review_execute", "academia_import_file"}:
+            assert tool.get("annotations", {}).get("readOnlyHint") is False
+        else:
+            assert tool.get("annotations", {}).get("readOnlyHint") is True
 
 
 def test_read_tools_return_bounded_workspace_data(mcp: tuple[McpServer, Path, Path]) -> None:
