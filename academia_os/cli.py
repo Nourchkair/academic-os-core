@@ -461,6 +461,12 @@ def build_parser() -> argparse.ArgumentParser:
     agent_recipe = agent_sub.add_parser("recipe", help="Compatibility alias for `agent playbook`")
     agent_recipe.add_argument("workflow_id")
     agent_recipe.add_argument("--json", action="store_true")
+    assistant = sub.add_parser("assistant", help="Inspect the first-party assistant contract and provider status")
+    assistant_sub = assistant.add_subparsers(dest="assistant_command", required=True)
+    assistant_tools = assistant_sub.add_parser("tools", help="List read-only assistant tools and their schemas")
+    assistant_tools.add_argument("--json", action="store_true")
+    assistant_capabilities = assistant_sub.add_parser("capabilities", help="Read the assistant runtime and provider capability status")
+    assistant_capabilities.add_argument("--json", action="store_true")
     workflow = sub.add_parser("workflow", help="Read or save local student workflow preferences")
     workflow_sub = workflow.add_subparsers(dest="workflow_command", required=True)
     workflow_preferences = workflow_sub.add_parser("preferences", help="List saved workflow preferences")
@@ -635,7 +641,7 @@ def main(argv: list[str] | None = None) -> int:
             return serve(profile=args.profile)
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"process", "study", "chat", "courses", "today", "tasks", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
+        if args.command in {"process", "study", "chat", "courses", "today", "tasks", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -647,6 +653,27 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def dispatch(args: argparse.Namespace) -> int:
+    if args.command == "assistant":
+        from .assistant import ASSISTANT_CONTRACT_VERSION, descriptors
+        if args.assistant_command == "tools":
+            value = {
+                "contract_version": ASSISTANT_CONTRACT_VERSION,
+                "write_tools": [],
+                "tools": descriptors(),
+            }
+        else:
+            value = {
+                "contract_version": ASSISTANT_CONTRACT_VERSION,
+                "runtime": {"status": "read_only", "write_tools": False, "provider_required": True},
+                "provider_gate": {
+                    "status": "pending",
+                    "requirement": "a real provider must demonstrate one complete tool-using workflow before the Agent experience is described as functional",
+                },
+                "providers": [],
+                "tools": descriptors(),
+            }
+        _emit(value, as_json=args.json)
+        return 0
     if args.command == "process":
         config = load_config(_profile_path(args))
         if args.process_command == "status":

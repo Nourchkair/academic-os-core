@@ -136,6 +136,21 @@ def ensure_scope_in_workspace(scope: Scope, policy: PolicyContext) -> None:
     validate_scope(scope, policy)
 
 
+def scope_within(child: Scope, parent: Scope) -> bool:
+    """Return whether one tool call stays inside the run's selected scope."""
+    if parent.kind is ScopeKind.WORKSPACE:
+        return True
+    if parent.kind is ScopeKind.SEMESTER:
+        if child.kind in {ScopeKind.WORKSPACE, ScopeKind.SEMESTER}:
+            return child.semester in {None, parent.semester}
+        return child.semester == parent.semester
+    if parent.kind is ScopeKind.COURSE:
+        return child.kind in {ScopeKind.COURSE, ScopeKind.SOURCE} and child.course_id == parent.course_id
+    if parent.kind is ScopeKind.SOURCE:
+        return child.kind is ScopeKind.SOURCE and child.source_id == parent.source_id
+    return False
+
+
 def course_scope(policy: PolicyContext, course_id: str) -> Scope:
     course = resolve_course(policy, course_id)
     return Scope(kind=ScopeKind.COURSE, semester=policy.semester, course_id=str(course["id"]))

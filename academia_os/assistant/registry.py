@@ -14,7 +14,7 @@ from .contracts import (
     ToolResult,
     validate_tool_call,
 )
-from .policy import PolicyContext, PolicyDenied, authorize_tool, resolve_course
+from .policy import PolicyContext, PolicyDenied, authorize_tool, resolve_course, scope_within
 from .tools import read
 from ..source_identity import SourceIdentityError, validate_source_id
 
@@ -247,12 +247,15 @@ def invoke(
     context: read.ReadContext,
     *,
     policy: PolicyContext | None = None,
+    parent_scope: Scope | None = None,
 ) -> ToolResult:
     spec = READ_TOOLS.get(name)
     if spec is None:
         raise AssistantError(f"unknown assistant tool: {name}", code="unknown_tool")
     values = validate_tool_call(spec.descriptor, arguments)
     scope = _scope_for(values, context)
+    if parent_scope is not None and not scope_within(scope, parent_scope):
+        raise PolicyDenied("tool call is outside the selected run scope")
     decision = authorize_tool(spec.descriptor, scope, policy or context.policy, arguments=values)
     if not decision.allowed:
         raise PolicyDenied(decision.reason)
