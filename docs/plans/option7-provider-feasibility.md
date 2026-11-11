@@ -93,6 +93,23 @@ After updating Codex, the same isolated probe passed:
 - A second probe sent `turn/interrupt`; the turn completed with status
   `interrupted` in 19 ms and academic files remained unchanged.
 
+### Write-approval probe
+
+A harmless fake MCP tool with `readOnlyHint: false` was exposed under
+`approvalPolicy: on-request` and `approvalsReviewer: user`. Codex **executed the
+tool without sending any server approval request** to the host. A direct write
+tool therefore cannot rely on the app-server approval policy for human
+confirmation.
+
+The safe integration is **proposal-only MCP**:
+
+- `academia mcp serve --proposal-only` exposes read tools plus
+  `academia_propose_import`.
+- The proposal records the exact source, destination, hash, and effects but
+  copies nothing.
+- The Review UI shows the exact action; only a human can approve and execute it.
+- Direct write tools remain hidden in the Codex app-server runtime.
+
 The prior 0.139.0 `model_not_found` responses remain the recorded
 authentication/entitlement failure evidence. Rate-limit and malformed-tool-call
 behavior are still not exercised by this probe.

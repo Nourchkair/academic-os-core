@@ -471,6 +471,7 @@ def build_parser() -> argparse.ArgumentParser:
     assistant_run.add_argument("--message", required=True)
     assistant_run.add_argument("--course", dest="course_id", help="Optional exact course ID, code, or name")
     assistant_run.add_argument("--model", help="Optional Codex model override")
+    assistant_run.add_argument("--proposal-mode", action="store_true", help="Let Codex create Review/Action proposals, never direct writes")
     assistant_run.add_argument("--json", action="store_true")
     assistant_propose_import = assistant_sub.add_parser("propose-import", help="Create a Review/Action proposal for one local file import")
     assistant_propose_import.add_argument("--source", required=True, help="Exact local source file")
@@ -627,7 +628,9 @@ def build_parser() -> argparse.ArgumentParser:
     mcp = sub.add_parser("mcp", help="Expose bounded local Academia tools over MCP stdio")
     mcp_sub = mcp.add_subparsers(dest="mcp_command", required=True)
     mcp_serve = mcp_sub.add_parser("serve", help="Run an MCP stdio server for an authorized local agent")
-    mcp_serve.add_argument("--read-only", action="store_true", help="Expose read tools only; disable all write tools")
+    mcp_mode = mcp_serve.add_mutually_exclusive_group()
+    mcp_mode.add_argument("--read-only", action="store_true", help="Expose read tools only; disable all write and proposal tools")
+    mcp_mode.add_argument("--proposal-only", action="store_true", help="Expose read tools and exact approval proposals, but no direct writes")
     mcp_serve.add_argument("--semester", help="Limit read tools to one exact semester folder")
     mcp_serve.add_argument("--course", help="Limit read tools to one exact course ID, code, or name")
     from .study.cli import add_parser as add_study_parser
@@ -655,6 +658,7 @@ def main(argv: list[str] | None = None) -> int:
             return serve(
                 profile=args.profile,
                 read_only=bool(args.read_only),
+                proposal_only=bool(args.proposal_only),
                 semester=args.semester,
                 course=args.course,
             )
@@ -737,6 +741,7 @@ def dispatch(args: argparse.Namespace) -> int:
                 academic_root=root,
                 profile_path=_profile_path(args),
                 model=model,
+                mcp_mode="proposal_only" if args.proposal_mode else "read_only",
             ).run(RunRequest(
                 messages=({"role": "user", "content": args.message},),
                 scope=scope,

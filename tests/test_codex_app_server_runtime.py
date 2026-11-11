@@ -95,3 +95,6 @@ def test_read_only_mcp_command_is_the_default(tmp_path: Path, monkeypatch: pytes
 
     scoped = runtime._resolved_mcp_command(Scope(kind="course", semester="Fall 2026", course_id="POL 2103 - Politics"))
     assert scoped[-4:] == ["--semester", "Fall 2026", "--course", "POL 2103 - Politics"]
+
+    proposal = CodexAppServerRuntime(academic_root=root, profile_path=profile, mcp_mode="proposal_only")
+    assert "--proposal-only" in proposal._resolved_mcp_command()

@@ -92,6 +92,7 @@ def capability_report() -> dict[str, Any]:
             "transport": "local_stdio",
             "read_tools": ["status", "capabilities", "courses", "today", "tasks", "agent_context", "attention", "review_item", "activity_changes", "library", "read_library_item", "processing_status", "import_targets"],
             "write_tools": ["review_decide", "review_execute", "import_file"],
+            "proposal_tools": ["propose_import"],
             "external_connectors": "not_provided_by_core_mcp",
         },
         "watched_folders": {

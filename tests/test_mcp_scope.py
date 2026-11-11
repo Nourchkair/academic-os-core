@@ -100,3 +100,41 @@ def test_unknown_scope_is_rejected_at_startup(tmp_path: Path) -> None:
         _resolve_scope(profile, "Spring 2099", None)
     with pytest.raises(ValueError, match="Unknown or ambiguous course"):
         _resolve_scope(profile, "Fall 2026", "UNKNOWN")
+
+
+def test_proposal_only_mode_exposes_exact_proposals_without_copying(tmp_path: Path) -> None:
+    _, root, profile = prepared_workspace(tmp_path)
+    inbox = root / "Fall 2026" / "POL 2103 - Politics" / "00_INBOX"
+    inbox.mkdir()
+    source = tmp_path / "lecture.md"
+    source.write_text("# Lecture\n", encoding="utf-8")
+    server = McpServer(profile, proposal_only=True, course="POL 2103", read_only=False)
+    try:
+        tools = {tool["name"] for tool in server.request("tools/list")["result"]["tools"]}
+        assert "academia_propose_import" in tools
+        assert "academia_import_file" not in tools
+        assert "academia_review_decide" not in tools
+
+        proposal = call_json(server, "academia_propose_import", {
+            "source_path": str(source),
+            "target_id": "Fall 2026/POL 2103 - Politics/00_INBOX",
+        })
+        assert proposal["status"] == "approval_required"
+        assert proposal["review_id"]
+        assert list(inbox.iterdir()) == []
+        assert "outside the selected course" in call_error(server, "academia_propose_import", {
+            "source_path": str(source),
+            "target_id": "Fall 2026/HIS 2101 - History/00_INBOX",
+        })
+    finally:
+        server.close()
+
+
+def test_read_only_mode_still_hides_proposal_tools(tmp_path: Path) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+    server = McpServer(profile, read_only=True)
+    try:
+        tools = {tool["name"] for tool in server.request("tools/list")["result"]["tools"]}
+        assert "academia_propose_import" not in tools
+    finally:
+        server.close()

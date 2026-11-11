@@ -54,11 +54,20 @@ The dashboard now has a first-class **Review** page:
 Approved action-linked items remain visible after restart through
 `academia review list --pending-execution`.
 
+## Codex proposal mode
+
+A probe showed that Codex app-server can execute a non-read-only MCP tool without
+sending an approval request to the host, even with `approvalPolicy: on-request`.
+Direct write tools are therefore **not** exposed to Codex.
+
+`academia assistant run --proposal-mode` starts the app-server with
+`academia mcp serve --proposal-only`. In that mode Codex may create an exact
+`academia_propose_import` proposal, but cannot copy files, approve, or execute.
+The proposal appears in Review; only a human can approve and run it.
+
 ## Boundaries
 
-- The Codex app-server runtime remains read-only and exposes no write tools.
+- Direct Codex write-tool execution remains disabled.
 - Task writes remain deferred.
-- Codex MCP write-tool execution still requires a host confirmation UI before it
-  can be enabled.
 - The Review UI displays exact local targets and effects; it does not treat a
   model recommendation as approval.

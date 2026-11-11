@@ -29,6 +29,7 @@ EXPECTED_TOOLS = {
     "academia_import_targets",
     "academia_library",
     "academia_processing_status",
+    "academia_propose_import",
     "academia_read_library_item",
     "academia_review_decide",
     "academia_review_execute",
@@ -42,12 +43,14 @@ EXPECTED_TOOLS = {
 class McpServer:
     """Spawn the real stdio server and speak newline-delimited JSON-RPC."""
 
-    def __init__(self, profile: Path, *, read_only: bool = False, semester: str | None = None, course: str | None = None) -> None:
+    def __init__(self, profile: Path, *, read_only: bool = False, proposal_only: bool = False, semester: str | None = None, course: str | None = None) -> None:
         environment = os.environ.copy()
         environment["PYTHONPATH"] = str(ROOT)
         command = [sys.executable, "-m", "academia_os", "--profile", str(profile), "mcp", "serve"]
         if read_only:
             command.append("--read-only")
+        if proposal_only:
+            command.append("--proposal-only")
         if semester:
             command.extend(["--semester", semester])
         if course:
@@ -165,6 +168,7 @@ def test_read_only_mode_hides_and_rejects_write_tools(tmp_path: Path) -> None:
             "academia_review_decide",
             "academia_review_execute",
             "academia_import_file",
+            "academia_propose_import",
         }
         error = call_error(server, "academia_review_decide", {"review_id": "missing", "decision": "use_new"})
         assert "disabled in read-only mode" in error
@@ -196,7 +200,7 @@ def test_tools_list_is_stable_and_schemas_are_complete(mcp: tuple[McpServer, Pat
         assert isinstance(schema.get("required"), list)
         assert schema.get("additionalProperties") is False
         assert set(schema["required"]) <= set(schema["properties"])
-        if tool["name"] in {"academia_review_decide", "academia_review_execute", "academia_import_file"}:
+        if tool["name"] in {"academia_review_decide", "academia_review_execute", "academia_import_file", "academia_propose_import"}:
             assert tool.get("annotations", {}).get("readOnlyHint") is False
         else:
             assert tool.get("annotations", {}).get("readOnlyHint") is True
@@ -344,5 +348,5 @@ def test_capability_report_mcp_metadata_matches_actual_tools(mcp: tuple[McpServe
     def normalize(name: str) -> str:
         return f"academia_{name}" if not name.startswith("academia_") else name
 
-    advertised = {normalize(name) for name in mcp_report["read_tools"] + mcp_report["write_tools"]}
+    advertised = {normalize(name) for name in mcp_report["read_tools"] + mcp_report["write_tools"] + mcp_report.get("proposal_tools", [])}
     assert advertised == actual

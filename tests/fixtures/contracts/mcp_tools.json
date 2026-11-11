@@ -74,5 +74,12 @@
       "source_path",
       "target_id"
     ]
+  },
+  {
+    "name": "academia_propose_import",
+    "required": [
+      "source_path",
+      "target_id"
+    ]
   }
 ]

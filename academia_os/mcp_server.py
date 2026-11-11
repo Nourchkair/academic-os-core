@@ -20,10 +20,15 @@ from .workspace import build_workspace_snapshot
 _MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 _PROTOCOL_VERSION = "2024-11-05"
 _WRITE_TOOL_NAMES = frozenset({"academia_review_decide", "academia_review_execute", "academia_import_file"})
+_PROPOSAL_TOOL_NAMES = frozenset({"academia_propose_import"})
 
 
-def _tools_for_mode(read_only: bool) -> list[dict[str, Any]]:
-    return [tool for tool in _TOOLS if not read_only or tool["name"] not in _WRITE_TOOL_NAMES]
+def _tools_for_mode(read_only: bool, proposal_only: bool = False) -> list[dict[str, Any]]:
+    if read_only:
+        return [tool for tool in _TOOLS if tool["name"] not in _WRITE_TOOL_NAMES and tool["name"] not in _PROPOSAL_TOOL_NAMES]
+    if proposal_only:
+        return [tool for tool in _TOOLS if tool["name"] not in _WRITE_TOOL_NAMES]
+    return list(_TOOLS)
 
 
 def _tool(
@@ -163,12 +168,23 @@ _TOOLS = [
         ["source_path", "target_id"],
         annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
     ),
+    _tool(
+        "academia_propose_import",
+        "Create an exact Review/Action proposal to copy one local file into a recognized inbox. This never copies the file. The student must approve and execute it in Review.",
+        {
+            "source_path": {"type": "string", "description": "Exact local file path."},
+            "target_id": {"type": "string", "description": "Exact inbox id returned by academia_import_targets."},
+            "source_label": {"type": "string", "description": "Optional provenance label."},
+        },
+        ["source_path", "target_id"],
+        annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
+    ),
 ]
 
 # Read tools are side-effect free. Advertise the standard MCP read-only hint so
 # compatible hosts do not need a write-style approval prompt for local reads.
 for _tool_definition in _TOOLS:
-    if _tool_definition["name"] not in _WRITE_TOOL_NAMES:
+    if _tool_definition["name"] not in _WRITE_TOOL_NAMES and _tool_definition["name"] not in _PROPOSAL_TOOL_NAMES:
         _tool_definition.setdefault("annotations", {})
         _tool_definition["annotations"].update({"readOnlyHint": True, "openWorldHint": False})
 
@@ -335,14 +351,17 @@ def _call_tool(
     profile: Path | None,
     *,
     read_only: bool = False,
+    proposal_only: bool = False,
     scope: McpScope | None = None,
 ) -> Any:
     if not isinstance(values, dict):
         raise McpError("Tool arguments must be a JSON object.")
-    allowed = {item["name"] for item in _tools_for_mode(read_only)}
+    allowed = {item["name"] for item in _tools_for_mode(read_only, proposal_only)}
     if name not in allowed:
-        if read_only and name in _WRITE_TOOL_NAMES:
+        if read_only and (name in _WRITE_TOOL_NAMES or name in _PROPOSAL_TOOL_NAMES):
             raise McpError(f"Tool is disabled in read-only mode: {name}")
+        if proposal_only and name in _WRITE_TOOL_NAMES:
+            raise McpError(f"Direct write tool is disabled in proposal-only mode: {name}")
         raise McpError(f"Unknown Academia MCP tool: {name}")
     values = _scoped_arguments(name, values, scope)
 
@@ -615,6 +634,24 @@ def _call_tool(
         _optional(args, "--source-label", source_label)
         result = _run_cli(args, profile)
         return {"import": result, "target": selected, "original_preserved": True, "processing_status": result.get("processing_status") if isinstance(result, dict) else None}
+    if name == "academia_propose_import":
+        from .assistant.tools.write import propose_import
+        source_value = values.get("source_path")
+        target_id = values.get("target_id")
+        if not isinstance(source_value, str) or not source_value.strip():
+            raise McpError("Provide the exact local source_path.")
+        if not isinstance(target_id, str) or not target_id.strip():
+            raise McpError("Choose an exact target_id returned by academia_import_targets.")
+        if scope:
+            target_semester = target_id.split("/", 1)[0]
+            if target_semester != scope.semester:
+                raise McpError("target_id is outside the selected semester scope.")
+            if scope.course_id and target_id != f"{scope.semester}/{scope.course_id}/00_INBOX":
+                raise McpError("target_id is outside the selected course scope.")
+        config = load_config(_profile_path(profile))
+        context = ReadContext.create(config, semester=scope.semester if scope else None, hosted_model_allowed=False)
+        source_label = values.get("source_label") if isinstance(values.get("source_label"), str) else None
+        return propose_import(context, source_path=source_value, target_id=target_id, source_label=source_label)
     raise McpError(f"Unknown Academia MCP tool: {name}")
 
 
@@ -627,6 +664,7 @@ def _handle(
     profile: Path | None,
     *,
     read_only: bool = False,
+    proposal_only: bool = False,
     scope: McpScope | None = None,
 ) -> dict[str, Any] | None:
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
@@ -651,11 +689,11 @@ def _handle(
     if method == "ping":
         return _response(request_id, {})
     if method == "tools/list":
-        return _response(request_id, {"tools": _tools_for_mode(read_only)})
+        return _response(request_id, {"tools": _tools_for_mode(read_only, proposal_only)})
     if method == "tools/call":
         name = params.get("name")
         try:
-            result = _call_tool(name, params.get("arguments", {}), profile, read_only=read_only, scope=scope)
+            result = _call_tool(name, params.get("arguments", {}), profile, read_only=read_only, proposal_only=proposal_only, scope=scope)
             return _response(request_id, {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]})
         except (McpError, OSError, subprocess.TimeoutExpired, TypeError, ValueError) as exc:
             error = exc if isinstance(exc, McpError) else McpError(str(exc), -32000)
@@ -670,6 +708,7 @@ def serve(
     profile: Path | None = None,
     *,
     read_only: bool = False,
+    proposal_only: bool = False,
     semester: str | None = None,
     course: str | None = None,
 ) -> int:
@@ -686,7 +725,7 @@ def serve(
         else:
             try:
                 request = json.loads(line)
-                message = _handle(request, profile, read_only=read_only, scope=scope)
+                message = _handle(request, profile, read_only=read_only, proposal_only=proposal_only, scope=scope)
             except json.JSONDecodeError:
                 message = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error."}}
         if message is not None:
