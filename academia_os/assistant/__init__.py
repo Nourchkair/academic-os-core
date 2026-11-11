@@ -16,7 +16,7 @@ from .contracts import (
     ToolResult,
 )
 from .policy import PolicyContext, PolicyDecision, PolicyDenied, authorize_tool, policy_context
-from .providers import CancelToken, FakeProvider, ProviderAdapter, ProviderRequest, ProviderResponse, ProviderToolCall
+from .providers import CancelToken, CodexAppServerRuntime, FakeProvider, ProviderAdapter, ProviderRequest, ProviderResponse, ProviderToolCall
 from .registry import READ_TOOLS, descriptor, descriptors, invoke
 from .runtime import RunController, tools_for_scope
 from .tools.read import ReadContext
@@ -25,6 +25,7 @@ __all__ = [
     "ASSISTANT_CONTRACT_VERSION",
     "AssistantError",
     "CancelToken",
+    "CodexAppServerRuntime",
     "Disclosure",
     "EventType",
     "FakeProvider",

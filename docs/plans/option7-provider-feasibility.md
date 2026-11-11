@@ -116,6 +116,31 @@ behavior are still not exercised by this probe.
 can proceed behind a feature flag, but must not be described as fully functional
 until Phase 3 write approvals and the remaining failure cases are tested.
 
+## Implemented backend
+
+`academia_os/assistant/providers/codex_app_server.py` now implements
+`CodexAppServerRuntime`:
+
+- Creates a temporary, permission-restricted `CODEX_HOME`.
+- Symlinks the existing Codex `auth.json`; it never copies or reads credentials.
+- Writes a minimal config exposing only `academia mcp serve --read-only`.
+- Disables shell, multi-agent, apps, plugins, and web search for the turn.
+- Starts an ephemeral read-only thread and one turn.
+- Maps MCP tool calls, message deltas, completion, interruption, timeout, and
+  provider errors into `RunResult`/`RunEvent` objects.
+- Supports `CancelToken` through `turn/interrupt`.
+
+CLI:
+
+```bash
+academia assistant run --message "List one Library item" --json
+```
+
+Live verification on a disposable workspace returned
+`week-4-reading.md`, with one `academia_library` tool result and no file changes.
+The selected scope is currently passed in the prompt; the MCP server remains
+workspace-scoped until course/source filtering is implemented.
+
 ## Decision rule
 
 The Agent experience remains feature-flagged and is not described as functional

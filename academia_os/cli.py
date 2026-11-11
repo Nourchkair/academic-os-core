@@ -467,6 +467,11 @@ def build_parser() -> argparse.ArgumentParser:
     assistant_tools.add_argument("--json", action="store_true")
     assistant_capabilities = assistant_sub.add_parser("capabilities", help="Read the assistant runtime and provider capability status")
     assistant_capabilities.add_argument("--json", action="store_true")
+    assistant_run = assistant_sub.add_parser("run", help="Run one read-only request through the verified Codex app-server backend")
+    assistant_run.add_argument("--message", required=True)
+    assistant_run.add_argument("--course", dest="course_id", help="Optional exact course ID, code, or name")
+    assistant_run.add_argument("--model", help="Optional Codex model override")
+    assistant_run.add_argument("--json", action="store_true")
     workflow = sub.add_parser("workflow", help="Read or save local student workflow preferences")
     workflow_sub = workflow.add_subparsers(dest="workflow_command", required=True)
     workflow_preferences = workflow_sub.add_parser("preferences", help="List saved workflow preferences")
@@ -655,24 +660,62 @@ def main(argv: list[str] | None = None) -> int:
 
 def dispatch(args: argparse.Namespace) -> int:
     if args.command == "assistant":
-        from .assistant import ASSISTANT_CONTRACT_VERSION, descriptors
+        from .assistant import ASSISTANT_CONTRACT_VERSION, CodexAppServerRuntime, RunRequest, Scope, descriptors
         if args.assistant_command == "tools":
             value = {
                 "contract_version": ASSISTANT_CONTRACT_VERSION,
                 "write_tools": [],
                 "tools": descriptors(),
             }
-        else:
+        elif args.assistant_command == "capabilities":
+            codex_path = shutil.which("codex")
+            auth_path = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "auth.json"
+            available = bool(codex_path and auth_path.is_file())
             value = {
                 "contract_version": ASSISTANT_CONTRACT_VERSION,
                 "runtime": {"status": "read_only", "write_tools": False, "provider_required": True},
                 "provider_gate": {
-                    "status": "pending",
-                    "requirement": "a real provider must demonstrate one complete tool-using workflow before the Agent experience is described as functional",
+                    "status": "read_only_passed" if available else "pending",
+                    "requirement": "write tools remain disabled until the Phase 3 approval flow is implemented",
                 },
-                "providers": [],
+                "providers": [{
+                    "id": "codex-app-server",
+                    "name": "Codex app-server",
+                    "available": available,
+                    "read_only": True,
+                    "writes": False,
+                    "authentication": "Codex-managed ChatGPT sign-in",
+                }],
                 "tools": descriptors(),
             }
+        else:
+            config = load_config(_profile_path(args))
+            root = Path(config["academic"]["root_directory"]).expanduser().resolve()
+            course_id = None
+            if args.course_id:
+                from .workspace import build_workspace_snapshot
+                snapshot = build_workspace_snapshot(config, persist=False)
+                course = resolve_course_identifier(snapshot.get("courses", []), args.course_id)
+                course_id = str(course["id"])
+            scope = Scope(
+                kind="course",
+                semester=config["academic"]["semester"],
+                course_id=course_id,
+            ) if course_id else Scope()
+            model = args.model
+            if not model:
+                from .study.providers import codex_model, codex_runtime
+                model, _notice = codex_model(codex_runtime())
+            result = CodexAppServerRuntime(
+                academic_root=root,
+                profile_path=_profile_path(args),
+                model=model,
+            ).run(RunRequest(
+                messages=({"role": "user", "content": args.message},),
+                scope=scope,
+            ))
+            _emit(result.as_dict(), as_json=args.json)
+            return 0 if result.status == "completed" else 1
         _emit(value, as_json=args.json)
         return 0
     if args.command == "process":

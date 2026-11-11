@@ -74,6 +74,7 @@ class EventType(StrEnum):
     TOOL_STARTED = "tool_started"
     TOOL_RESULT = "tool_result"
     PERMISSION_REQUIRED = "permission_required"
+    MESSAGE_DELTA = "message_delta"
     ERROR = "error"
     FINAL = "final"
     CANCELLED = "cancelled"

@@ -1,0 +1,94 @@
+from __future__ import annotations
+
+import sys
+import threading
+from pathlib import Path
+
+import pytest
+
+from academia_os.assistant import CancelToken, RunRequest, Scope
+from academia_os.assistant.providers.codex_app_server import CodexAppServerRuntime
+from tests.test_agent_interface import prepared_workspace
+
+FAKE_SERVER = Path(__file__).parent / "fixtures" / "fake_codex_app_server.py"
+
+
+def make_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, mode: str = "completed", auth: bool = True) -> CodexAppServerRuntime:
+    config, root, profile = prepared_workspace(tmp_path)
+    auth_path = tmp_path / "auth.json"
+    if auth:
+        auth_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("FAKE_CODEX_MODE", mode)
+    return CodexAppServerRuntime(
+        academic_root=root,
+        profile_path=profile,
+        model="gpt-6-luna",
+        codex_command=[sys.executable, str(FAKE_SERVER)],
+        mcp_command=["/usr/bin/true"],
+        auth_path=auth_path,
+        timeout_seconds=10,
+    )
+
+
+def request() -> RunRequest:
+    return RunRequest(messages=({"role": "user", "content": "List one Library item."},), scope=Scope(), timeout_seconds=10)
+
+
+def test_completed_run_maps_mcp_tool_and_streamed_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime = make_runtime(tmp_path, monkeypatch)
+    result = runtime.run(request())
+
+    assert result.status == "completed"
+    assert result.message == "week-4-reading.md"
+    assert result.error is None
+    assert result.tool_results
+    assert result.tool_results[0].tool == "academia_library"
+    assert result.tool_results[0].data["items"][0]["name"] == "week-4-reading.md"
+    event_types = [event.event_type.value for event in result.events]
+    assert event_types[0] == "run_started"
+    assert "tool_started" in event_types
+    assert "tool_result" in event_types
+    assert "message_delta" in event_types
+    assert event_types[-1] == "final"
+    assert any(event.data.get("delta") == "week-4-" for event in result.events if event.event_type.value == "message_delta")
+
+
+def test_interrupt_maps_to_cancelled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime = make_runtime(tmp_path, monkeypatch, mode="interrupted")
+    cancel = CancelToken()
+    timer = threading.Timer(0.2, cancel.cancel)
+    timer.start()
+    try:
+        result = runtime.run(request(), cancel=cancel)
+    finally:
+        timer.cancel()
+        timer.join(timeout=2)
+
+    assert result.status == "cancelled"
+    assert result.error is None
+    assert result.events[-1].event_type.value == "cancelled"
+
+
+def test_failed_turn_maps_to_structured_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime = make_runtime(tmp_path, monkeypatch, mode="failed")
+    result = runtime.run(request())
+
+    assert result.status == "error"
+    assert result.error is not None
+    assert result.error.code == "turn_failed"
+    assert "synthetic provider failure" in str(result.error)
+    assert result.events[-1].event_type.value == "error"
+
+
+def test_missing_auth_fails_before_starting_a_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime = make_runtime(tmp_path, monkeypatch, auth=False)
+    with pytest.raises(Exception, match="signed in"):
+        runtime.run(request())
+
+
+def test_read_only_mcp_command_is_the_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config, root, profile = prepared_workspace(tmp_path)
+    runtime = CodexAppServerRuntime(academic_root=root, profile_path=profile, mcp_command=None)
+    command = runtime._resolved_mcp_command()
+    assert command[-1] == "--read-only"
+    assert "mcp" in command and "serve" in command

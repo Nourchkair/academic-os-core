@@ -37,6 +37,8 @@ def test_assistant_capabilities_cli_reports_the_provider_gate_as_pending() -> No
     value = json.loads(result.stdout)
     assert value["runtime"]["status"] == "read_only"
     assert value["runtime"]["write_tools"] is False
-    assert value["provider_gate"]["status"] == "pending"
-    assert value["providers"] == []
+    assert value["provider_gate"]["status"] in {"pending", "read_only_passed"}
+    assert value["providers"][0]["id"] == "codex-app-server"
+    assert value["providers"][0]["read_only"] is True
+    assert value["providers"][0]["writes"] is False
     assert len(value["tools"]) == 12
