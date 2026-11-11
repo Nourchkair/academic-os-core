@@ -7,15 +7,18 @@ revalidates the source before copying.
 """
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from ...acquisition import import_file, validate_import_destination, validate_import_source
 from ...actions import ActionProposal, ActionStore, ActionType
 from ...activity import ActivityLog
+from ...domain import DomainProjection, Evidence
 from ...processing import ProcessingStore
 from ...review import ReviewQueue
-from ...source_identity import SourceIdentityError, fingerprint
+from ...source_identity import SourceIdentityError, fingerprint, safe_workspace_path
+from ...study import StudyService
 from ...workflow import ApprovalWorkflow
 from ..contracts import AssistantError, Disclosure, PermissionClass, SideEffect, ToolDescriptor, ToolResult
 from .read import ReadContext
@@ -44,7 +47,64 @@ IMPORT_PROPOSAL_DESCRIPTOR = ToolDescriptor(
     verifiable=True,
 )
 
-WRITE_TOOL_DESCRIPTORS = [IMPORT_PROPOSAL_DESCRIPTOR]
+STUDY_CREATE_DESCRIPTOR = ToolDescriptor(
+    name="study.create",
+    version=1,
+    description="Create one cited, non-authoritative Study set from selected course sources. Create-only; existing sets and attempts remain untouched.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "course": {"type": "string", "description": "Exact course ID, code, or name"},
+            "payload": {"type": "object", "description": "Validated Study payload with citation IDs from the retrieved context"},
+            "source_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 300},
+            "query": {"type": "string", "maxLength": 2000},
+            "pages": {"type": "string", "maxLength": 40},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 128},
+            "deep": {"type": "boolean"},
+        },
+        "required": ["course", "payload"],
+        "additionalProperties": False,
+    },
+    permission=PermissionClass.WRITE_LOCAL,
+    side_effect=SideEffect.CREATE,
+    disclosure=Disclosure.HOSTED_MODEL_ELIGIBLE,
+    requires_approval=False,
+    idempotent=False,
+    previewable=True,
+    verifiable=True,
+)
+
+DOMAIN_CHANGE_DESCRIPTOR = ToolDescriptor(
+    name="domain.propose",
+    version=1,
+    description="Propose one evidence-backed change to a derived academic record. Creates a Review/Action proposal and never changes the projection by itself.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "course": {"type": "string"},
+            "entity_type": {"type": "string"},
+            "entity_id": {"type": "string"},
+            "field": {"type": "string"},
+            "after": {"type": "string"},
+            "evidence_source": {"type": "string"},
+            "evidence_path": {"type": "string"},
+            "source_location": {"type": "string"},
+            "confidence": {"type": "string", "enum": ["current-confirmed", "likely", "unverified", "historical"]},
+            "authority": {"type": "string"},
+        },
+        "required": ["course", "entity_type", "entity_id", "field", "after", "evidence_source", "evidence_path"],
+        "additionalProperties": False,
+    },
+    permission=PermissionClass.WRITE_LOCAL,
+    side_effect=SideEffect.UPDATE,
+    disclosure=Disclosure.LOCAL_ONLY,
+    requires_approval=True,
+    idempotent=False,
+    previewable=True,
+    verifiable=True,
+)
+
+WRITE_TOOL_DESCRIPTORS = [IMPORT_PROPOSAL_DESCRIPTOR, STUDY_CREATE_DESCRIPTOR, DOMAIN_CHANGE_DESCRIPTOR]
 
 
 def _state_stores(root: Path) -> tuple[ApprovalWorkflow, ReviewQueue]:
@@ -188,4 +248,126 @@ def execute_import_proposal(
         "duplicate": bool(result.get("duplicate")),
         "duplicate_of": result.get("duplicate_of"),
         "processing_status": result.get("processing_status"),
+    }
+
+
+def create_study_set(
+    context: ReadContext,
+    *,
+    course: str,
+    payload: dict[str, Any],
+    source_ids: list[str] | None = None,
+    query: str = "",
+    pages: str | None = None,
+    limit: int = 12,
+    deep: bool = False,
+    actor: str = "agent:codex",
+) -> dict[str, Any]:
+    """Create a cited Study set through the canonical Study service."""
+    service = StudyService(context.root, context.semester, course)
+    study_context = service.context(
+        source_ids=source_ids or [],
+        query=query,
+        pages=pages,
+        limit=limit,
+        deep=deep,
+    )
+    created = service.create(payload, study_context, actor=actor)
+    return {
+        "set": created,
+        "coverage": study_context.get("coverage"),
+        "warnings": study_context.get("warnings", []),
+    }
+
+
+def propose_domain_change(
+    context: ReadContext,
+    *,
+    course: str,
+    entity_type: str,
+    entity_id: str,
+    field: str,
+    after: str,
+    evidence_source: str,
+    evidence_path: str,
+    source_location: str | None = None,
+    confidence: str = "unverified",
+    authority: str = "unknown",
+) -> dict[str, Any]:
+    """Create an evidence-backed Review/Action proposal for a derived fact."""
+    from ...course_identity import resolve_course_identifier
+    try:
+        resolved = resolve_course_identifier(context.policy.courses, course)
+    except (KeyError, ValueError) as exc:
+        raise AssistantError(str(exc), code="unknown_course") from exc
+    course_id = str(resolved["id"])
+    projection = DomainProjection(context.root / ".academia" / "domain.json")
+    current = projection.get(entity_type, entity_id)
+    if str(current.get("course_id")) != course_id:
+        raise AssistantError("domain entity does not belong to the selected course", code="cross_course_domain")
+    if field not in current:
+        raise AssistantError(f"domain entity has no field: {field}", code="invalid_domain_field")
+    before = current.get(field)
+    if str(before) == after:
+        raise AssistantError("the proposed value already matches the recorded value", code="no_change")
+    if confidence not in {"current-confirmed", "likely", "unverified", "historical"}:
+        raise AssistantError("confidence is invalid", code="invalid_evidence")
+    try:
+        evidence_file = safe_workspace_path(context.root, evidence_path)
+    except SourceIdentityError as exc:
+        raise AssistantError(str(exc), code="invalid_evidence") from exc
+    evidence = asdict(Evidence(
+        source=evidence_source,
+        source_path=evidence_file.relative_to(context.root).as_posix(),
+        source_location=source_location,
+        provenance="ORIGINAL",
+        confidence=confidence,
+        authority=authority,
+    ))
+    workflow, _ = _state_stores(context.root)
+    effects = [
+        f"change {field} from {before!s} to {after}",
+        "preserve both evidence records in Activity and Review history",
+        "verify the derived projection after execution",
+    ]
+    proposal, review = workflow.propose(
+        action_type=ActionType.DOMAIN_CHANGE,
+        title=f"Review {entity_type} {field} change",
+        details={
+            "updates": [{
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "field": field,
+                "before": before,
+                "after": after,
+                "evidence": evidence,
+            }],
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "field": field,
+            "before": before,
+            "after": after,
+            "new_evidence": evidence,
+            "effects": effects,
+        },
+        course=course_id,
+        priority="high",
+        review_kind="domain_conflict",
+        review_details={
+            "current": before,
+            "new": after,
+            "field": field,
+            "source": evidence_source,
+            "confidence": confidence,
+            "evidence": evidence,
+            "effects": effects,
+        },
+    )
+    return {
+        "status": "approval_required",
+        "proposal_id": proposal.id,
+        "review_id": review.id,
+        "before": before,
+        "after": after,
+        "effects": effects,
     }

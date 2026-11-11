@@ -700,7 +700,7 @@ def dispatch(args: argparse.Namespace) -> int:
                     "authentication": "Codex-managed ChatGPT sign-in",
                 }],
                 "write_policy": {
-                    "status": "approval_required",
+                    "status": "approval_required_for_state_changes",
                     "tools": [descriptor.name for descriptor in WRITE_TOOL_DESCRIPTORS],
                 },
                 "tools": descriptors(),

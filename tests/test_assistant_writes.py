@@ -11,9 +11,12 @@ import pytest
 from academia_os.actions import ActionStore
 from academia_os.activity import ActivityLog
 from academia_os.assistant import ReadContext
-from academia_os.assistant.tools.write import execute_import_proposal, propose_import
+from academia_os.assistant.tools.write import create_study_set, execute_import_proposal, propose_domain_change, propose_import
+from academia_os.domain import Deadline, DomainProjection, Evidence
+from academia_os.extraction.reconcile import execute_domain_change
 from academia_os.processing import ProcessingStore
 from academia_os.review import ReviewQueue, ReviewStatus
+from academia_os.study import StudyService
 from academia_os.workflow import ApprovalWorkflow
 from tests.test_agent_interface import prepared_workspace
 
@@ -170,6 +173,92 @@ def test_cli_propose_decide_execute_import(tmp_path: Path) -> None:
     assert executed.returncode == 0, executed.stderr
     assert json.loads(executed.stdout)["status"] == "verified"
     assert (inbox / "lecture.md").read_text(encoding="utf-8") == "# Lecture\n"
+
+
+def test_study_write_tool_creates_a_cited_set(tmp_path: Path) -> None:
+    config, root, _ = prepared_workspace(tmp_path)
+    context = ReadContext.create(config, hosted_model_allowed=True)
+    source = "Fall 2026/POL 2103 - Politics/05_REFERENCE/week-4-reading.md"
+    service = StudyService(root, "Fall 2026", "POL 2103 - Politics")
+    study_context = service.context(source_ids=[source], query="Private source content", limit=4)
+    chunk = study_context["chunks"][0]
+    payload = {
+        "title": "Week 4 recall",
+        "kind": "quiz",
+        "items": [{
+            "kind": "multiple_choice",
+            "topic": "Private content",
+            "prompt": "Where does the private source content stay?",
+            "options": ["In context", "In the cloud", "In chat history"],
+            "answer": "In context",
+            "explanation": "The selected source is the only citation.",
+            "citation_ids": [chunk["id"]],
+        }],
+        "connections": [],
+    }
+
+    result = create_study_set(
+        context,
+        course="POL 2103",
+        payload=payload,
+        source_ids=[source],
+        query="Private source content",
+        limit=4,
+    )
+
+    assert result["set"]["kind"] == "quiz"
+    assert result["set"]["provenance"] == "AI-GENERATED"
+    assert result["coverage"]["selected_sources"] == 1
+    overview = service.overview()
+    assert len(overview["sets"]) == 1
+    assert overview["sets"][0]["source_count"] == 1
+
+
+def test_domain_write_tool_proposes_then_verifies(tmp_path: Path) -> None:
+    config, root, _ = prepared_workspace(tmp_path)
+    context = ReadContext.create(config, hosted_model_allowed=True)
+    domain = DomainProjection(root / ".academia" / "domain.json")
+    evidence_path = "Fall 2026/POL 2103 - Politics/01_COURSE/Course_Status.md"
+    evidence = Evidence(
+        source="Updated syllabus",
+        source_path=evidence_path,
+        provenance="ORIGINAL",
+        confidence="current-confirmed",
+        authority="course syllabus",
+    )
+    domain.upsert(Deadline(
+        id="essay",
+        course_id="POL 2103 - Politics",
+        title="Research Essay",
+        date="2026-10-19",
+        time=None,
+        type="assignment",
+        evidence=evidence,
+    ))
+
+    proposed = propose_domain_change(
+        context,
+        course="POL 2103",
+        entity_type="deadline",
+        entity_id="essay",
+        field="date",
+        after="2026-10-22",
+        evidence_source="Updated syllabus",
+        evidence_path=evidence_path,
+        confidence="current-confirmed",
+        authority="course syllabus",
+    )
+    assert proposed["status"] == "approval_required"
+    assert domain.get("deadline", "essay")["date"] == "2026-10-19"
+    workflow, actions, reviews = stores(root)
+    workflow.approve_review(proposed["review_id"])
+    verified = workflow.execute_approved(
+        proposed["proposal_id"],
+        lambda proposal: execute_domain_change(proposal, domain),
+    )
+    assert verified.status == "verified"
+    assert domain.get("deadline", "essay")["date"] == "2026-10-22"
+    assert reviews.get(proposed["review_id"]).status is ReviewStatus.RESOLVED
 
 
 def test_cli_pending_execution_list_includes_approved_actions(tmp_path: Path) -> None:
