@@ -6,13 +6,16 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 from pathlib import Path
 from typing import Any
 
-from .assistant import ReadContext, invoke as invoke_assistant_tool
-from .config import load_config
+from .assistant import ReadContext, Scope, invoke as invoke_assistant_tool
+from .config import SEMESTER_PATTERN, load_config
+from .course_identity import course_records, resolve_course_identifier
 from .version import __version__
+from .workspace import build_workspace_snapshot
 
 _MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 _PROTOCOL_VERSION = "2024-11-05"
@@ -193,10 +196,49 @@ def _profile_path(profile: Path | None) -> Path:
     return Path(os.environ.get("ACADEMIC_OS_CONFIG", str(Path.home() / ".academic-os" / "profile.json"))).expanduser().resolve()
 
 
-def _read_tool(profile: Path | None, semester: str | None, name: str, arguments: dict[str, Any]) -> Any:
+@dataclass(frozen=True)
+class McpScope:
+    semester: str | None = None
+    course_id: str | None = None
+
+    def parent_scope(self) -> Scope | None:
+        if self.course_id:
+            return Scope(kind="course", semester=str(self.semester), course_id=self.course_id)
+        if self.semester:
+            return Scope(kind="semester", semester=self.semester)
+        return None
+
+
+def _resolve_scope(profile: Path | None, semester: str | None, course: str | None) -> McpScope | None:
+    if not semester and not course:
+        return None
     config = load_config(_profile_path(profile))
-    context = ReadContext.create(config, semester=semester or None)
-    return invoke_assistant_tool(name, arguments, context)
+    root = Path(config["academic"]["root_directory"]).expanduser().resolve()
+    active = str(config["academic"]["semester"])
+    selected = semester or active
+    if selected != active:
+        if SEMESTER_PATTERN.fullmatch(selected) is None or not (root / selected).is_dir():
+            raise ValueError(f"Unknown workspace semester: {selected}")
+    course_id = None
+    if course:
+        try:
+            resolved = resolve_course_identifier(course_records(root / selected), course)
+        except (KeyError, ValueError) as exc:
+            raise ValueError(f"Unknown or ambiguous course in {selected}: {course}") from exc
+        course_id = str(resolved["id"])
+    return McpScope(semester=selected, course_id=course_id)
+
+
+def _read_tool(
+    profile: Path | None,
+    semester: str | None,
+    name: str,
+    arguments: dict[str, Any],
+    scope: McpScope | None = None,
+) -> Any:
+    config = load_config(_profile_path(profile))
+    context = ReadContext.create(config, semester=scope.semester if scope else (semester or None))
+    return invoke_assistant_tool(name, arguments, context, parent_scope=scope.parent_scope() if scope else None)
 
 
 def _run_cli(args: list[str], profile: Path | None, *, input_text: str | None = None) -> Any:
@@ -272,7 +314,29 @@ def _optional(args: list[str], flag: str, value: Any) -> None:
         args.extend([flag, str(value)])
 
 
-def _call_tool(name: str, values: Any, profile: Path | None, *, read_only: bool = False) -> Any:
+def _scoped_arguments(name: str, values: dict[str, Any], scope: McpScope | None) -> dict[str, Any]:
+    if scope is None:
+        return values
+    result = dict(values)
+    if scope.course_id:
+        if name in {"academia_tasks", "academia_library"}:
+            result["course"] = scope.course_id
+        elif name == "academia_agent_context":
+            result["scope"] = "course"
+            result["course"] = scope.course_id
+    elif scope.semester and name == "academia_agent_context" and result.get("scope") == "workspace":
+        result["scope"] = "semester"
+    return result
+
+
+def _call_tool(
+    name: str,
+    values: Any,
+    profile: Path | None,
+    *,
+    read_only: bool = False,
+    scope: McpScope | None = None,
+) -> Any:
     if not isinstance(values, dict):
         raise McpError("Tool arguments must be a JSON object.")
     allowed = {item["name"] for item in _tools_for_mode(read_only)}
@@ -280,55 +344,109 @@ def _call_tool(name: str, values: Any, profile: Path | None, *, read_only: bool 
         if read_only and name in _WRITE_TOOL_NAMES:
             raise McpError(f"Tool is disabled in read-only mode: {name}")
         raise McpError(f"Unknown Academia MCP tool: {name}")
+    values = _scoped_arguments(name, values, scope)
 
     if name == "academia_status":
-        return _run_cli(["status"], profile)
+        status = _run_cli(["status"], profile)
+        if scope and isinstance(status, dict):
+            config = load_config(_profile_path(profile))
+            snapshot = build_workspace_snapshot(
+                config,
+                persist=False,
+                semester_override=scope.semester,
+                include_material=True,
+                count_inbox_files=True,
+            )
+            if scope.course_id:
+                snapshot["courses"] = [course for course in snapshot.get("courses", []) if course.get("id") == scope.course_id]
+            status["workspace"] = snapshot
+            activity = status.get("recent_activity") if isinstance(status.get("recent_activity"), list) else []
+            if scope.course_id:
+                activity = [event for event in activity if isinstance(event, dict) and event.get("course") == scope.course_id]
+            elif scope.semester:
+                activity = [
+                    event for event in activity
+                    if isinstance(event, dict) and (
+                        event.get("course") is None or str(event.get("source") or "").startswith(scope.semester + "/")
+                    )
+                ]
+            status["recent_activity"] = activity
+            status["scope"] = {"semester": scope.semester, "course_id": scope.course_id}
+        return status
     if name == "academia_capabilities":
         return _run_cli(["agent", "capabilities"], profile)
     if name == "academia_courses":
-        return _read_tool(profile, values.get("semester"), "course.list", {}).data
+        courses = _read_tool(profile, scope.semester if scope else values.get("semester"), "course.list", {}, scope=None).data
+        if scope and scope.course_id:
+            courses = [course for course in courses if course.get("id") == scope.course_id]
+        return courses
     if name == "academia_today":
+        if scope:
+            arguments = {"scope": "course" if scope.course_id else "today"}
+            if scope.course_id:
+                arguments["course"] = scope.course_id
+            return _read_tool(profile, scope.semester, "context.get", arguments, scope=scope).data
         return _run_cli(["today"], profile)
     if name == "academia_tasks":
-        return _read_tool(profile, values.get("semester"), "task.list", {}).data
+        task_arguments = {"course": scope.course_id} if scope and scope.course_id else {}
+        return _read_tool(
+            profile,
+            scope.semester if scope else values.get("semester"),
+            "task.list",
+            task_arguments,
+            scope=scope,
+        ).data
     if name == "academia_agent_context":
-        scope = values.get("scope", "workspace")
+        context_scope = values.get("scope", "workspace")
         detail = values.get("detail", "standard")
-        if scope not in {"workspace", "semester", "course", "today"} or detail not in {"compact", "standard", "deep"}:
+        if context_scope not in {"workspace", "semester", "course", "today"} or detail not in {"compact", "standard", "deep"}:
             raise McpError("Use a supported context scope and detail level.")
-        if scope == "course" and not values.get("course"):
+        if context_scope == "course" and not values.get("course"):
             raise McpError("Course scope requires an exact course identifier.")
-        arguments = {"scope": scope, "detail": detail}
+        arguments = {"scope": context_scope, "detail": detail}
         if values.get("course"):
             arguments["course"] = values["course"]
-        return _read_tool(profile, values.get("semester"), "context.get", arguments).data
+        return _read_tool(
+            profile,
+            scope.semester if scope else values.get("semester"),
+            "context.get",
+            arguments,
+            scope=scope,
+        ).data
     if name == "academia_attention":
         detail = values.get("detail", "standard")
         if detail not in {"compact", "standard", "deep"}:
             raise McpError("Use compact, standard, or deep detail.")
         args = ["agent", "attention", "--detail", detail]
-        _optional(args, "--course", values.get("course"))
-        _optional(args, "--semester", values.get("semester"))
+        _optional(args, "--course", scope.course_id if scope else values.get("course"))
+        _optional(args, "--semester", scope.semester if scope else values.get("semester"))
         return _run_cli(args, profile)
     if name == "academia_review_item":
         review_id = values.get("review_id")
         if not isinstance(review_id, str) or not review_id.strip():
             raise McpError("Provide an exact review_id.")
         args = ["agent", "attention", "--detail", "deep"]
-        _optional(args, "--semester", values.get("semester"))
+        _optional(args, "--course", scope.course_id if scope else None)
+        _optional(args, "--semester", scope.semester if scope else values.get("semester"))
         attention = _run_cli(args, profile)
         attention_items = attention.get("items", []) if isinstance(attention, dict) else []
         selected = next((entry for entry in attention_items if isinstance(entry, dict) and entry.get("id") == review_id), None)
+        if selected is not None:
+            return selected
         show_args = ["review", "show", review_id]
-        _optional(show_args, "--semester", values.get("semester"))
-        return selected if selected is not None else _run_cli(show_args, profile)
+        _optional(show_args, "--semester", scope.semester if scope else values.get("semester"))
+        shown = _run_cli(show_args, profile)
+        if scope and scope.course_id and isinstance(shown, dict) and shown.get("course") not in {None, scope.course_id}:
+            raise McpError("Review item is outside the selected course scope.")
+        return shown
     if name == "academia_review_decide":
         review_id = values.get("review_id")
         decision = values.get("decision")
         if not isinstance(review_id, str) or not review_id.strip() or not isinstance(decision, str) or not decision.strip():
             raise McpError("Provide an exact review_id and decision.")
         attention_args = ["agent", "attention", "--detail", "deep"]
-        _optional(attention_args, "--semester", values.get("semester"))
+        _optional(attention_args, "--course", scope.course_id if scope else None)
+        _optional(attention_args, "--semester", scope.semester if scope else values.get("semester"))
         attention = _run_cli(attention_args, profile)
         attention_items = attention.get("items", []) if isinstance(attention, dict) else []
         item = next((entry for entry in attention_items if isinstance(entry, dict) and entry.get("id") == review_id), None)
@@ -339,7 +457,7 @@ def _call_tool(name: str, values: Any, profile: Path | None, *, read_only: bool 
         if not isinstance(action, dict) or action.get("type") != "review_decision" or action.get("review_id") != review_id or action.get("decision") != decision:
             raise McpError("decision must exactly match an executable Review choice returned by academia_attention.")
         decide_args = ["review", "decide", review_id, decision, "--actor", "agent:mcp"]
-        _optional(decide_args, "--semester", values.get("semester"))
+        _optional(decide_args, "--semester", scope.semester if scope else values.get("semester"))
         result = _run_cli(decide_args, profile)
         status = result.get("status") if isinstance(result, dict) else None
         return {"review_id": review_id, "status": status, "decision": decision, "requires_execution": bool(action.get("requires_execution")), "execution": action.get("execution")}
@@ -348,8 +466,10 @@ def _call_tool(name: str, values: Any, profile: Path | None, *, read_only: bool 
         if not isinstance(review_id, str) or not review_id.strip():
             raise McpError("Provide an exact review_id.")
         show_args = ["review", "show", review_id]
-        _optional(show_args, "--semester", values.get("semester"))
+        _optional(show_args, "--semester", scope.semester if scope else values.get("semester"))
         review = _run_cli(show_args, profile)
+        if scope and scope.course_id and isinstance(review, dict) and review.get("course") not in {None, scope.course_id}:
+            raise McpError("Review item is outside the selected course scope.")
         if not isinstance(review, dict) or review.get("status") != "approved" or not review.get("action_proposal_id"):
             raise McpError("Only a Review item with a linked action that is already approved can be executed.")
         details = review.get("details") if isinstance(review.get("details"), dict) else {}
@@ -358,7 +478,7 @@ def _call_tool(name: str, values: Any, profile: Path | None, *, read_only: bool 
         if action_type != "domain_change":
             raise McpError("No supported Academia executor exists for this approved action type.")
         execute_args = ["review", "execute", review_id, "--actor", "agent:mcp"]
-        _optional(execute_args, "--semester", values.get("semester"))
+        _optional(execute_args, "--semester", scope.semester if scope else values.get("semester"))
         result = _run_cli(execute_args, profile)
         return {
             "review_id": review_id,
@@ -373,7 +493,22 @@ def _call_tool(name: str, values: Any, profile: Path | None, *, read_only: bool 
         arguments = {"limit": limit}
         if values.get("since"):
             arguments["since"] = values["since"]
-        return _read_tool(profile, None, "activity.changes", arguments).data
+        data = _read_tool(profile, None, "activity.changes", arguments).data
+        if scope and isinstance(data, dict):
+            changes = data.get("changes") if isinstance(data.get("changes"), list) else []
+            if scope.course_id:
+                changes = [event for event in changes if isinstance(event, dict) and event.get("course") == scope.course_id]
+            elif scope.semester:
+                changes = [
+                    event for event in changes
+                    if isinstance(event, dict) and (
+                        event.get("course") is None
+                        or str(event.get("source") or "").startswith(scope.semester + "/")
+                    )
+                ]
+            data["changes"] = changes
+            data["count"] = len(changes)
+        return data
     if name == "academia_library":
         category = values.get("category", "all")
         if not isinstance(category, str) or category not in {"all", "syllabi", "readings", "lectures", "assessments", "notes", "other"}:
@@ -396,7 +531,13 @@ def _call_tool(name: str, values: Any, profile: Path | None, *, read_only: bool 
         }
         if values.get("course"):
             arguments["course"] = values["course"]
-        result = _read_tool(profile, values.get("semester"), "library.list", arguments)
+        result = _read_tool(
+            profile,
+            scope.semester if scope else values.get("semester"),
+            "library.list",
+            arguments,
+            scope=scope,
+        )
         items = result.data if isinstance(result.data, list) else []
         return {
             "items": items,
@@ -411,14 +552,38 @@ def _call_tool(name: str, values: Any, profile: Path | None, *, read_only: bool 
         relative = Path(item_id)
         if relative.is_absolute() or ".." in relative.parts or not relative.parts:
             raise McpError("Library ids must be workspace-relative paths without parent-directory segments.")
-        return _read_tool(profile, values.get("semester"), "library.get", {"item_id": item_id}).data
+        if scope and scope.course_id:
+            prefix = f"{scope.semester}/{scope.course_id}/"
+            if not item_id.startswith(prefix):
+                raise McpError("Library item is outside the selected course scope.")
+        return _read_tool(
+            profile,
+            scope.semester if scope else values.get("semester"),
+            "library.get",
+            {"item_id": item_id},
+            scope=scope,
+        ).data
     if name == "academia_processing_status":
-        return _run_cli(["process", "status"], profile)
+        records = _run_cli(["process", "status"], profile)
+        if scope and isinstance(records, list):
+            records = [
+                record for record in records
+                if isinstance(record, dict)
+                and f"/{scope.semester}/" in str(record.get("source_path") or "")
+                and (not scope.course_id or f"/{scope.semester}/{scope.course_id}/" in str(record.get("source_path") or ""))
+            ]
+        return records
     if name == "academia_import_targets":
         semester = values.get("semester")
         if semester is not None and (not isinstance(semester, str) or not semester.strip()):
             raise McpError("semester must be an exact non-empty folder name.")
-        return _import_targets(profile, semester.strip() if isinstance(semester, str) else None)
+        result = _import_targets(profile, scope.semester if scope else (semester.strip() if isinstance(semester, str) else None))
+        if scope and isinstance(result, dict) and isinstance(result.get("targets"), list):
+            targets = result["targets"]
+            if scope.course_id:
+                targets = [target for target in targets if isinstance(target, dict) and target.get("course_id") == scope.course_id]
+            result["targets"] = targets
+        return result
     if name == "academia_import_file":
         source_value = values.get("source_path")
         target_id = values.get("target_id")
@@ -430,7 +595,13 @@ def _call_tool(name: str, values: Any, profile: Path | None, *, read_only: bool 
         if not source.is_file():
             raise McpError("The selected source_path is not a regular file.")
         target_semester = target_id.split("/", 1)[0]
+        if scope and target_semester != scope.semester:
+            raise McpError("target_id is outside the selected semester scope.")
+        if scope and scope.course_id and target_id != f"{scope.semester}/{scope.course_id}/00_INBOX":
+            raise McpError("target_id is outside the selected course scope.")
         targets = _import_targets(profile, target_semester)["targets"]
+        if scope and scope.course_id:
+            targets = [item for item in targets if item.get("course_id") == scope.course_id]
         selected = next((item for item in targets if item["id"] == target_id), None)
         if selected is None:
             raise McpError("target_id must exactly match an available workspace inbox.")
@@ -451,7 +622,13 @@ def _response(request_id: Any, result: Any) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
-def _handle(message: Any, profile: Path | None, *, read_only: bool = False) -> dict[str, Any] | None:
+def _handle(
+    message: Any,
+    profile: Path | None,
+    *,
+    read_only: bool = False,
+    scope: McpScope | None = None,
+) -> dict[str, Any] | None:
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
         return {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid JSON-RPC request."}}
     request_id = message.get("id")
@@ -478,7 +655,7 @@ def _handle(message: Any, profile: Path | None, *, read_only: bool = False) -> d
     if method == "tools/call":
         name = params.get("name")
         try:
-            result = _call_tool(name, params.get("arguments", {}), profile, read_only=read_only)
+            result = _call_tool(name, params.get("arguments", {}), profile, read_only=read_only, scope=scope)
             return _response(request_id, {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]})
         except (McpError, OSError, subprocess.TimeoutExpired, TypeError, ValueError) as exc:
             error = exc if isinstance(exc, McpError) else McpError(str(exc), -32000)
@@ -489,8 +666,15 @@ def _handle(message: Any, profile: Path | None, *, read_only: bool = False) -> d
     return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": f"Method not found: {method}"}}
 
 
-def serve(profile: Path | None = None, *, read_only: bool = False) -> int:
+def serve(
+    profile: Path | None = None,
+    *,
+    read_only: bool = False,
+    semester: str | None = None,
+    course: str | None = None,
+) -> int:
     """Read newline-delimited JSON-RPC from stdin and write protocol replies to stdout."""
+    scope = _resolve_scope(profile, semester, course)
     source = sys.stdin.buffer
     sink = sys.stdout.buffer
     while True:
@@ -502,7 +686,7 @@ def serve(profile: Path | None = None, *, read_only: bool = False) -> int:
         else:
             try:
                 request = json.loads(line)
-                message = _handle(request, profile, read_only=read_only)
+                message = _handle(request, profile, read_only=read_only, scope=scope)
             except json.JSONDecodeError:
                 message = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error."}}
         if message is not None:

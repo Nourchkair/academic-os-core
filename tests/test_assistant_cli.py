@@ -25,7 +25,8 @@ def test_assistant_tools_cli_exposes_only_read_tools() -> None:
     assert result.returncode == 0, result.stderr
     value = json.loads(result.stdout)
     assert value["contract_version"] == 1
-    assert value["write_tools"] == []
+    assert [tool["name"] for tool in value["write_tools"]] == ["import.propose"]
+    assert value["write_tools"][0]["requires_approval"] is True
     assert len(value["tools"]) == 12
     assert all(tool["permission"] == "read_local" for tool in value["tools"])
     assert all(tool["side_effect"] == "none" for tool in value["tools"])

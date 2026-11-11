@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 from uuid import uuid4
 
-from ..contracts import AssistantError, EventType, RunEvent, RunRequest, RunResult, ToolResult
+from ..contracts import AssistantError, EventType, RunEvent, RunRequest, RunResult, Scope, ScopeKind, ToolResult
 from ..providers.base import CancelToken
 
 
@@ -53,22 +53,29 @@ class CodexAppServerRuntime:
             return self.auth_path
         return Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser().resolve() / "auth.json"
 
-    def _resolved_mcp_command(self) -> list[str]:
+    def _resolved_mcp_command(self, scope: Scope | None = None) -> list[str]:
         if self.mcp_command:
-            return [str(value) for value in self.mcp_command]
-        return [
-            sys.executable,
-            "-m",
-            "academia_os",
-            "--profile",
-            str(self.profile_path),
-            "mcp",
-            "serve",
-            "--read-only",
-        ]
+            command = [str(value) for value in self.mcp_command]
+        else:
+            command = [
+                sys.executable,
+                "-m",
+                "academia_os",
+                "--profile",
+                str(self.profile_path),
+                "mcp",
+                "serve",
+                "--read-only",
+            ]
+        if scope is not None:
+            if scope.kind in {ScopeKind.COURSE, ScopeKind.SOURCE}:
+                command.extend(["--semester", str(scope.semester), "--course", str(scope.course_id)])
+            elif scope.kind is ScopeKind.SEMESTER:
+                command.extend(["--semester", str(scope.semester)])
+        return command
 
-    def _write_codex_home(self, home: Path) -> None:
-        command = self._resolved_mcp_command()
+    def _write_codex_home(self, home: Path, scope: Scope | None = None) -> None:
+        command = self._resolved_mcp_command(scope)
         lines = [
             "[mcp_servers.academia]",
             f"command = {_toml_string(command[0])}",
@@ -132,7 +139,7 @@ class CodexAppServerRuntime:
                 home = Path(home_name)
                 os.chmod(home, 0o700)
                 os.symlink(auth_path, home / "auth.json")
-                self._write_codex_home(home)
+                self._write_codex_home(home, request.scope)
                 environment = os.environ.copy()
                 environment["CODEX_HOME"] = str(home)
                 process = subprocess.Popen(

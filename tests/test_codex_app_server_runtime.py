@@ -92,3 +92,6 @@ def test_read_only_mcp_command_is_the_default(tmp_path: Path, monkeypatch: pytes
     command = runtime._resolved_mcp_command()
     assert command[-1] == "--read-only"
     assert "mcp" in command and "serve" in command
+
+    scoped = runtime._resolved_mcp_command(Scope(kind="course", semester="Fall 2026", course_id="POL 2103 - Politics"))
+    assert scoped[-4:] == ["--semester", "Fall 2026", "--course", "POL 2103 - Politics"]

@@ -472,6 +472,11 @@ def build_parser() -> argparse.ArgumentParser:
     assistant_run.add_argument("--course", dest="course_id", help="Optional exact course ID, code, or name")
     assistant_run.add_argument("--model", help="Optional Codex model override")
     assistant_run.add_argument("--json", action="store_true")
+    assistant_propose_import = assistant_sub.add_parser("propose-import", help="Create a Review/Action proposal for one local file import")
+    assistant_propose_import.add_argument("--source", required=True, help="Exact local source file")
+    assistant_propose_import.add_argument("--target", required=True, help="Exact semester or course 00_INBOX id")
+    assistant_propose_import.add_argument("--source-label", help="Optional provenance label")
+    assistant_propose_import.add_argument("--json", action="store_true")
     workflow = sub.add_parser("workflow", help="Read or save local student workflow preferences")
     workflow_sub = workflow.add_subparsers(dest="workflow_command", required=True)
     workflow_preferences = workflow_sub.add_parser("preferences", help="List saved workflow preferences")
@@ -622,6 +627,8 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_sub = mcp.add_subparsers(dest="mcp_command", required=True)
     mcp_serve = mcp_sub.add_parser("serve", help="Run an MCP stdio server for an authorized local agent")
     mcp_serve.add_argument("--read-only", action="store_true", help="Expose read tools only; disable all write tools")
+    mcp_serve.add_argument("--semester", help="Limit read tools to one exact semester folder")
+    mcp_serve.add_argument("--course", help="Limit read tools to one exact course ID, code, or name")
     from .study.cli import add_parser as add_study_parser
     add_study_parser(sub)
     dashboard_chat = sub.add_parser("chat", help=argparse.SUPPRESS)
@@ -644,7 +651,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "mcp":
             from .mcp_server import serve
-            return serve(profile=args.profile, read_only=bool(args.read_only))
+            return serve(
+                profile=args.profile,
+                read_only=bool(args.read_only),
+                semester=args.semester,
+                course=args.course,
+            )
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
         if args.command in {"process", "study", "chat", "courses", "today", "tasks", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
@@ -660,11 +672,11 @@ def main(argv: list[str] | None = None) -> int:
 
 def dispatch(args: argparse.Namespace) -> int:
     if args.command == "assistant":
-        from .assistant import ASSISTANT_CONTRACT_VERSION, CodexAppServerRuntime, RunRequest, Scope, descriptors
+        from .assistant import ASSISTANT_CONTRACT_VERSION, CodexAppServerRuntime, ReadContext, RunRequest, Scope, WRITE_TOOL_DESCRIPTORS, descriptors
         if args.assistant_command == "tools":
             value = {
                 "contract_version": ASSISTANT_CONTRACT_VERSION,
-                "write_tools": [],
+                "write_tools": [descriptor.as_dict() for descriptor in WRITE_TOOL_DESCRIPTORS],
                 "tools": descriptors(),
             }
         elif args.assistant_command == "capabilities":
@@ -686,8 +698,22 @@ def dispatch(args: argparse.Namespace) -> int:
                     "writes": False,
                     "authentication": "Codex-managed ChatGPT sign-in",
                 }],
+                "write_policy": {
+                    "status": "approval_required",
+                    "tools": [descriptor.name for descriptor in WRITE_TOOL_DESCRIPTORS],
+                },
                 "tools": descriptors(),
             }
+        elif args.assistant_command == "propose-import":
+            from .assistant.tools.write import propose_import
+            config = load_config(_profile_path(args))
+            context = ReadContext.create(config, hosted_model_allowed=False)
+            value = propose_import(
+                context,
+                source_path=args.source,
+                target_id=args.target,
+                source_label=args.source_label,
+            )
         else:
             config = load_config(_profile_path(args))
             root = Path(config["academic"]["root_directory"]).expanduser().resolve()
@@ -1038,7 +1064,7 @@ def dispatch(args: argparse.Namespace) -> int:
                 value = {"academic_root": snapshot["academic_root"], "semester": snapshot["semester"], "exists": snapshot["workspace_exists"]}
         _emit(value, as_json=args.json); return 0
     if args.command == "review":
-        _, snapshot, _ = _semester_context(args)
+        config, snapshot, profile_path = _semester_context(args)
         state_root = Path(snapshot["academic_root"]) / ".academia"
         queue = ReviewQueue(state_root / "review.json")
         if args.action == "show":
@@ -1074,12 +1100,27 @@ def dispatch(args: argparse.Namespace) -> int:
                     raise ValueError("review decide requires a decision")
                 value = asdict(workflow.decide_review(args.item_id, args.decision, actor=args.actor))
             elif args.action == "execute":
-                from .extraction.reconcile import execute_domain_change
                 review_item = queue.get(args.item_id)
                 if not review_item.action_proposal_id:
                     raise ValueError("review execute requires an action-linked Review item")
-                projection = DomainProjection(state_root / "domain.json")
-                value = asdict(workflow.execute_approved(review_item.action_proposal_id, lambda proposal: execute_domain_change(proposal, projection), actor=args.actor if args.actor != "user" else "system"))
+                details = review_item.details if isinstance(review_item.details, dict) else {}
+                proposal_details = details.get("proposal_details") if isinstance(details.get("proposal_details"), dict) else {}
+                action_type = details.get("action_type") or proposal_details.get("action_type")
+                if action_type == "domain_change":
+                    from .extraction.reconcile import execute_domain_change
+                    projection = DomainProjection(state_root / "domain.json")
+                    value = asdict(workflow.execute_approved(review_item.action_proposal_id, lambda proposal: execute_domain_change(proposal, projection), actor=args.actor if args.actor != "user" else "system"))
+                elif action_type == "file_copy":
+                    from .assistant.tools.write import execute_import_proposal
+                    from .processing import ProcessingStore
+                    processing = ProcessingStore(state_root / "processing.json")
+                    value = asdict(workflow.execute_approved(
+                        review_item.action_proposal_id,
+                        lambda proposal: execute_import_proposal(proposal, workspace_root=Path(snapshot["academic_root"]), processing=processing),
+                        actor=args.actor if args.actor != "user" else "system",
+                    ))
+                else:
+                    raise ValueError(f"no supported executor for approved action type: {action_type}")
             elif args.action == "approve":
                 value = asdict(workflow.approve_review(args.item_id, actor=args.actor))
             elif args.action == "reject":
