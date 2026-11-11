@@ -10,7 +10,8 @@ from urllib.parse import urlsplit, urlunsplit
 from pathlib import Path
 from typing import Any
 
-from .library import filter_material
+from .assistant import ReadContext, invoke as invoke_assistant_tool
+from .config import load_config
 from .version import __version__
 
 _MAX_MESSAGE_BYTES = 16 * 1024 * 1024
@@ -174,6 +175,18 @@ def _cli_prefix(profile: Path | None) -> list[str]:
     return args
 
 
+def _profile_path(profile: Path | None) -> Path:
+    if profile is not None:
+        return Path(profile).expanduser().resolve()
+    return Path(os.environ.get("ACADEMIC_OS_CONFIG", str(Path.home() / ".academic-os" / "profile.json"))).expanduser().resolve()
+
+
+def _read_tool(profile: Path | None, semester: str | None, name: str, arguments: dict[str, Any]) -> Any:
+    config = load_config(_profile_path(profile))
+    context = ReadContext.create(config, semester=semester or None)
+    return invoke_assistant_tool(name, arguments, context)
+
+
 def _run_cli(args: list[str], profile: Path | None, *, input_text: str | None = None) -> Any:
     command = [*_cli_prefix(profile), *args, "--json"]
     completed = subprocess.run(
@@ -259,15 +272,11 @@ def _call_tool(name: str, values: Any, profile: Path | None) -> Any:
     if name == "academia_capabilities":
         return _run_cli(["agent", "capabilities"], profile)
     if name == "academia_courses":
-        args = ["courses"]
-        _optional(args, "--semester", values.get("semester"))
-        return _run_cli(args, profile)
+        return _read_tool(profile, values.get("semester"), "course.list", {}).data
     if name == "academia_today":
         return _run_cli(["today"], profile)
     if name == "academia_tasks":
-        args = ["tasks"]
-        _optional(args, "--semester", values.get("semester"))
-        return _run_cli(args, profile)
+        return _read_tool(profile, values.get("semester"), "task.list", {}).data
     if name == "academia_agent_context":
         scope = values.get("scope", "workspace")
         detail = values.get("detail", "standard")
@@ -275,10 +284,10 @@ def _call_tool(name: str, values: Any, profile: Path | None) -> Any:
             raise McpError("Use a supported context scope and detail level.")
         if scope == "course" and not values.get("course"):
             raise McpError("Course scope requires an exact course identifier.")
-        args = ["agent", "context", "--scope", scope, "--detail", detail]
-        _optional(args, "--course", values.get("course"))
-        _optional(args, "--semester", values.get("semester"))
-        return _run_cli(args, profile)
+        arguments = {"scope": scope, "detail": detail}
+        if values.get("course"):
+            arguments["course"] = values["course"]
+        return _read_tool(profile, values.get("semester"), "context.get", arguments).data
     if name == "academia_attention":
         detail = values.get("detail", "standard")
         if detail not in {"compact", "standard", "deep"}:
@@ -347,9 +356,10 @@ def _call_tool(name: str, values: Any, profile: Path | None) -> Any:
         limit = values.get("limit", 100)
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 500:
             raise McpError("Activity limit must be an integer from 1 to 500.")
-        args = ["agent", "changes", "--limit", str(limit)]
-        _optional(args, "--since", values.get("since"))
-        return _run_cli(args, profile)
+        arguments = {"limit": limit}
+        if values.get("since"):
+            arguments["since"] = values["since"]
+        return _read_tool(profile, None, "activity.changes", arguments).data
     if name == "academia_library":
         category = values.get("category", "all")
         if not isinstance(category, str) or category not in {"all", "syllabi", "readings", "lectures", "assessments", "notes", "other"}:
@@ -363,29 +373,22 @@ def _call_tool(name: str, values: Any, profile: Path | None) -> Any:
         limit = values.get("limit", 100)
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
             raise McpError("Library limit must be an integer from 1 to 100.")
-        scope = "course" if values.get("course") else "semester"
-        args = ["agent", "context", "--scope", scope, "--detail", "deep"]
-        _optional(args, "--semester", values.get("semester"))
-        _optional(args, "--course", values.get("course"))
-        context = _run_cli(args, profile)
-        library = context.get("sources", {}).get("library_items", []) if isinstance(context, dict) else []
-        if not isinstance(library, list):
-            raise McpError("Academia returned an invalid bounded Library catalog.", -32000)
-        if any(not isinstance(item, dict) for item in library):
-            raise McpError("Academia returned an invalid bounded Library catalog.", -32000)
-        selected = filter_material(
-            library,
-            category=category,
-            location=location,
-            processing_status=processing_status,
-            query=str(values.get("query", "")),
-        )
-        material_count = context.get("workspace", {}).get("material_count", len(library))
+        arguments = {
+            "category": category,
+            "location": location,
+            "processing_status": processing_status,
+            "query": str(values.get("query", "")),
+            "limit": limit,
+        }
+        if values.get("course"):
+            arguments["course"] = values["course"]
+        result = _read_tool(profile, values.get("semester"), "library.list", arguments)
+        items = result.data if isinstance(result.data, list) else []
         return {
-            "items": selected[:limit],
-            "returned": min(len(selected), limit),
+            "items": items,
+            "returned": len(items),
             "catalog_limit": 100,
-            "truncated": len(selected) > limit or material_count > len(library),
+            "truncated": bool(result.truncated),
         }
     if name == "academia_read_library_item":
         item_id = values.get("id")
@@ -394,17 +397,7 @@ def _call_tool(name: str, values: Any, profile: Path | None) -> Any:
         relative = Path(item_id)
         if relative.is_absolute() or ".." in relative.parts or not relative.parts:
             raise McpError("Library ids must be workspace-relative paths without parent-directory segments.")
-        status = _run_cli(["status"], profile)
-        workspace = status.get("workspace", {}) if isinstance(status, dict) else {}
-        academic_root = workspace.get("academic_root") if isinstance(workspace, dict) else None
-        if not isinstance(academic_root, str) or not academic_root:
-            raise McpError("Academia did not return a configured workspace path.", -32000)
-        semester = values.get("semester") or workspace.get("semester")
-        if not isinstance(semester, str) or not semester or relative.parts[0] != semester:
-            raise McpError("That Library id is outside the selected semester.")
-        args = ["file-preview", str(Path(academic_root) / relative)]
-        _optional(args, "--semester", semester)
-        return _run_cli(args, profile)
+        return _read_tool(profile, values.get("semester"), "library.get", {"item_id": item_id}).data
     if name == "academia_processing_status":
         return _run_cli(["process", "status"], profile)
     if name == "academia_import_targets":

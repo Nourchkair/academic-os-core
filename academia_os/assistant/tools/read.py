@@ -264,6 +264,8 @@ def activity_changes(context: ReadContext, *, since: str | None = None, limit: i
 
 
 def agent_context(context: ReadContext, *, scope: str = "workspace", course: str | None = None, detail: str = "compact") -> ToolResult:
+    if scope == "course" and not course:
+        raise AssistantError("course scope requires an exact course identifier", code="invalid_scope")
     try:
         data = build_agent_context(
             context.config,

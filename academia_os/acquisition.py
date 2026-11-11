@@ -87,8 +87,8 @@ def capability_report() -> dict[str, Any]:
         "mcp": {
             "status": "available",
             "transport": "local_stdio",
-            "read_tools": ["workspace", "courses", "tasks", "agent_context", "attention", "review_item", "activity", "library", "file_preview", "processing_status", "import_targets"],
-            "write_tools": ["review_decide_after_student_confirmation", "review_execute_after_approval", "import_file_after_student_confirmation"],
+            "read_tools": ["status", "capabilities", "courses", "today", "tasks", "agent_context", "attention", "review_item", "activity_changes", "library", "read_library_item", "processing_status", "import_targets"],
+            "write_tools": ["review_decide", "review_execute", "import_file"],
             "external_connectors": "not_provided_by_core_mcp",
         },
         "watched_folders": {

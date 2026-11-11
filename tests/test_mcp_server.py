@@ -305,10 +305,6 @@ def test_review_attention_and_exact_decision(mcp: tuple[McpServer, Path, Path]) 
     assert decided["requires_execution"] is False
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known capability-report drift: MCP read/write metadata names do not match the actual 16 tools. Fix in P1B.",
-)
 def test_capability_report_mcp_metadata_matches_actual_tools(mcp: tuple[McpServer, Path, Path]) -> None:
     server, _, _ = mcp
     tools = server.request("tools/list")["result"]["tools"]
