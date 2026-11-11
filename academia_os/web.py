@@ -17,6 +17,7 @@ from typing import Any, Callable, Sequence
 
 from .config import SEMESTER_PATTERN, load_config
 from .file_preview import FilePreviewError, IMAGE_EXTENSIONS, IMAGE_MIME_TYPES, MAX_IMAGE_PREVIEW_BYTES, TEXT_EXTENSIONS, preview_file, resolve_library_file
+from .transport_policy import SAFE_COMMANDS, validate_command
 from .workspace import build_workspace_snapshot
 
 DEFAULT_HOST = "127.0.0.1"
@@ -37,41 +38,9 @@ def default_profile_path() -> Path:
 
     return Path(os.environ.get("ACADEMIC_OS_CONFIG", str(Path.home() / ".academic-os" / "profile.json"))).expanduser().resolve()
 
-# Keep this in sync with the already-approved local Tauri command surface.  The
-# browser transport is intentionally narrower than a general CLI shell: the
-# command name is selected from this fixed set and arguments are passed without
-# shell interpretation.
-SAFE_COMMANDS = frozenset(
-    {
-        "status",
-        "courses",
-        "course",
-        "today",
-        "tasks",
-        "review",
-        "activity",
-        "workspace",
-        "semester",
-        "inbox",
-        "process",
-        "import",
-        "domain",
-        "history",
-        "study",
-        "library",
-        "file-preview",
-        "extract",
-        "migration",
-        "settings",
-        "capabilities",
-        "watch",
-        "verify",
-        "verify-source",
-        "agents",
-        "agent",
-        "workflow",
-    }
-)
+# The browser transport is intentionally narrower than a general CLI shell:
+# the command name is selected from the shared allowlist and arguments are
+# passed without shell interpretation.
 ALLOWED_ORIGINS = frozenset({"http://localhost:4173", "http://127.0.0.1:4173"})
 
 
@@ -770,25 +739,27 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             raise DashboardRequestError(400, "InvalidCommand", "command must be a non-empty string")
         if command != "study" and length > MAX_BODY_BYTES:
             raise DashboardRequestError(413, "RequestTooLarge", "command request body is too large")
-        if command not in SAFE_COMMANDS:
-            raise DashboardRequestError(400, "CommandNotAllowed", f"dashboard command is not allowed: {command}")
-        if not isinstance(args, list) or any(not isinstance(arg, str) for arg in args):
-            raise DashboardRequestError(400, "InvalidArguments", "args must be an array of strings")
-        if command == "process" and args != ["status"]:
-            raise DashboardRequestError(400, "CommandNotAllowed", "the dashboard may only read processing status")
-        argument_count_limit = 620 if command == "study" else MAX_ARGUMENTS
-        if len(args) > argument_count_limit:
-            raise DashboardRequestError(400, "TooManyArguments", f"at most {argument_count_limit} command arguments are allowed")
-        for arg in args:
-            argument_limit = 48 * 1024 if command == "study" else MAX_ARGUMENT_LENGTH
-            if len(arg) > argument_limit:
-                raise DashboardRequestError(400, "ArgumentTooLong", f"command arguments are limited to {MAX_ARGUMENT_LENGTH} characters")
-            if "\x00" in arg:
-                raise DashboardRequestError(400, "InvalidArguments", "command arguments must not contain NUL bytes")
-            option = arg.split("=", 1)[0]
-            if option in {"--profile", "--json"}:
-                raise DashboardRequestError(400, "ArgumentNotAllowed", f"browser may not supply {option}")
-        return command, args
+        try:
+            validated_command, validated_args = validate_command(
+                command,
+                args,
+                max_arguments=620 if command == "study" else MAX_ARGUMENTS,
+                max_argument_length=48 * 1024 if command == "study" else MAX_ARGUMENT_LENGTH,
+            )
+        except ValueError as exc:
+            message = str(exc)
+            if message.startswith("at most"):
+                error_type = "TooManyArguments"
+            elif "limited to" in message:
+                error_type = "ArgumentTooLong"
+            elif "browser may not supply" in message:
+                error_type = "ArgumentNotAllowed"
+            elif message.startswith("args must") or "NUL" in message:
+                error_type = "InvalidArguments"
+            else:
+                error_type = "CommandNotAllowed"
+            raise DashboardRequestError(400, error_type, message) from exc
+        return validated_command, validated_args
 
     def _serve_static(self, *, head_only: bool, cors_origin: str | None = None) -> None:
         dist_dir = self.dashboard.dist_dir
