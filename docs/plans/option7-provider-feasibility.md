@@ -138,8 +138,10 @@ academia assistant run --message "List one Library item" --json
 
 Live verification on a disposable workspace returned
 `week-4-reading.md`, with one `academia_library` tool result and no file changes.
-The selected scope is currently passed in the prompt; the MCP server remains
-workspace-scoped until course/source filtering is implemented.
+A second live run used `--course "POL 2103"` against a workspace containing a
+second course; the MCP server returned only the selected course's material.
+The selected scope is now enforced by `academia mcp serve --semester ... --course ...`
+and passed through by `CodexAppServerRuntime`.
 
 ## Decision rule
 
