@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
+import shutil
 import tempfile
 import threading
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, TypeVar
 
@@ -29,6 +32,26 @@ def _thread_lock_for(path: Path) -> threading.Lock:
             lock = threading.Lock()
             _PROCESS_LOCKS[key] = lock
         return lock
+
+
+class StateCorruptionError(ValueError):
+    """Durable state is unreadable or has an unexpected shape.
+
+    The store never replaces a corrupt file with an empty default. Callers can
+    preserve a diagnostic copy with ``quarantine`` and ask the student to
+    restore from backup.
+    """
+
+    def __init__(self, path: Path, message: str, *, quarantine_path: Path | None = None) -> None:
+        super().__init__(message)
+        self.path = Path(path)
+        self.quarantine_path = quarantine_path
+
+    def to_dict(self) -> dict[str, Any]:
+        value: dict[str, Any] = {"path": str(self.path), "message": str(self)}
+        if self.quarantine_path is not None:
+            value["quarantine_path"] = str(self.quarantine_path)
+        return value
 
 
 class JsonStateStore:
@@ -69,6 +92,51 @@ class JsonStateStore:
         """
         return self._read_unlocked(default)
 
+    def _read_strict_unlocked(self, default: Any) -> Any:
+        if not self.path.exists():
+            return copy.deepcopy(default)
+        try:
+            raw = self.path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise StateCorruptionError(self.path, "state file could not be read") from exc
+        try:
+            value = json.loads(raw)
+        except (ValueError, TypeError) as exc:
+            raise StateCorruptionError(self.path, "state file is not valid JSON") from exc
+        if not isinstance(value, type(default)):
+            raise StateCorruptionError(
+                self.path,
+                f"state file has an unexpected top-level type; expected {type(default).__name__}",
+            )
+        return value
+
+    def read_strict(self, default: Any, *, quarantine: bool = False) -> Any:
+        """Read durable state and fail closed instead of silently resetting it."""
+        try:
+            return self._read_strict_unlocked(default)
+        except StateCorruptionError as exc:
+            if not quarantine:
+                raise
+            destination = self.quarantine()
+            raise StateCorruptionError(
+                self.path,
+                str(exc),
+                quarantine_path=destination,
+            ) from None
+
+    def quarantine(self) -> Path:
+        """Copy a damaged durable state file for diagnosis without deleting it."""
+        if not self.path.is_file():
+            raise FileNotFoundError(self.path)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        destination = self.path.with_name(f"{self.path.name}.corrupt-{stamp}")
+        counter = 1
+        while destination.exists():
+            destination = self.path.with_name(f"{self.path.name}.corrupt-{stamp}-{counter}")
+            counter += 1
+        shutil.copy2(self.path, destination)
+        return destination
+
     def _write_unlocked(self, value: Any) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(prefix=f".{self.path.name}.", dir=str(self.path.parent))
@@ -93,6 +161,24 @@ class JsonStateStore:
             current = self._read_unlocked(default)
             if not isinstance(current, type(default)):
                 current = default
+            updated = transform(current)
+            self._write_unlocked(updated)
+            return updated
+
+    def update_strict(self, default: T, transform: Callable[[T], T], *, quarantine: bool = False) -> T:
+        """Apply a strict read-modify-write transition for durable records."""
+        with self.locked():
+            try:
+                current = self._read_strict_unlocked(default)
+            except StateCorruptionError as exc:
+                if not quarantine:
+                    raise
+                destination = self.quarantine()
+                raise StateCorruptionError(
+                    self.path,
+                    str(exc),
+                    quarantine_path=destination,
+                ) from None
             updated = transform(current)
             self._write_unlocked(updated)
             return updated

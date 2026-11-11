@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
@@ -48,7 +48,8 @@ class ActionProposal:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "ActionProposal":
-        return cls(**value)
+        known = {field.name for field in fields(cls)}
+        return cls(**{key: item for key, item in value.items() if key in known})
 
 
 class ActionStore:
@@ -56,7 +57,7 @@ class ActionStore:
         self.store = JsonStateStore(path)
 
     def _all(self) -> list[ActionProposal]:
-        return [ActionProposal.from_dict(value) for value in self.store.read([])]
+        return [ActionProposal.from_dict(value) for value in self.store.read_strict([])]
 
     def _write(self, items: list[ActionProposal]) -> None:
         self.store.write([asdict(item) for item in items])
@@ -67,7 +68,7 @@ class ActionStore:
             raise PermissionError(f"Academia OS never performs {normalized.value} actions")
         now = datetime.now(timezone.utc).isoformat()
         proposal = ActionProposal(str(uuid4()), normalized.value, title, details or {}, ActionStatus.PROPOSED.value, requires_approval, now, now)
-        self.store.update([], lambda raw: [*raw, asdict(proposal)])
+        self.store.update_strict([], lambda raw: [*raw, asdict(proposal)])
         return proposal
 
     def list(self, *, status: str | None = None) -> list[ActionProposal]:
@@ -90,7 +91,7 @@ class ActionStore:
                 raise ValueError("only unlinked proposed actions can be deleted")
             return [asdict(item) for item in items if item.id != proposal_id]
 
-        self.store.update([], transition)
+        self.store.update_strict([], transition)
 
     def reopen(self, proposal_id: str) -> ActionProposal:
         return self._transition(proposal_id, ActionStatus.PROPOSED, expected=ActionStatus.APPROVED)
@@ -113,7 +114,7 @@ class ActionStore:
                 return [asdict(value) for value in items]
             raise KeyError(proposal_id)
 
-        self.store.update([], transition)
+        self.store.update_strict([], transition)
         return selected[0]
 
     def approve(self, proposal_id: str) -> ActionProposal:

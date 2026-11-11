@@ -134,7 +134,7 @@ def _acquisition_index(workspace_root: Path) -> dict[str, dict[str, Any]]:
     path = workspace_root / ".academia" / "acquisition.json"
     if not path.is_file():
         return {}
-    value = JsonStateStore(path).read({"records": {}})
+    value = JsonStateStore(path).read_strict({"records": {}})
     records = value.get("records") if isinstance(value, dict) else {}
     return {
         str(key): item

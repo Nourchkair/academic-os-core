@@ -118,7 +118,7 @@ class ReviewQueue:
         self.store = JsonStateStore(path)
 
     def _items(self) -> list[ReviewItem]:
-        value = self.store.read([])
+        value = self.store.read_strict([])
         if not isinstance(value, list):
             return []
         return [ReviewItem.from_dict(item) for item in value if isinstance(item, dict) and "id" in item]
@@ -129,7 +129,7 @@ class ReviewQueue:
     def add(self, *, kind: str, title: str, course: str | None = None, details: dict[str, Any] | None = None, priority: str = "normal", action_proposal_id: str | None = None) -> ReviewItem:
         now = datetime.now(timezone.utc).isoformat()
         item = ReviewItem(str(uuid4()), kind, title, course, details or {}, ReviewStatus.OPEN, priority, now, now, action_proposal_id)
-        self.store.update([], lambda raw: [*raw, asdict(item)])
+        self.store.update_strict([], lambda raw: [*raw, asdict(item)])
         return item
 
     def list(self, *, include_resolved: bool = False) -> list[ReviewItem]:
@@ -164,5 +164,5 @@ class ReviewQueue:
                 return [asdict(value) for value in items]
             raise KeyError(f"review item not found: {item_id}")
 
-        self.store.update([], transition)
+        self.store.update_strict([], transition)
         return selected[0]

@@ -169,7 +169,7 @@ def _record_acquisition(workspace_root: Path, destination: Path, metadata: dict[
         state["records"] = records
         return state
 
-    JsonStateStore(path).update({"schema_version": 1, "records": {}}, transition)
+    JsonStateStore(path).update_strict({"schema_version": 1, "records": {}}, transition)
 
 
 def import_file(

@@ -132,7 +132,7 @@ class ProcessingStore:
         self.last_detection_changed = False
 
     def _records(self) -> list[ProcessingRecord]:
-        value = self.store.read([])
+        value = self.store.read_strict([])
         return [ProcessingRecord.from_dict(item) for item in value if isinstance(item, dict) and "id" in item] if isinstance(value, list) else []
 
     def _save(self, records: list[ProcessingRecord]) -> None:
@@ -182,7 +182,7 @@ class ProcessingStore:
             selected.append(record)
             return [asdict(item) for item in records]
 
-        self.store.update([], transition)
+        self.store.update_strict([], transition)
         self.last_detection_changed = changed[0]
         return selected[0]
 
@@ -204,7 +204,7 @@ class ProcessingStore:
                     return [asdict(item) for item in records]
             raise KeyError(f"processing record not found: {updated.id}")
 
-        self.store.update([], transition)
+        self.store.update_strict([], transition)
         return selected[0]
 
     def _transition_record(self, record_id: str, expected: ProcessingStatus, mutator: Any) -> ProcessingRecord:
@@ -223,7 +223,7 @@ class ProcessingStore:
                 return [asdict(item) for item in records]
             raise KeyError(f"processing record not found: {record_id}")
 
-        self.store.update([], transition)
+        self.store.update_strict([], transition)
         return selected[0]
 
     def begin(self, record_id: str, *, lease_seconds: int = 300) -> ProcessingRecord:
@@ -312,7 +312,7 @@ class ProcessingStore:
                 return [asdict(item) for item in records if item.id != record_id]
             raise KeyError(f"processing record not found: {record_id}")
 
-        self.store.update([], transition)
+        self.store.update_strict([], transition)
         return selected[0]
 
     def verify(self, record_id: str, *, verification: dict[str, Any]) -> ProcessingRecord:
@@ -361,7 +361,7 @@ class ProcessingStore:
                 return [asdict(item) for item in records]
             raise KeyError(f"processing record not found: {record_id}")
 
-        self.store.update([], transition)
+        self.store.update_strict([], transition)
         return selected[0]
 
     def recover_stale(self, *, now: datetime | None = None) -> list[ProcessingRecord]:
@@ -386,7 +386,7 @@ class ProcessingStore:
             return [asdict(item) for item in records]
 
         if self.store.path.exists():
-            self.store.update([], transition)
+            self.store.update_strict([], transition)
         return recovered
 
     def list(self) -> list[ProcessingRecord]:

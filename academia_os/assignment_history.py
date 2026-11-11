@@ -176,7 +176,7 @@ def add_assignment_history(workspace_root: Path, semester: str, course_id: str, 
         records.append(record)
         return {**state, "semester": semester, "records": records}
 
-    JsonStateStore(path).update(default, append)
+    JsonStateStore(path).update_strict(default, append)
     return record
 
 
@@ -218,7 +218,7 @@ def update_assignment_history(workspace_root: Path, semester: str, course_id: st
             raise KeyError(f"assignment history record not found: {record_id}")
         return {**state, "semester": semester, "records": records}
 
-    JsonStateStore(path).update(default, transform)
+    JsonStateStore(path).update_strict(default, transform)
     return result
 
 
