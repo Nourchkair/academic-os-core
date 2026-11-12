@@ -96,6 +96,7 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
         "migration",
         "agent",
         "workflow",
+        "mcp-connections",
         "artifact",
     ];
     if !allowed.contains(&command.as_str()) {
@@ -112,6 +113,12 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
         let action = args.first().map(String::as_str).unwrap_or("");
         if !["list", "create", "update", "complete", "reopen"].contains(&action) {
             return Err("Unsupported Academia task action".to_string());
+        }
+    }
+    if command == "mcp-connections" {
+        let action = args.first().map(String::as_str).unwrap_or("");
+        if !["list", "add", "inspect", "grant", "call", "enable", "disable", "disconnect"].contains(&action) {
+            return Err("Unsupported MCP connection action".to_string());
         }
     }
     let mut cli_args = vec![command];

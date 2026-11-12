@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { AccountStatus, ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, TaskInput, TaskListPayload, TaskProposalAmendment, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
+import type { AccountStatus, ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MCPConnection, MCPConnectionInput, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, TaskInput, TaskListPayload, TaskProposalAmendment, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
@@ -198,6 +198,16 @@ export function fileUrl(path: string, semester?: string): string {
   return `/api/v1/file?${query.toString()}`
 }
 
+async function postJson<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  } catch {
+    throw new BridgeUnavailableError()
+  }
+  return readJsonResponse<T>(response)
+}
+
 export const api = {
   study: <T>(args: string[]) => command<T>("study", args),
   chat: <T>(payload: Record<string, unknown>) => isTauriEnvironment() ? invoke<string>('academia_chat', { payload }).then((raw) => JSON.parse(raw) as T) : browserChat(payload) as Promise<T>,
@@ -207,6 +217,28 @@ export const api = {
   accountLogin: () => fetch('/api/v1/account/login', { method: 'POST' }).then(readJsonResponse<AccountStatus>),
   accountLoginCancel: () => fetch('/api/v1/account/login/cancel', { method: 'POST' }).then(readJsonResponse<AccountStatus>),
   accountLogout: () => fetch('/api/v1/account/logout', { method: 'POST' }).then(readJsonResponse<AccountStatus>),
+  mcpConnections: () => isTauriEnvironment() ? command<MCPConnection[]>('mcp-connections', ['list']) : fetch('/api/v1/mcp/connections').then(readJsonResponse<MCPConnection[]>),
+  addMCPConnection: (input: MCPConnectionInput) => {
+    if (isTauriEnvironment()) {
+      const args = ['add', '--name', input.name, '--command', input.command]
+      for (const value of input.args) args.push('--arg', value)
+      if (input.cwd) args.push('--cwd', input.cwd)
+      return command<MCPConnection>('mcp-connections', args)
+    }
+    return postJson<MCPConnection>('/api/v1/mcp/connections', input)
+  },
+  inspectMCPConnection: (id: string) => isTauriEnvironment() ? command<MCPConnection>('mcp-connections', ['inspect', id]) : postJson<MCPConnection>('/api/v1/mcp/connections/inspect', { id }),
+  grantMCPConnection: (id: string, tools: string[]) => {
+    if (isTauriEnvironment()) {
+      const args = ['grant', id]
+      for (const tool of tools) args.push('--tool', tool)
+      return command<MCPConnection>('mcp-connections', args)
+    }
+    return postJson<MCPConnection>('/api/v1/mcp/connections/grant', { id, tools })
+  },
+  enableMCPConnection: (id: string) => isTauriEnvironment() ? command<MCPConnection>('mcp-connections', ['enable', id]) : postJson<MCPConnection>('/api/v1/mcp/connections/enable', { id }),
+  disableMCPConnection: (id: string) => isTauriEnvironment() ? command<MCPConnection>('mcp-connections', ['disable', id]) : postJson<MCPConnection>('/api/v1/mcp/connections/disable', { id }),
+  disconnectMCPConnection: (id: string) => isTauriEnvironment() ? command<MCPConnection>('mcp-connections', ['disconnect', id]) : postJson<MCPConnection>('/api/v1/mcp/connections/disconnect', { id }),
   chatProviders: <T>() => isTauriEnvironment() ? command<T>('study', ['providers']) : fetch('/api/v1/chat/providers').then(readJsonResponse<T>),
   status: () => command<StatusPayload>('status'),
   startupStatus: () => command<StatusPayload>('status', ['--fast']),

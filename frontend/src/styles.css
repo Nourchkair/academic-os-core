@@ -843,3 +843,34 @@ button { -webkit-tap-highlight-color: transparent; }
 .account-code code { background: #ffffff; border: 1px solid #e2e2e2; border-radius: 7px; color: #3f3f3f; font-size: 15px; letter-spacing: .12em; padding: 8px 11px; }
 .account-code a { color: #5f765f; font-size: 10px; font-weight: 700; }
 .account-error { color: #8b4b45; }
+
+.mcp-connections { display: grid; gap: 14px; }
+.mcp-connections-heading { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; }
+.mcp-connections-heading p { color: #828282; font-size: 11px; line-height: 1.55; margin: 0; max-width: 640px; }
+.mcp-add-form { margin-top: 2px; }
+.mcp-add-form textarea { background: #ffffff; border: 1px solid #e6e6e6; border-radius: 7px; color: #545454; font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; min-height: 62px; padding: 8px 9px; resize: vertical; width: 100%; }
+.mcp-connection-list { display: grid; gap: 12px; }
+.mcp-connection-card { background: #fafafa; border: 1px solid #e9e9e9; border-radius: 12px; display: grid; gap: 11px; padding: 14px; }
+.mcp-connection-card > header { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
+.mcp-connection-card > header > div:first-child { display: grid; gap: 4px; }
+.mcp-connection-card > header strong { color: #424242; font-size: 13px; }
+.mcp-connection-card > header small { color: #969696; font-size: 10px; }
+.mcp-status { border-radius: 999px; font-size: 8px; font-weight: 750; justify-self: start; padding: 4px 7px; text-transform: uppercase; }
+.mcp-status.unchecked { background: #f4f0e6; color: #7d6a3e; }
+.mcp-status.available { background: #eef1ee; color: #5d735d; }
+.mcp-status.error { background: #f7e9e7; color: #8b4b45; }
+.mcp-status.enabled { background: #e9f2ec; color: #356b4b; }
+.mcp-connection-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.mcp-connection-actions button { font-size: 9px; padding: 7px 9px; }
+.mcp-command { background: #ffffff; border: 1px solid #eeeeee; border-radius: 7px; color: #777777; display: block; font: 9px ui-monospace, SFMono-Regular, monospace; overflow-wrap: anywhere; padding: 7px 9px; }
+.mcp-tools { border-top: 1px solid #ececec; display: grid; gap: 8px; padding-top: 11px; }
+.mcp-tools > p { color: #8a8a8a; font-size: 10px; margin: 0; }
+.mcp-tool { align-items: flex-start; background: #ffffff; border: 1px solid #ededed; border-radius: 9px; display: flex; gap: 9px; padding: 9px 10px; }
+.mcp-tool input { accent-color: #6f876f; margin-top: 2px; }
+.mcp-tool > span { display: grid; flex: 1; gap: 3px; }
+.mcp-tool strong { color: #555555; font-size: 10px; }
+.mcp-tool small { color: #969696; font-size: 9px; line-height: 1.45; }
+.mcp-tool em { color: #5d735d; font-size: 8px; font-style: normal; font-weight: 700; white-space: nowrap; }
+.mcp-tool.not-grantable { opacity: .64; }
+.mcp-tool.not-grantable em { color: #8b4b45; }
+.mcp-grant-actions { display: flex; justify-content: flex-end; }

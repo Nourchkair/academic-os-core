@@ -358,6 +358,40 @@ export type AccountStatus = {
   updated_at?: string
 }
 
+export type MCPTool = {
+  name: string
+  description: string
+  read_only: boolean
+  destructive: boolean
+  open_world: boolean
+}
+
+export type MCPConnection = {
+  id: string
+  name: string
+  transport: string
+  scope: string
+  command: string
+  args: string[]
+  cwd?: string | null
+  enabled: boolean
+  status: 'unchecked' | 'available' | 'error'
+  server_info?: { name?: string | null; version?: string | null } | null
+  tools: MCPTool[]
+  granted_tools: string[]
+  error?: string | null
+  created_at: string
+  updated_at: string
+  last_checked_at?: string | null
+}
+
+export type MCPConnectionInput = {
+  name: string
+  command: string
+  args: string[]
+  cwd?: string | null
+}
+
 export type StatusPayload = {  version: string
   profile: string
   student: WorkspaceSnapshot['student']

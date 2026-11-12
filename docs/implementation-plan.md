@@ -154,7 +154,7 @@ This is the next product phase agreed with the student. The app remains local-fi
 
 ### Stage C — Local provider and MCP connection management
 
-**Partially implemented.** The Study chat provider picker detects local Codex ChatGPT CLI sign-in and shows Claude as unavailable with the reason. Settings provides the approved app-level ChatGPT device-code sign-in and reports the signed-in account summary. The app does not own or store provider credentials. Still needed: explicit provider setup guidance plus an MCP connection manager for user-enabled services with local connection metadata, service identity, scopes, actual status, and disconnect/revoke controls. Do not interpret a playbook preference as a connection or authorization.
+**Partially implemented.** The Study chat provider picker detects local Codex ChatGPT CLI sign-in and shows Claude as unavailable with the reason. Settings provides the approved app-level ChatGPT device-code sign-in and reports the signed-in account summary. Settings also manages explicit local stdio MCP connections: add, inspect actual identity/tools, grant only read-only tools, call granted tools, disable, and disconnect. Connection metadata stays in the runtime directory, and the app does not own or store provider secrets. Still needed: remote/OAuth MCP transports, OS credential-store integration, service-specific scope review, and explicit provider setup guidance. Do not interpret a playbook preference as a connection or authorization.
 
 ### Stage D — External integrations and acquisition
 

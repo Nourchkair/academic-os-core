@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, isTauriEnvironment } from './lib/api'
 import { AssistantAccountCard } from './AssistantAccountCard'
+import { MCPConnectionsCard } from './MCPConnectionsCard'
 import type { SettingsPreview, StatusPayload, WorkflowPreferenceRecord, AgentSetupPlaybook } from './types'
 import type { Update } from '@tauri-apps/plugin-updater'
 
@@ -191,6 +192,9 @@ export function SettingsView({ status, onSaved }: SettingsViewProps) {
     </> : <div className="loading-card">Loading your local settings…</div>}
     <SettingsSection title="ChatGPT sign-in" description="Connect the installed Codex CLI to your ChatGPT plan for Study chat and proposal runs. Academia never reads or stores your credentials.">
       <AssistantAccountCard />
+    </SettingsSection>
+    <SettingsSection title="External MCP connections" description="Manage local external MCP servers explicitly. Only server-declared read-only tools can be granted, and no connection starts automatically.">
+      <MCPConnectionsCard />
     </SettingsSection>
     <SettingsSection title="App updates" description="Check for signed Academia OS updates and install them on this device. Your academic workspace stays in place.">
       {isTauriEnvironment() ? <>

@@ -163,6 +163,13 @@ academia review decide REVIEW_ID DECISION --actor agent:mcp --json
 academia review execute REVIEW_ID --actor agent:mcp --json
 academia capabilities --json
 academia mcp serve
+academia mcp-connections list --json
+academia mcp-connections add --name "Local research" --command /path/to/mcp-server --arg --stdio --json
+academia mcp-connections inspect CONNECTION_ID --json
+academia mcp-connections grant CONNECTION_ID --tool search_notes --json
+academia mcp-connections call CONNECTION_ID --tool search_notes --arguments '{"query":"research"}' --json
+academia mcp-connections disable CONNECTION_ID --json
+academia mcp-connections disconnect CONNECTION_ID --json
 academia agent capabilities --json
 academia agent playbooks --json
 academia agent playbook daily_academic_brief --json
@@ -183,6 +190,8 @@ academia verify-source --requested requested.json --retrieved retrieved.json --j
 JSON output is the preferred agent context format. Human-readable output is for users. Any agent command that accepts `--course` resolves the exact canonical course ID, course code, or exact course name/display name to the same canonical course object. Unknown and ambiguous identifiers fail with a structured error; they never fall back to workspace-wide results.
 
 `academia mcp serve` exposes a local MCP interface over stdio for compatible hosts. Read tools use bounded structured interfaces; Library previews require an exact workspace-relative Library ID and are revalidated by `academia file-preview`. Narrow write tools support host-gated local-file import, an exact executable Review decision, and a separate supported execution for an already-approved Review item. `--proposal-only` additionally exposes exact `academia_propose_import` and `academia_propose_task` tools that create Review/Action proposals without writing. The server cannot verify that a human confirmation was displayed; compatible hosts must obtain confirmation for the exact decision or file and destination before calling write tools. The Review decision tool rejects choices that do not exactly match an executable choice from current `academia agent attention` output. Review execution is limited to an already-approved linked `domain_change`, `file_copy`, or `task_change` action. Activity records identify MCP-initiated decisions and execution as `agent:mcp`. Imports preserve the original and start supported local extraction. Study sets and practice are managed through the Study interface. The server opens no network listener and has no external-service connectors.
+
+`academia mcp-connections` manages explicit local stdio MCP connections. Metadata is stored only in the runtime directory, never in the academic workspace, profile.json, workflow preferences, or repository. Adding a connection does not start it. `inspect` launches the server once, records its actual server identity and declared tools, and closes it. Only tools with `readOnlyHint: true` can be granted; non-read-only tools remain ungranted and are shown as not grantable. `enable` requires at least one read-only grant, `call` requires an enabled connection and a granted read-only tool, and `disable`/`disconnect` stop future use and remove the connection record respectively. Academia does not store credentials for these servers and does not claim an external integration works until inspection succeeds.
 
 ## Allowed behavior
 

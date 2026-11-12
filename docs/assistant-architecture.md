@@ -79,7 +79,7 @@ Remaining within this stage: ensure import/artefact actions have clear student c
 
 ### Stage 3 — Provider and connection management
 
-**Partially implemented.** Study chat checks the local Codex CLI sign-in and offers model choices; Claude appears as unavailable with its Anthropic authorization reason. Settings now provides an app-level ChatGPT device-code sign-in through the official Codex app-server and reports the signed-in account summary without storing credentials. The app does not store provider secrets. Still needed: an MCP connection manager with explicit add, inspect, grant, disable, and disconnect flows. Start external services as read-only and verify each advertised integration against its actual tool list and granted scopes.
+**Partially implemented.** Study chat checks the local Codex CLI sign-in and offers model choices; Claude appears as unavailable with its Anthropic authorization reason. Settings provides an app-level ChatGPT device-code sign-in through the official Codex app-server and reports the signed-in account summary without storing credentials. Settings also manages explicit local stdio MCP connections: users add a server, inspect its actual identity and tool list, grant only server-declared read-only tools, call granted tools, disable future use, or disconnect the record. Connection metadata stays in the runtime directory; Academia stores no MCP credentials. Still needed: remote/OAuth MCP transports, OS credential-store integration, service-specific scope review, and remote-service verification. Do not interpret a playbook preference as a connection or authorization.
 
 ### Stage 4 — Integrations and automation
 

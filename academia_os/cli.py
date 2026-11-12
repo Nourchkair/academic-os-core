@@ -402,6 +402,35 @@ def _migration(args: argparse.Namespace) -> dict[str, Any]:
     raise ValueError(f"unsupported migration command: {args.migration_command}")
 
 
+def _mcp_connections(args: argparse.Namespace) -> Any:
+    from .mcp_connections import MCPConnectionManager
+    config = load_config(_profile_path(args))
+    manager = MCPConnectionManager(runtime_directory(config) / "mcp_connections.json")
+    if args.mcp_connections_command == "list":
+        return manager.list()
+    if args.mcp_connections_command == "add":
+        return manager.add(name=args.name, command=args.connection_command, args=args.connection_args, cwd=args.cwd)
+    if args.mcp_connections_command == "inspect":
+        return manager.inspect(args.connection_id)
+    if args.mcp_connections_command == "grant":
+        return manager.grant(args.connection_id, args.granted_tools)
+    if args.mcp_connections_command == "call":
+        try:
+            arguments = json.loads(args.arguments)
+        except json.JSONDecodeError as exc:
+            raise ValueError("--arguments must be a JSON object") from exc
+        if not isinstance(arguments, dict):
+            raise ValueError("--arguments must be a JSON object")
+        return manager.call_read_tool(args.connection_id, args.tool, arguments)
+    if args.mcp_connections_command == "enable":
+        return manager.enable(args.connection_id)
+    if args.mcp_connections_command == "disable":
+        return manager.disable(args.connection_id)
+    if args.mcp_connections_command == "disconnect":
+        return manager.disconnect(args.connection_id)
+    raise ValueError(f"unsupported mcp-connections command: {args.mcp_connections_command}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="academia", description="Agent-neutral local Academia OS interface")
     parser.add_argument("--profile", type=Path, help="Path to the local Academia OS profile.json")
@@ -686,6 +715,34 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_serve.add_argument("--proposal-tool", action="append", choices=("propose_import", "propose_task"), dest="proposal_tools", help="Grant one exact proposal tool in proposal-only mode; may be repeated")
     mcp_serve.add_argument("--semester", help="Limit read tools to one exact semester folder")
     mcp_serve.add_argument("--course", help="Limit read tools to one exact course ID, code, or name")
+    connections = sub.add_parser("mcp-connections", help="Manage local external MCP connections and read-only tool grants")
+    connections_sub = connections.add_subparsers(dest="mcp_connections_command", required=True)
+    connections_list = connections_sub.add_parser("list", help="List local MCP connection records")
+    connections_list.add_argument("--json", action="store_true")
+    connections_add = connections_sub.add_parser("add", help="Add one local stdio MCP connection")
+    connections_add.add_argument("--name", required=True)
+    connections_add.add_argument("--command", dest="connection_command", required=True)
+    connections_add.add_argument("--arg", action="append", dest="connection_args", default=[])
+    connections_add.add_argument("--cwd")
+    connections_add.add_argument("--json", action="store_true")
+    for action, summary in (
+        ("inspect", "Start the server once and read its tool list"),
+        ("enable", "Enable a connection with read-only tool grants"),
+        ("disable", "Disable one connection"),
+        ("disconnect", "Remove one connection record"),
+    ):
+        command = connections_sub.add_parser(action, help=summary)
+        command.add_argument("connection_id")
+        command.add_argument("--json", action="store_true")
+    connections_grant = connections_sub.add_parser("grant", help="Replace the read-only tool grants for one connection")
+    connections_grant.add_argument("connection_id")
+    connections_grant.add_argument("--tool", action="append", dest="granted_tools", default=[])
+    connections_grant.add_argument("--json", action="store_true")
+    connections_call = connections_sub.add_parser("call", help="Call one granted read-only tool")
+    connections_call.add_argument("connection_id")
+    connections_call.add_argument("--tool", required=True)
+    connections_call.add_argument("--arguments", default="{}", help="JSON object of tool arguments")
+    connections_call.add_argument("--json", action="store_true")
     from .study.cli import add_parser as add_study_parser
     add_study_parser(sub)
     dashboard_chat = sub.add_parser("chat", help=argparse.SUPPRESS)
@@ -720,7 +777,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"process", "study", "chat", "courses", "today", "tasks", "task", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
+        if args.command in {"process", "study", "chat", "courses", "today", "tasks", "task", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard", "mcp-connections"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -732,6 +789,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def dispatch(args: argparse.Namespace) -> int:
+    if args.command == "mcp-connections":
+        _emit(_mcp_connections(args), as_json=args.json)
+        return 0
     if args.command == "assistant":
         from .assistant import ASSISTANT_CONTRACT_VERSION, CodexAppServerRuntime, ReadContext, RunRequest, Scope, WRITE_TOOL_DESCRIPTORS, descriptors
         if args.assistant_command == "tools":

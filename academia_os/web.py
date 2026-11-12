@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 from uuid import uuid4
 
-from .config import SEMESTER_PATTERN, load_config
+from .config import SEMESTER_PATTERN, load_config, runtime_directory
 from .file_preview import FilePreviewError, IMAGE_EXTENSIONS, IMAGE_MIME_TYPES, MAX_IMAGE_PREVIEW_BYTES, TEXT_EXTENSIONS, preview_file, resolve_library_file
 from .transport_policy import SAFE_COMMANDS, validate_command
 from .workspace import build_workspace_snapshot
@@ -191,6 +191,7 @@ class DashboardServer:
         self._chat_runs_lock = threading.Lock()
         from .assistant.account import CodexAccountManager
         self.account_manager = CodexAccountManager()
+        self.mcp_manager: Any | None = None
         server_class = _DashboardHTTPServerV6 if ":" in self.host else _DashboardHTTPServer
         self._httpd = server_class((self.host, port), _DashboardRequestHandler)
         self.allowed_origins = _allowed_origins(self.host, self.port)
@@ -223,6 +224,13 @@ class DashboardServer:
             if len(self.chat_runs) >= 8:
                 raise ValueError("too many active chat runs; wait for one to finish or cancel it")
             self.chat_runs[run_id] = cancel
+
+    def get_mcp_manager(self) -> Any:
+        if self.mcp_manager is None:
+            from .mcp_connections import MCPConnectionManager
+            config = load_config(self.profile)
+            self.mcp_manager = MCPConnectionManager(runtime_directory(config) / "mcp_connections.json")
+        return self.mcp_manager
 
     def unregister_chat_run(self, run_id: str) -> None:
         with self._chat_runs_lock:
@@ -391,6 +399,8 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 self._handle_chat_providers(origin)
             elif self.request_path == "/api/v1/account":
                 self._handle_account(origin)
+            elif self.request_path == "/api/v1/mcp/connections":
+                self._handle_mcp_connections(origin, "list")
             else:
                 self._send_api_error(
                     DashboardRequestError(404, "NotFound", "API endpoint not found"),
@@ -440,6 +450,18 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             return
         if self.request_path == "/api/v1/account/logout":
             self._handle_account_action(origin, "logout")
+            return
+        mcp_actions = {
+            "/api/v1/mcp/connections": "add",
+            "/api/v1/mcp/connections/inspect": "inspect",
+            "/api/v1/mcp/connections/grant": "grant",
+            "/api/v1/mcp/connections/call": "call",
+            "/api/v1/mcp/connections/enable": "enable",
+            "/api/v1/mcp/connections/disable": "disable",
+            "/api/v1/mcp/connections/disconnect": "disconnect",
+        }
+        if self.request_path in mcp_actions:
+            self._handle_mcp_connections(origin, mcp_actions[self.request_path])
             return
         if self.request_path != "/api/v1/command":
             if self._is_api_request():
@@ -633,6 +655,74 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, value, cors_origin=origin)
         except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError) as exc:
             self._send_api_error(DashboardRequestError(502, "AccountUnavailable", str(exc)), cors_origin=origin)
+
+    def _small_json_body(self, *, maximum: int = 64 * 1024) -> dict[str, Any]:
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.casefold().startswith("application/json"):
+            raise DashboardRequestError(415, "UnsupportedMediaType", "request must use application/json")
+        content_length = self.headers.get("Content-Length")
+        if content_length is None:
+            raise DashboardRequestError(400, "MissingContentLength", "request body is required")
+        try:
+            length = int(content_length)
+        except ValueError as exc:
+            raise DashboardRequestError(400, "InvalidContentLength", "Content-Length must be an integer") from exc
+        if length < 0 or length > maximum:
+            raise DashboardRequestError(400, "InvalidContentLength", "request body is too large")
+        try:
+            value = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise DashboardRequestError(400, "MalformedJSON", "request must be valid UTF-8 JSON") from exc
+        if not isinstance(value, dict):
+            raise DashboardRequestError(400, "MalformedJSON", "request must be a JSON object")
+        return value
+
+    def _handle_mcp_connections(self, origin: str | None, action: str) -> None:
+        try:
+            manager = self.dashboard.get_mcp_manager()
+            if action == "list":
+                value: Any = manager.list()
+            else:
+                body = self._small_json_body()
+                if action == "add":
+                    value = manager.add(
+                        name=body.get("name"),
+                        command=body.get("command"),
+                        args=body.get("args") if isinstance(body.get("args"), list) else [],
+                        cwd=body.get("cwd") if isinstance(body.get("cwd"), str) else None,
+                    )
+                else:
+                    connection_id = body.get("id")
+                    if not isinstance(connection_id, str) or not connection_id.strip():
+                        raise DashboardRequestError(400, "InvalidConnectionID", "an exact connection id is required")
+                    if action == "inspect":
+                        value = manager.inspect(connection_id)
+                    elif action == "grant":
+                        tools = body.get("tools")
+                        if not isinstance(tools, list) or any(not isinstance(item, str) for item in tools):
+                            raise DashboardRequestError(400, "InvalidTools", "tools must be a list of tool names")
+                        value = manager.grant(connection_id, tools)
+                    elif action == "call":
+                        tool = body.get("tool")
+                        arguments = body.get("arguments", {})
+                        if not isinstance(tool, str) or not tool.strip():
+                            raise DashboardRequestError(400, "InvalidTool", "an exact granted tool name is required")
+                        if not isinstance(arguments, dict):
+                            raise DashboardRequestError(400, "InvalidArguments", "arguments must be a JSON object")
+                        value = manager.call_read_tool(connection_id, tool, arguments)
+                    elif action == "enable":
+                        value = manager.enable(connection_id)
+                    elif action == "disable":
+                        value = manager.disable(connection_id)
+                    else:
+                        value = manager.disconnect(connection_id)
+            self._send_json(200, value, cors_origin=origin)
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except KeyError as exc:
+            self._send_api_error(DashboardRequestError(404, "NotFound", str(exc)), cors_origin=origin)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(422, "MCPConnectionError", str(exc)), cors_origin=origin)
 
     def _handle_chat(self, origin: str | None) -> None:
         try:
