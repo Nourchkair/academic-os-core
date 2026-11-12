@@ -1,5 +1,5 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
-import type { AccountStatus, ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MCPAuthorizationStart, MCPAuthorizationStatus, MCPConnection, MCPConnectionInput, MCPRemoteInput, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, TaskInput, TaskListPayload, TaskProposalAmendment, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
+import type { AccountStatus, ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, GoogleAuthorizationStart, GoogleAuthorizationStatus, GoogleConnectorStatus, ImportResult, LibraryItem, MCPAuthorizationStart, MCPAuthorizationStatus, MCPConnection, MCPConnectionInput, MCPRemoteInput, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, TaskInput, TaskListPayload, TaskProposalAmendment, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
@@ -297,6 +297,14 @@ export const api = {
   accountLogin: (onUpdate?: (status: AccountStatus) => void) => isTauriEnvironment() ? nativeAccountLogin(onUpdate) : fetch('/api/v1/account/login', { method: 'POST' }).then(readJsonResponse<AccountStatus>),
   accountLoginCancel: () => isTauriEnvironment() ? nativeAccountLoginCancel() : fetch('/api/v1/account/login/cancel', { method: 'POST' }).then(readJsonResponse<AccountStatus>),
   accountLogout: () => isTauriEnvironment() ? nativeAccountCommand<AccountStatus>(['logout']) : fetch('/api/v1/account/logout', { method: 'POST' }).then(readJsonResponse<AccountStatus>),
+  googleConnectorStatus: () => isTauriEnvironment() ? command<GoogleConnectorStatus>('connectors', ['google', 'status']) : fetch('/api/v1/connectors/google').then(readJsonResponse<GoogleConnectorStatus>),
+  googleConnectorAuthStatus: () => isTauriEnvironment() ? command<GoogleAuthorizationStatus>('connectors', ['google', 'oauth-status']) : postJson<GoogleAuthorizationStatus>('/api/v1/connectors/google/oauth-status', {}),
+  beginGoogleAuthorization: () => postJson<GoogleAuthorizationStart>('/api/v1/connectors/google/authorize', {}),
+  finishGoogleAuthorization: () => command<GoogleConnectorStatus>('connectors', ['google', 'authorize']),
+  cancelGoogleAuthorization: () => isTauriEnvironment() ? command<GoogleConnectorStatus>('connectors', ['google', 'oauth-cancel']) : postJson<GoogleConnectorStatus>('/api/v1/connectors/google/oauth-cancel', {}),
+  disconnectGoogleConnector: () => isTauriEnvironment() ? command<GoogleConnectorStatus>('connectors', ['google', 'disconnect']) : postJson<GoogleConnectorStatus>('/api/v1/connectors/google/disconnect', {}),
+  setupGoogleConnector: (input: { client_id: string; client_secret: string }) => postJson<GoogleConnectorStatus>('/api/v1/connectors/google/setup', input),
+  setupGoogleConnectorFromPath: (path: string) => command<GoogleConnectorStatus>('connectors', ['google', 'setup', '--client-json', path]),
   mcpConnections: () => isTauriEnvironment() ? command<MCPConnection[]>('mcp-connections', ['list']) : fetch('/api/v1/mcp/connections').then(readJsonResponse<MCPConnection[]>),
   addMCPConnection: (input: MCPConnectionInput) => {
     if (isTauriEnvironment()) {

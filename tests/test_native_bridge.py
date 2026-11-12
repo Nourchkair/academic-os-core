@@ -33,6 +33,7 @@ def test_cancel_request_requires_an_active_run(tmp_path: Path) -> None:
     profile = _profile(tmp_path)
     result = native_bridge.request_cancel(profile, "chat", "run-one")
     assert result == {"run_id": "run-one", "cancelled": False}
+    assert native_bridge.request_cancel(profile, "google", "google") == {"run_id": "google", "cancelled": False}
     with pytest.raises(native_bridge.NativeBridgeError):
         native_bridge.request_cancel(profile, "chat", "../escape")
 

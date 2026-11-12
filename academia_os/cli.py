@@ -405,6 +405,61 @@ def _migration(args: argparse.Namespace) -> dict[str, Any]:
     raise ValueError(f"unsupported migration command: {args.migration_command}")
 
 
+def _google_connector(args: argparse.Namespace) -> Any:
+    from .connectors.google import GoogleConnector
+    config = load_config(_profile_path(args))
+    return GoogleConnector(runtime_directory(config) / "google_connector.json")
+
+
+def _connectors(args: argparse.Namespace) -> Any:
+    if args.connector_command != "google":
+        raise ValueError(f"unsupported connector: {args.connector_command}")
+    connector = _google_connector(args)
+    if args.google_command == "setup":
+        try:
+            value = json.loads(Path(args.client_json).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("Google client JSON could not be read") from exc
+        client = value.get("installed") if isinstance(value, dict) else None
+        if not isinstance(client, dict):
+            client = value.get("web") if isinstance(value, dict) else None
+        if not isinstance(client, dict):
+            client = value if isinstance(value, dict) else {}
+        client_id = client.get("client_id")
+        client_secret = client.get("client_secret")
+        return connector.configure(client_id=client_id, client_secret=client_secret)
+    if args.google_command == "status":
+        return connector.status()
+    if args.google_command == "authorize":
+        from .native_bridge import run_lease
+
+        def cancel_authorization() -> None:
+            connector.cancel_authorize()
+
+        with run_lease(_profile_path(args), "google", "google", cancel_authorization):
+            return connector.authorize(open_browser=not args.no_open)
+    if args.google_command == "oauth-status":
+        return connector.oauth_status()
+    if args.google_command == "oauth-cancel":
+        from .native_bridge import request_cancel
+
+        requested = request_cancel(_profile_path(args), "google", "google")
+        if requested["cancelled"]:
+            return connector.oauth_status()
+        return connector.cancel_authorize()
+    if args.google_command == "disconnect":
+        return connector.disconnect()
+    if args.google_command == "gmail":
+        if args.gmail_command == "list":
+            return connector.gmail_list(query=args.query or "", max_results=args.max_results)
+        if args.gmail_command == "get":
+            return connector.gmail_get(args.message_id)
+    if args.google_command == "calendar":
+        if args.calendar_command == "list":
+            return connector.calendar_list(time_min=args.time_min or None, time_max=args.time_max or None, max_results=args.max_results)
+    raise ValueError(f"unsupported Google connector command: {args.google_command}")
+
+
 def _mcp_connections(args: argparse.Namespace) -> Any:
     from .mcp_connections import MCPConnectionManager
     config = load_config(_profile_path(args))
@@ -798,6 +853,40 @@ def build_parser() -> argparse.ArgumentParser:
     connections_call.add_argument("--tool", required=True)
     connections_call.add_argument("--arguments", default="{}", help="JSON object of tool arguments")
     connections_call.add_argument("--json", action="store_true")
+    connectors = sub.add_parser("connectors", help="Manage Google Gmail and Calendar connections")
+    connectors_sub = connectors.add_subparsers(dest="connector_command", required=True)
+    google = connectors_sub.add_parser("google", help="Google account, Gmail, and Calendar")
+    google_sub = google.add_subparsers(dest="google_command", required=True)
+    google_setup = google_sub.add_parser("setup", help="Import a downloaded Google OAuth Desktop client JSON")
+    google_setup.add_argument("--client-json", required=True)
+    google_setup.add_argument("--json", action="store_true")
+    for action, summary in (
+        ("status", "Show the Google connection status"),
+        ("authorize", "Open Google consent and store tokens in the system credential store"),
+        ("oauth-status", "Read the current Google authorization status"),
+        ("oauth-cancel", "Cancel a pending Google authorization"),
+        ("disconnect", "Remove the stored Google account tokens"),
+    ):
+        command = google_sub.add_parser(action, help=summary)
+        command.add_argument("--json", action="store_true")
+        if action == "authorize":
+            command.add_argument("--no-open", action="store_true")
+    google_gmail = google_sub.add_parser("gmail", help="Read Gmail messages")
+    gmail_sub = google_gmail.add_subparsers(dest="gmail_command", required=True)
+    gmail_list = gmail_sub.add_parser("list", help="List recent Gmail messages")
+    gmail_list.add_argument("--query", default="")
+    gmail_list.add_argument("--max", dest="max_results", type=int, default=10)
+    gmail_list.add_argument("--json", action="store_true")
+    gmail_get = gmail_sub.add_parser("get", help="Read one Gmail message")
+    gmail_get.add_argument("message_id")
+    gmail_get.add_argument("--json", action="store_true")
+    google_calendar = google_sub.add_parser("calendar", help="Read Google Calendar events")
+    calendar_sub = google_calendar.add_subparsers(dest="calendar_command", required=True)
+    calendar_list = calendar_sub.add_parser("list", help="List upcoming primary-calendar events")
+    calendar_list.add_argument("--time-min", default="")
+    calendar_list.add_argument("--time-max", default="")
+    calendar_list.add_argument("--max", dest="max_results", type=int, default=20)
+    calendar_list.add_argument("--json", action="store_true")
     from .study.cli import add_parser as add_study_parser
     add_study_parser(sub)
     dashboard_chat = sub.add_parser("chat", help=argparse.SUPPRESS)
@@ -848,7 +937,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"process", "study", "chat", "chat-stream", "chat-cancel", "account", "courses", "today", "tasks", "task", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard", "mcp-connections"}:
+        if args.command in {"process", "study", "chat", "chat-stream", "chat-cancel", "account", "connectors", "courses", "today", "tasks", "task", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard", "mcp-connections"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -860,6 +949,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def dispatch(args: argparse.Namespace) -> int:
+    if args.command == "connectors":
+        _emit(_connectors(args), as_json=args.json)
+        return 0
     if args.command == "mcp-connections":
         _emit(_mcp_connections(args), as_json=args.json)
         return 0

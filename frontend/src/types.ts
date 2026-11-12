@@ -358,6 +358,34 @@ export type AccountStatus = {
   updated_at?: string
 }
 
+export type GoogleConnectorStatus = {
+  schema_version: number
+  client_id: string | null
+  scopes: string[]
+  auth_status: 'not_configured' | 'configured' | 'pending' | 'authorized' | 'error'
+  account_email: string | null
+  authorization_url: string | null
+  error: string | null
+  created_at: string
+  updated_at: string
+  last_checked_at: string | null
+}
+
+export type GoogleAuthorizationStart = {
+  authorization_url: string
+  auth_status: string
+  redirect_uri: string
+  expires_in: number
+  connection: GoogleConnectorStatus
+}
+
+export type GoogleAuthorizationStatus = {
+  auth_status: string
+  authorization_url: string | null
+  error: string | null
+  connection: GoogleConnectorStatus
+}
+
 export type MCPTool = {
   name: string
   description: string

@@ -281,7 +281,7 @@ def test_workflow_reset_cli_is_local_idempotent_and_does_not_fabricate_integrati
     assert (root / ".academia" / "workflow_preferences.json").is_file()
 
 
-def test_dashboard_exposes_agent_setup_playbooks_and_editable_preferences_without_connection_controls() -> None:
+def test_dashboard_exposes_agent_setup_playbooks_and_editable_preferences_with_google_connector() -> None:
     source = (FRONTEND / "SettingsView.tsx").read_text(encoding="utf-8")
     api_source = (FRONTEND / "lib" / "api.ts").read_text(encoding="utf-8")
     tauri = (FRONTEND.parent / "src-tauri" / "src" / "lib.rs").read_text(encoding="utf-8")
@@ -300,8 +300,9 @@ def test_dashboard_exposes_agent_setup_playbooks_and_editable_preferences_withou
     assert "JSON.stringify(preferences)" in api_source
     assert "Agent Setup Playbook" in source
     assert "api.playbooks" in source
-    assert "Connect Gmail" not in source
-    assert "Connect Calendar" not in source
+    assert "GoogleConnectorCard" in source
+    assert "read-only access" in source
+    assert "Connect Brightspace" not in source
     assert "automation definitely running" not in source
 
 

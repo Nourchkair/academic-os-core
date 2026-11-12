@@ -192,6 +192,7 @@ class DashboardServer:
         from .assistant.account import CodexAccountManager
         self.account_manager = CodexAccountManager()
         self.mcp_manager: Any | None = None
+        self.google_connector: Any | None = None
         server_class = _DashboardHTTPServerV6 if ":" in self.host else _DashboardHTTPServer
         self._httpd = server_class((self.host, port), _DashboardRequestHandler)
         self.allowed_origins = _allowed_origins(self.host, self.port)
@@ -231,6 +232,13 @@ class DashboardServer:
             config = load_config(self.profile)
             self.mcp_manager = MCPConnectionManager(runtime_directory(config) / "mcp_connections.json")
         return self.mcp_manager
+
+    def get_google_connector(self) -> Any:
+        if self.google_connector is None:
+            from .connectors.google import GoogleConnector
+            config = load_config(self.profile)
+            self.google_connector = GoogleConnector(runtime_directory(config) / "google_connector.json")
+        return self.google_connector
 
     def unregister_chat_run(self, run_id: str) -> None:
         with self._chat_runs_lock:
@@ -401,6 +409,8 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 self._handle_account(origin)
             elif self.request_path == "/api/v1/mcp/connections":
                 self._handle_mcp_connections(origin, "list")
+            elif self.request_path == "/api/v1/connectors/google":
+                self._handle_google_connector(origin, "status")
             else:
                 self._send_api_error(
                     DashboardRequestError(404, "NotFound", "API endpoint not found"),
@@ -467,6 +477,16 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
         }
         if self.request_path in mcp_actions:
             self._handle_mcp_connections(origin, mcp_actions[self.request_path])
+            return
+        google_actions = {
+            "/api/v1/connectors/google/setup": "setup",
+            "/api/v1/connectors/google/authorize": "authorize",
+            "/api/v1/connectors/google/oauth-status": "oauth-status",
+            "/api/v1/connectors/google/oauth-cancel": "oauth-cancel",
+            "/api/v1/connectors/google/disconnect": "disconnect",
+        }
+        if self.request_path in google_actions:
+            self._handle_google_connector(origin, google_actions[self.request_path])
             return
         if self.request_path != "/api/v1/command":
             if self._is_api_request():
@@ -681,6 +701,33 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
         if not isinstance(value, dict):
             raise DashboardRequestError(400, "MalformedJSON", "request must be a JSON object")
         return value
+
+    def _handle_google_connector(self, origin: str | None, action: str) -> None:
+        try:
+            connector = self.dashboard.get_google_connector()
+            if action == "status":
+                value: Any = connector.status()
+            elif action == "setup":
+                body = self._small_json_body()
+                value = connector.configure(
+                    client_id=body.get("client_id"),
+                    client_secret=body.get("client_secret"),
+                )
+            elif action == "authorize":
+                value = connector.begin_authorize()
+            elif action == "oauth-status":
+                value = connector.oauth_status()
+            elif action == "oauth-cancel":
+                value = connector.cancel_authorize()
+            elif action == "disconnect":
+                value = connector.disconnect()
+            else:
+                raise DashboardRequestError(404, "NotFound", "Google connector action not found")
+            self._send_json(200, value, cors_origin=origin)
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except (OSError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(422, "GoogleConnectorError", str(exc)), cors_origin=origin)
 
     def _handle_mcp_connections(self, origin: str | None, action: str) -> None:
         try:
