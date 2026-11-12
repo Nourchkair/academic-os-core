@@ -91,6 +91,41 @@ def test_unavailable_server_and_corrupt_state_fail_closed(tmp_path: Path) -> Non
         connections.list()
 
 
+def test_cli_remote_add_trust_and_inspect(tmp_path: Path) -> None:
+    import json
+
+    from tests.test_agent_interface import prepared_workspace, run_cli
+    from tests.test_mcp_remote import FakeRemoteServer
+
+    remote = FakeRemoteServer(require_auth=False)
+    try:
+        _, _, profile = prepared_workspace(tmp_path / "workspace")
+        added = run_cli(profile, "mcp-connections", "add-remote", "--name", "Remote Research", "--url", remote.origin + "/mcp", "--json")
+        assert added.returncode == 0, added.stderr
+        record = json.loads(added.stdout)
+        assert record["transport"] == "http"
+        assert record["trust"] == "remote_unverified"
+        assert record["url"] == remote.origin + "/mcp"
+
+        insecure = run_cli(profile, "mcp-connections", "add-remote", "--name", "Insecure", "--url", "http://example.test/mcp", "--json")
+        assert insecure.returncode != 0
+        assert "HTTPS" in insecure.stdout + insecure.stderr
+
+        early_trust = run_cli(profile, "mcp-connections", "trust", record["id"], "--json")
+        assert early_trust.returncode != 0
+        assert "inspect" in early_trust.stdout + early_trust.stderr
+
+        inspected = run_cli(profile, "mcp-connections", "inspect", record["id"], "--json")
+        assert inspected.returncode == 0, inspected.stderr
+        assert json.loads(inspected.stdout)["status"] == "available"
+
+        trusted = run_cli(profile, "mcp-connections", "trust", record["id"], "--json")
+        assert trusted.returncode == 0, trusted.stderr
+        assert json.loads(trusted.stdout)["trust"] == "remote_trusted"
+    finally:
+        remote.close()
+
+
 def test_cli_mcp_connections_lifecycle(tmp_path: Path) -> None:
     import json
 

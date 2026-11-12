@@ -117,7 +117,7 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
     }
     if command == "mcp-connections" {
         let action = args.first().map(String::as_str).unwrap_or("");
-        if !["list", "add", "inspect", "grant", "call", "enable", "disable", "disconnect"].contains(&action) {
+        if !["list", "add", "add-remote", "authorize", "oauth-status", "oauth-cancel", "trust", "inspect", "grant", "call", "enable", "disable", "disconnect"].contains(&action) {
             return Err("Unsupported MCP connection action".to_string());
         }
     }

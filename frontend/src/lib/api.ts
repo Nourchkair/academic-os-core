@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { AccountStatus, ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MCPConnection, MCPConnectionInput, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, TaskInput, TaskListPayload, TaskProposalAmendment, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
+import type { AccountStatus, ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MCPAuthorizationStart, MCPAuthorizationStatus, MCPConnection, MCPConnectionInput, MCPRemoteInput, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, TaskInput, TaskListPayload, TaskProposalAmendment, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
@@ -227,6 +227,11 @@ export const api = {
     }
     return postJson<MCPConnection>('/api/v1/mcp/connections', input)
   },
+  addRemoteMCPConnection: (input: MCPRemoteInput) => isTauriEnvironment() ? command<MCPConnection>('mcp-connections', ['add-remote', '--name', input.name, '--url', input.url]) : postJson<MCPConnection>('/api/v1/mcp/connections/add-remote', input),
+  authorizeMCPConnection: (id: string) => isTauriEnvironment() ? command<MCPAuthorizationStatus>('mcp-connections', ['authorize', id]) : postJson<MCPAuthorizationStart>('/api/v1/mcp/connections/authorize', { id }),
+  mcpOAuthStatus: (id: string) => isTauriEnvironment() ? command<MCPAuthorizationStatus>('mcp-connections', ['oauth-status', id]) : postJson<MCPAuthorizationStatus>('/api/v1/mcp/connections/oauth-status', { id }),
+  cancelMCPAuthorization: (id: string) => isTauriEnvironment() ? command<MCPAuthorizationStatus>('mcp-connections', ['oauth-cancel', id]) : postJson<MCPAuthorizationStatus>('/api/v1/mcp/connections/oauth-cancel', { id }),
+  trustMCPConnection: (id: string) => isTauriEnvironment() ? command<MCPConnection>('mcp-connections', ['trust', id]) : postJson<MCPConnection>('/api/v1/mcp/connections/trust', { id }),
   inspectMCPConnection: (id: string) => isTauriEnvironment() ? command<MCPConnection>('mcp-connections', ['inspect', id]) : postJson<MCPConnection>('/api/v1/mcp/connections/inspect', { id }),
   grantMCPConnection: (id: string, tools: string[]) => {
     if (isTauriEnvironment()) {

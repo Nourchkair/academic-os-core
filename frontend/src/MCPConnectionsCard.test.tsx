@@ -12,6 +12,11 @@ vi.mock('./lib/api', async (importOriginal) => {
       ...actual.api,
       mcpConnections: vi.fn(),
       addMCPConnection: vi.fn(),
+      addRemoteMCPConnection: vi.fn(),
+      authorizeMCPConnection: vi.fn(),
+      mcpOAuthStatus: vi.fn(),
+      cancelMCPAuthorization: vi.fn(),
+      trustMCPConnection: vi.fn(),
       inspectMCPConnection: vi.fn(),
       grantMCPConnection: vi.fn(),
       enableMCPConnection: vi.fn(),
@@ -26,8 +31,13 @@ const unchecked: MCPConnection = {
   name: 'Fake Research',
   transport: 'stdio',
   scope: 'read_only',
+  trust: 'local',
   command: '/usr/bin/fake-server',
+  url: null,
   args: [],
+  cwd: null,
+  auth: { type: 'none' },
+  auth_status: 'none',
   enabled: false,
   status: 'unchecked',
   server_info: null,
@@ -73,5 +83,29 @@ describe('MCPConnectionsCard', () => {
     fireEvent.click(screen.getAllByRole('checkbox')[0])
     fireEvent.click(screen.getByRole('button', { name: 'Save read-only grants' }))
     await waitFor(() => expect(api.grantMCPConnection).toHaveBeenCalledWith('one', ['search_notes']))
+  })
+
+  it('requires an explicit trust decision before granting remote tools', async () => {
+    const remote: MCPConnection = {
+      ...unchecked,
+      id: 'remote',
+      name: 'Remote Research',
+      transport: 'http',
+      trust: 'remote_unverified',
+      command: null,
+      url: 'https://research.example.test/mcp',
+      status: 'available',
+      server_info: { name: 'Remote Research', version: '1.0' },
+      tools: inspected.tools,
+    }
+    vi.mocked(api.mcpConnections).mockResolvedValue([remote])
+    vi.mocked(api.trustMCPConnection).mockResolvedValue({ ...remote, trust: 'remote_trusted' })
+    render(<MCPConnectionsCard />)
+
+    expect(await screen.findByText(/Untrusted remote/)).toBeInTheDocument()
+    expect(screen.getAllByRole('checkbox')[0]).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Trust server declarations' }))
+    await waitFor(() => expect(api.trustMCPConnection).toHaveBeenCalledWith('remote'))
+    await waitFor(() => expect(screen.getAllByRole('checkbox')[0]).not.toBeDisabled())
   })
 })

@@ -5,6 +5,8 @@ import json
 import os
 import shutil
 import sys
+import time
+import webbrowser
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable
@@ -410,6 +412,27 @@ def _mcp_connections(args: argparse.Namespace) -> Any:
         return manager.list()
     if args.mcp_connections_command == "add":
         return manager.add(name=args.name, command=args.connection_command, args=args.connection_args, cwd=args.cwd)
+    if args.mcp_connections_command == "add-remote":
+        return manager.add_remote(name=args.name, url=args.url)
+    if args.mcp_connections_command == "authorize":
+        started = manager.begin_authorize(args.connection_id)
+        if not args.no_open:
+            webbrowser.open(started["authorization_url"])
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            status = manager.oauth_status(args.connection_id)
+            if status["auth_status"] == "authorized":
+                return status
+            if status["auth_status"] == "error":
+                raise ValueError(status.get("error") or "MCP authorization failed")
+            time.sleep(0.5)
+        raise ValueError("MCP authorization timed out")
+    if args.mcp_connections_command == "oauth-status":
+        return manager.oauth_status(args.connection_id)
+    if args.mcp_connections_command == "oauth-cancel":
+        return manager.cancel_authorize(args.connection_id)
+    if args.mcp_connections_command == "trust":
+        return manager.trust_remote(args.connection_id)
     if args.mcp_connections_command == "inspect":
         return manager.inspect(args.connection_id)
     if args.mcp_connections_command == "grant":
@@ -725,6 +748,22 @@ def build_parser() -> argparse.ArgumentParser:
     connections_add.add_argument("--arg", action="append", dest="connection_args", default=[])
     connections_add.add_argument("--cwd")
     connections_add.add_argument("--json", action="store_true")
+    connections_add_remote = connections_sub.add_parser("add-remote", help="Add one remote streamable-HTTP MCP connection")
+    connections_add_remote.add_argument("--name", required=True)
+    connections_add_remote.add_argument("--url", required=True)
+    connections_add_remote.add_argument("--json", action="store_true")
+    connections_authorize = connections_sub.add_parser("authorize", help="Start OAuth and open the verification page")
+    connections_authorize.add_argument("connection_id")
+    connections_authorize.add_argument("--no-open", action="store_true")
+    connections_authorize.add_argument("--json", action="store_true")
+    for action, summary in (
+        ("oauth-status", "Read the OAuth status for one remote connection"),
+        ("oauth-cancel", "Cancel a pending OAuth authorization"),
+        ("trust", "Trust one inspected remote server's read-only declarations"),
+    ):
+        command = connections_sub.add_parser(action, help=summary)
+        command.add_argument("connection_id")
+        command.add_argument("--json", action="store_true")
     for action, summary in (
         ("inspect", "Start the server once and read its tool list"),
         ("enable", "Enable a connection with read-only tool grants"),

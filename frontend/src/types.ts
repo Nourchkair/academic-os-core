@@ -371,9 +371,13 @@ export type MCPConnection = {
   name: string
   transport: string
   scope: string
-  command: string
+  trust: 'local' | 'remote_unverified' | 'remote_trusted'
+  command?: string | null
+  url?: string | null
   args: string[]
   cwd?: string | null
+  auth: { type: 'none' | 'oauth'; authorization_server?: string; token_endpoint?: string; client_id?: string; redirect_uri?: string; scopes?: string[] }
+  auth_status: 'none' | 'pending' | 'authorized' | 'error'
   enabled: boolean
   status: 'unchecked' | 'available' | 'error'
   server_info?: { name?: string | null; version?: string | null } | null
@@ -391,6 +395,10 @@ export type MCPConnectionInput = {
   args: string[]
   cwd?: string | null
 }
+
+export type MCPRemoteInput = { name: string; url: string }
+export type MCPAuthorizationStart = { connection_id: string; authorization_url: string; state: string; redirect_uri: string; auth_status: string; expires_in?: number }
+export type MCPAuthorizationStatus = { connection_id: string; auth_status: string; error?: string | null; session_status?: string; connection: MCPConnection }
 
 export type StatusPayload = {  version: string
   profile: string

@@ -453,6 +453,11 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             return
         mcp_actions = {
             "/api/v1/mcp/connections": "add",
+            "/api/v1/mcp/connections/add-remote": "add-remote",
+            "/api/v1/mcp/connections/authorize": "authorize",
+            "/api/v1/mcp/connections/oauth-status": "oauth-status",
+            "/api/v1/mcp/connections/oauth-cancel": "oauth-cancel",
+            "/api/v1/mcp/connections/trust": "trust",
             "/api/v1/mcp/connections/inspect": "inspect",
             "/api/v1/mcp/connections/grant": "grant",
             "/api/v1/mcp/connections/call": "call",
@@ -691,11 +696,24 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                         args=body.get("args") if isinstance(body.get("args"), list) else [],
                         cwd=body.get("cwd") if isinstance(body.get("cwd"), str) else None,
                     )
+                elif action == "add-remote":
+                    value = manager.add_remote(
+                        name=body.get("name"),
+                        url=body.get("url"),
+                    )
                 else:
                     connection_id = body.get("id")
                     if not isinstance(connection_id, str) or not connection_id.strip():
                         raise DashboardRequestError(400, "InvalidConnectionID", "an exact connection id is required")
-                    if action == "inspect":
+                    if action == "authorize":
+                        value = manager.begin_authorize(connection_id)
+                    elif action == "oauth-status":
+                        value = manager.oauth_status(connection_id)
+                    elif action == "oauth-cancel":
+                        value = manager.cancel_authorize(connection_id)
+                    elif action == "trust":
+                        value = manager.trust_remote(connection_id)
+                    elif action == "inspect":
                         value = manager.inspect(connection_id)
                     elif action == "grant":
                         tools = body.get("tools")
