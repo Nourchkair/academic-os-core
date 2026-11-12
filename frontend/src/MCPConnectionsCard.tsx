@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api } from './lib/api'
+import { api, isTauriEnvironment } from './lib/api'
 import type { MCPConnection } from './types'
 
 type AddDraft = { mode: 'local' | 'remote'; name: string; command: string; url: string; args: string; cwd: string }
@@ -95,6 +95,17 @@ export function MCPConnectionsCard() {
     setBusy(`auth:${id}`)
     setError('')
     try {
+      if (isTauriEnvironment()) {
+        setPendingAuth(id)
+        setConnections((current) => current.map((item) => item.id === id ? { ...item, auth_status: 'pending' } : item))
+        void api.authorizeMCPConnection(id).then((status) => {
+          if ('connection' in status) replace(status.connection)
+        }).catch((reason) => {
+          setPendingAuth(null)
+          setError(`MCP authorization could not complete. ${String(reason)}`)
+        })
+        return
+      }
       const started = await api.authorizeMCPConnection(id)
       if ('authorization_url' in started && started.authorization_url) {
         window.open(started.authorization_url, '_blank', 'noopener,noreferrer')

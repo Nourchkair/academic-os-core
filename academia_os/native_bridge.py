@@ -76,7 +76,7 @@ def run_lease(profile: Path, kind: str, run_id: str, on_cancel: Callable[[], Non
 def request_cancel(profile: Path, kind: str, run_id: str) -> dict[str, Any]:
     """Ask an active native run to cancel and report whether it was active."""
     run_id = _run_id(run_id)
-    if kind not in {"chat", "account"}:
+    if kind not in {"chat", "account", "mcp"}:
         raise NativeBridgeError("run kind is invalid")
     root = _run_directory(profile, kind)
     active = root / f"{run_id}.active"

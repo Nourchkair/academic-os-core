@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import sys
+import threading
 import time
 import webbrowser
 from dataclasses import asdict
@@ -415,21 +416,36 @@ def _mcp_connections(args: argparse.Namespace) -> Any:
     if args.mcp_connections_command == "add-remote":
         return manager.add_remote(name=args.name, url=args.url)
     if args.mcp_connections_command == "authorize":
+        from .native_bridge import run_lease
+
         started = manager.begin_authorize(args.connection_id)
         if not args.no_open:
             webbrowser.open(started["authorization_url"])
+        cancelled = threading.Event()
+
+        def cancel_authorization() -> None:
+            cancelled.set()
+            try:
+                manager.cancel_authorize(args.connection_id)
+            except (KeyError, ValueError):
+                pass
+
         deadline = time.monotonic() + 180
-        while time.monotonic() < deadline:
-            status = manager.oauth_status(args.connection_id)
-            if status["auth_status"] == "authorized":
-                return status
-            if status["auth_status"] == "error":
-                raise ValueError(status.get("error") or "MCP authorization failed")
-            time.sleep(0.5)
+        with run_lease(_profile_path(args), "mcp", args.connection_id, cancel_authorization):
+            while time.monotonic() < deadline:
+                status = manager.oauth_status(args.connection_id)
+                if status["auth_status"] in {"authorized", "error"} or cancelled.is_set():
+                    return status
+                time.sleep(0.5)
         raise ValueError("MCP authorization timed out")
     if args.mcp_connections_command == "oauth-status":
         return manager.oauth_status(args.connection_id)
     if args.mcp_connections_command == "oauth-cancel":
+        from .native_bridge import request_cancel
+
+        requested = request_cancel(_profile_path(args), "mcp", args.connection_id)
+        if requested["cancelled"]:
+            return manager.oauth_status(args.connection_id)
         return manager.cancel_authorize(args.connection_id)
     if args.mcp_connections_command == "trust":
         return manager.trust_remote(args.connection_id)
