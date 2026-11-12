@@ -44,7 +44,7 @@ EXPECTED_TOOLS = {
 class McpServer:
     """Spawn the real stdio server and speak newline-delimited JSON-RPC."""
 
-    def __init__(self, profile: Path, *, read_only: bool = False, proposal_only: bool = False, semester: str | None = None, course: str | None = None) -> None:
+    def __init__(self, profile: Path, *, read_only: bool = False, proposal_only: bool = False, proposal_tools: list[str] | None = None, semester: str | None = None, course: str | None = None) -> None:
         environment = os.environ.copy()
         environment["PYTHONPATH"] = str(ROOT)
         command = [sys.executable, "-m", "academia_os", "--profile", str(profile), "mcp", "serve"]
@@ -52,6 +52,8 @@ class McpServer:
             command.append("--read-only")
         if proposal_only:
             command.append("--proposal-only")
+        for proposal_tool in proposal_tools or []:
+            command.extend(["--proposal-tool", proposal_tool])
         if semester:
             command.extend(["--semester", semester])
         if course:

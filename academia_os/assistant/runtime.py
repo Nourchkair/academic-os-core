@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
-from .contracts import AssistantError, EventType, RunEvent, RunRequest, RunResult, Scope, ScopeKind, ToolResult
+from .contracts import AssistantError, EventType, RunEvent, RunRequest, RunResult, Scope, ScopeKind, ToolDescriptor, ToolGrant, ToolResult
 from .policy import PolicyDenied, validate_scope
 from .providers import CancelToken, ProviderAdapter, ProviderRequest, ProviderResponse
-from .registry import descriptors, invoke
+from .registry import WRITE_TOOLS, descriptors, invoke_granted
 from .tools.read import ReadContext
 
 _COURSE_TOOL_NAMES = {
@@ -31,14 +31,21 @@ _SOURCE_TOOL_NAMES = {"library.get"}
 _MAX_TOOL_MESSAGE_CHARS = 60_000
 
 
-def tools_for_scope(scope: Scope) -> list[dict[str, Any]]:
+def tools_for_scope(scope: Scope, grants: ToolGrant | None = None) -> list[dict[str, Any]]:
     if scope.kind is ScopeKind.COURSE:
         allowed = _COURSE_TOOL_NAMES
     elif scope.kind is ScopeKind.SOURCE:
         allowed = _SOURCE_TOOL_NAMES
     else:
         allowed = {tool["name"] for tool in descriptors()}
-    return [tool for tool in descriptors() if tool["name"] in allowed]
+    tools = [tool for tool in descriptors() if tool["name"] in allowed]
+    if grants is not None and scope.kind is not ScopeKind.SOURCE:
+        tools.extend([
+            spec.descriptor.as_dict()
+            for name, spec in WRITE_TOOLS.items()
+            if grants.allows(name)
+        ])
+    return tools
 
 
 def _tool_content(result: dict[str, Any]) -> str:
@@ -53,7 +60,15 @@ class RunController:
         self.context = context
         self.provider = provider
 
-    def run(self, request: RunRequest, *, cancel: CancelToken | None = None) -> RunResult:
+    def run(
+        self,
+        request: RunRequest,
+        *,
+        cancel: CancelToken | None = None,
+        grants: ToolGrant | None = None,
+        confirm: Callable[[ToolDescriptor, dict[str, Any]], bool] | None = None,
+        on_event: Callable[[RunEvent], None] | None = None,
+    ) -> RunResult:
         run_id = str(uuid4())
         events: list[RunEvent] = []
         tool_results: list[ToolResult] = []
@@ -61,12 +76,15 @@ class RunController:
         deadline = time.monotonic() + request.timeout_seconds
 
         def emit(event_type: EventType, data: dict[str, Any] | None = None) -> None:
-            events.append(RunEvent(
+            event = RunEvent(
                 run_id=run_id,
                 sequence=len(events),
                 event_type=event_type,
                 data=data or {},
-            ))
+            )
+            events.append(event)
+            if on_event is not None:
+                on_event(event)
 
         try:
             validate_scope(request.scope, self.context.policy)
@@ -75,11 +93,12 @@ class RunController:
             emit(EventType.ERROR, {"code": error.code, "message": str(error)})
             return RunResult(run_id=run_id, status="error", events=tuple(events), error=error)
 
-        tools = tools_for_scope(request.scope)
+        tools = tools_for_scope(request.scope, grants)
         emit(EventType.RUN_STARTED, {
             "provider": self.provider.id,
             "scope": request.scope.as_dict(),
             "tool_count": len(tools),
+            "granted_tools": sorted(grants.tools) if grants is not None else [],
         })
 
         for _iteration in range(request.max_iterations):
@@ -105,11 +124,13 @@ class RunController:
                 for call in response.tool_calls:
                     emit(EventType.TOOL_STARTED, {"name": call.name, "call_id": call.call_id})
                     try:
-                        result = invoke(
+                        result = invoke_granted(
                             call.name,
                             call.arguments,
                             self.context,
+                            grants=grants,
                             parent_scope=request.scope,
+                            confirm=confirm,
                         )
                     except AssistantError as exc:
                         payload = {"error": exc.to_dict()}
@@ -122,13 +143,16 @@ class RunController:
                     else:
                         payload = result.as_dict()
                         tool_results.append(result)
-                        emit(EventType.TOOL_RESULT, {
+                        event_data: dict[str, Any] = {
                             "name": call.name,
                             "call_id": call.call_id,
                             "ok": True,
                             "truncated": result.truncated,
                             "citation_count": len(result.citations),
-                        })
+                        }
+                        if call.name in WRITE_TOOLS:
+                            event_data["data"] = result.data
+                        emit(EventType.TOOL_RESULT, event_data)
                     messages.append({
                         "role": "tool",
                         "name": call.name,

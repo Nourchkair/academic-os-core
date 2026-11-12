@@ -42,7 +42,7 @@ def available_catalog() -> dict[str, Any]:
 
 
 def test_validate_payload_accepts_minimal_codex_chat() -> None:
-    prompt, messages, provider, model, effort, fast, attachments, context, proposal_mode, course_id, semester = _validate_payload(payload())
+    prompt, messages, provider, model, effort, fast, attachments, context, proposal_mode, course_id, semester, grants = _validate_payload(payload())
 
     assert prompt == "USER: hello"
     assert messages == [{"role": "user", "content": "hello"}]
@@ -55,6 +55,7 @@ def test_validate_payload_accepts_minimal_codex_chat() -> None:
     assert proposal_mode is False
     assert course_id is None
     assert semester is None
+    assert grants == []
 
 
 def test_validate_payload_bounds_messages_and_prompt_size() -> None:
@@ -216,12 +217,20 @@ def test_respond_reports_timeout_and_empty_answer(monkeypatch: pytest.MonkeyPatc
 
 
 def test_validate_payload_accepts_and_bounds_proposal_scope() -> None:
-    *_, proposal_mode, course_id, semester = _validate_payload(
+    *_, proposal_mode, course_id, semester, grants = _validate_payload(
         payload(proposal_mode=True, course_id="POL 2103", semester="Fall 2026")
     )
     assert proposal_mode is True
     assert course_id == "POL 2103"
     assert semester == "Fall 2026"
+    assert grants == ["task", "import"]
+
+    *_, grants = _validate_payload(payload(proposal_mode=True, granted_proposal_tools=["task"]))
+    assert grants == ["task"]
+    with pytest.raises(ValueError, match="at least one"):
+        _validate_payload(payload(proposal_mode=True, granted_proposal_tools=[]))
+    with pytest.raises(ValueError, match="granted_proposal_tools"):
+        _validate_payload(payload(proposal_mode=True, granted_proposal_tools=["calendar"]))
 
     with pytest.raises(ValueError, match="proposal_mode"):
         _validate_payload(payload(proposal_mode="yes"))
@@ -290,6 +299,7 @@ def test_respond_proposal_mode_uses_app_server_and_returns_cards(tmp_path: Path,
         "proposal_id": "proposal-1",
     }]
     assert captured["init"]["mcp_mode"] == "proposal_only"
+    assert captured["init"]["proposal_tools"] == ("propose_task", "propose_import")
     assert captured["init"]["model"] == "test-model"
     assert captured["init"]["effort"] == "high"
     assert captured["init"]["fast"] is True

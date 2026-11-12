@@ -23,11 +23,15 @@ _WRITE_TOOL_NAMES = frozenset({"academia_review_decide", "academia_review_execut
 _PROPOSAL_TOOL_NAMES = frozenset({"academia_propose_import", "academia_propose_task"})
 
 
-def _tools_for_mode(read_only: bool, proposal_only: bool = False) -> list[dict[str, Any]]:
+def _tools_for_mode(read_only: bool, proposal_only: bool = False, proposal_tools: set[str] | None = None) -> list[dict[str, Any]]:
     if read_only:
         return [tool for tool in _TOOLS if tool["name"] not in _WRITE_TOOL_NAMES and tool["name"] not in _PROPOSAL_TOOL_NAMES]
     if proposal_only:
-        return [tool for tool in _TOOLS if tool["name"] not in _WRITE_TOOL_NAMES]
+        return [
+            tool for tool in _TOOLS
+            if tool["name"] not in _WRITE_TOOL_NAMES
+            and (tool["name"] not in _PROPOSAL_TOOL_NAMES or proposal_tools is None or tool["name"] in proposal_tools)
+        ]
     return list(_TOOLS)
 
 
@@ -371,16 +375,19 @@ def _call_tool(
     *,
     read_only: bool = False,
     proposal_only: bool = False,
+    proposal_tools: set[str] | None = None,
     scope: McpScope | None = None,
 ) -> Any:
     if not isinstance(values, dict):
         raise McpError("Tool arguments must be a JSON object.")
-    allowed = {item["name"] for item in _tools_for_mode(read_only, proposal_only)}
+    allowed = {item["name"] for item in _tools_for_mode(read_only, proposal_only, proposal_tools)}
     if name not in allowed:
         if read_only and (name in _WRITE_TOOL_NAMES or name in _PROPOSAL_TOOL_NAMES):
             raise McpError(f"Tool is disabled in read-only mode: {name}")
         if proposal_only and name in _WRITE_TOOL_NAMES:
             raise McpError(f"Direct write tool is disabled in proposal-only mode: {name}")
+        if proposal_only and name in _PROPOSAL_TOOL_NAMES:
+            raise McpError(f"Proposal tool is not granted in this run: {name}")
         raise McpError(f"Unknown Academia MCP tool: {name}")
     values = _scoped_arguments(name, values, scope)
 
@@ -741,6 +748,7 @@ def _handle(
     *,
     read_only: bool = False,
     proposal_only: bool = False,
+    proposal_tools: set[str] | None = None,
     scope: McpScope | None = None,
 ) -> dict[str, Any] | None:
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
@@ -765,11 +773,11 @@ def _handle(
     if method == "ping":
         return _response(request_id, {})
     if method == "tools/list":
-        return _response(request_id, {"tools": _tools_for_mode(read_only, proposal_only)})
+        return _response(request_id, {"tools": _tools_for_mode(read_only, proposal_only, proposal_tools)})
     if method == "tools/call":
         name = params.get("name")
         try:
-            result = _call_tool(name, params.get("arguments", {}), profile, read_only=read_only, proposal_only=proposal_only, scope=scope)
+            result = _call_tool(name, params.get("arguments", {}), profile, read_only=read_only, proposal_only=proposal_only, proposal_tools=proposal_tools, scope=scope)
             return _response(request_id, {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]})
         except (McpError, OSError, subprocess.TimeoutExpired, TypeError, ValueError) as exc:
             error = exc if isinstance(exc, McpError) else McpError(str(exc), -32000)
@@ -785,6 +793,7 @@ def serve(
     *,
     read_only: bool = False,
     proposal_only: bool = False,
+    proposal_tools: set[str] | None = None,
     semester: str | None = None,
     course: str | None = None,
 ) -> int:
@@ -801,7 +810,7 @@ def serve(
         else:
             try:
                 request = json.loads(line)
-                message = _handle(request, profile, read_only=read_only, proposal_only=proposal_only, scope=scope)
+                message = _handle(request, profile, read_only=read_only, proposal_only=proposal_only, proposal_tools=proposal_tools, scope=scope)
             except json.JSONDecodeError:
                 message = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error."}}
         if message is not None:

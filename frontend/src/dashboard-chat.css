@@ -399,3 +399,7 @@
 .chat-cancel-run:hover { background: #f2dfdc; border-color: #dcbdb7; }
 .chat-cancel-run:focus-visible { outline: 2px solid #c58d85; outline-offset: 2px; }
 .chat-proposal-done { color: #5d735d; font-size: 8px; font-weight: 700; }
+.chat-proposal-mode-note { align-items: center; display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.chat-proposal-mode-note label { align-items: center; cursor: pointer; display: inline-flex; font-size: 9px; gap: 4px; }
+.chat-proposal-mode-note input { accent-color: #6f876f; margin: 0; }
+.chat-proposal-mode-note small { flex-basis: 100%; font-size: 8px; }

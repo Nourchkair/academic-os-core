@@ -138,3 +138,22 @@ def test_read_only_mode_still_hides_proposal_tools(tmp_path: Path) -> None:
         assert "academia_propose_import" not in tools
     finally:
         server.close()
+
+
+def test_proposal_tool_grants_are_exact_and_enforced(tmp_path: Path) -> None:
+    _, root, profile = prepared_workspace(tmp_path)
+    inbox = root / "Fall 2026" / "POL 2103 - Politics" / "00_INBOX"
+    inbox.mkdir()
+    source = tmp_path / "lecture.md"
+    source.write_text("# Lecture\n", encoding="utf-8")
+    server = McpServer(profile, proposal_only=True, proposal_tools=["propose_task"], course="POL 2103")
+    try:
+        tools = {tool["name"] for tool in server.request("tools/list")["result"]["tools"]}
+        assert "academia_propose_task" in tools
+        assert "academia_propose_import" not in tools
+        assert "not granted" in call_error(server, "academia_propose_import", {
+            "source_path": str(source),
+            "target_id": "Fall 2026/POL 2103 - Politics/00_INBOX",
+        })
+    finally:
+        server.close()

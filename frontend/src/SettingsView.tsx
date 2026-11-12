@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, isTauriEnvironment } from './lib/api'
+import { AssistantAccountCard } from './AssistantAccountCard'
 import type { SettingsPreview, StatusPayload, WorkflowPreferenceRecord, AgentSetupPlaybook } from './types'
 import type { Update } from '@tauri-apps/plugin-updater'
 
@@ -188,6 +189,9 @@ export function SettingsView({ status, onSaved }: SettingsViewProps) {
       <section className="settings-actions"><button className="secondary-button" onClick={() => void previewChanges()} disabled={busy}>{busy ? 'Preparing…' : 'Preview changes'}</button>{preview && <button className="primary-button" onClick={() => void applyChanges()} disabled={busy}>{structuralPreview ? 'Approve and apply structural changes' : 'Apply settings'}</button>}</section>
       {preview && <SettingsPreviewCard preview={preview} />}
     </> : <div className="loading-card">Loading your local settings…</div>}
+    <SettingsSection title="ChatGPT sign-in" description="Connect the installed Codex CLI to your ChatGPT plan for Study chat and proposal runs. Academia never reads or stores your credentials.">
+      <AssistantAccountCard />
+    </SettingsSection>
     <SettingsSection title="App updates" description="Check for signed Academia OS updates and install them on this device. Your academic workspace stays in place.">
       {isTauriEnvironment() ? <>
         <p className="settings-note">Installed version {status?.version || 'not available'}</p>

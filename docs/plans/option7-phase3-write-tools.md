@@ -107,8 +107,18 @@ Direct write tools are therefore **not** exposed to Codex.
 `academia assistant run --proposal-mode` starts the app-server with
 `academia mcp serve --proposal-only`. In that mode Codex may create an exact
 `academia_propose_import` or `academia_propose_task` proposal, but cannot copy
-files, write tasks, approve, or execute. The proposal appears in Review; only a
-human can approve and run it.
+files, write tasks, approve, or execute. Proposal tools can be granted
+individually with repeated `--proposal-tool` flags. The proposal appears in
+Review; only a human can approve and run it.
+
+The shared provider-neutral `RunController` accepts an exact `ToolGrant` set.
+Read tools stay scope-bound. Approval-gated import/domain/task proposals create
+Review items; create-only Study writes require an explicit host confirmation
+callback. No direct write tool is enabled by default.
+
+Settings provides an app-level ChatGPT device-code sign-in through the official
+Codex app-server. Academia exposes only the verification URL, one-time code, and
+account summary; credentials remain in Codex's own credential store.
 
 Dashboard Study chat uses the same proposal-only path when the student enables
 **Proposal mode**. The chat can create task/import proposals, renders the exact

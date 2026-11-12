@@ -502,6 +502,7 @@ def build_parser() -> argparse.ArgumentParser:
     assistant_run.add_argument("--course", dest="course_id", help="Optional exact course ID, code, or name")
     assistant_run.add_argument("--model", help="Optional Codex model override")
     assistant_run.add_argument("--proposal-mode", action="store_true", help="Let Codex create Review/Action proposals, never direct writes")
+    assistant_run.add_argument("--proposal-tool", action="append", choices=("propose_import", "propose_task"), dest="proposal_tools", help="Grant one exact proposal tool in proposal mode; may be repeated")
     assistant_run.add_argument("--json", action="store_true")
     assistant_propose_import = assistant_sub.add_parser("propose-import", help="Create a Review/Action proposal for one local file import")
     assistant_propose_import.add_argument("--source", required=True, help="Exact local source file")
@@ -682,6 +683,7 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_mode = mcp_serve.add_mutually_exclusive_group()
     mcp_mode.add_argument("--read-only", action="store_true", help="Expose read tools only; disable all write and proposal tools")
     mcp_mode.add_argument("--proposal-only", action="store_true", help="Expose read tools and exact approval proposals, but no direct writes")
+    mcp_serve.add_argument("--proposal-tool", action="append", choices=("propose_import", "propose_task"), dest="proposal_tools", help="Grant one exact proposal tool in proposal-only mode; may be repeated")
     mcp_serve.add_argument("--semester", help="Limit read tools to one exact semester folder")
     mcp_serve.add_argument("--course", help="Limit read tools to one exact course ID, code, or name")
     from .study.cli import add_parser as add_study_parser
@@ -706,10 +708,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "mcp":
             from .mcp_server import serve
+            if args.proposal_tools and not args.proposal_only:
+                raise ValueError("--proposal-tool requires --proposal-only")
             return serve(
                 profile=args.profile,
                 read_only=bool(args.read_only),
                 proposal_only=bool(args.proposal_only),
+                proposal_tools={f"academia_{name}" for name in args.proposal_tools} if args.proposal_tools else None,
                 semester=args.semester,
                 course=args.course,
             )
@@ -758,6 +763,17 @@ def dispatch(args: argparse.Namespace) -> int:
                 "write_policy": {
                     "status": "approval_required_for_state_changes",
                     "tools": [descriptor.name for descriptor in WRITE_TOOL_DESCRIPTORS],
+                },
+                "tool_grants": {
+                    "default": "read_only",
+                    "allowed_write_tools": [
+                        {
+                            "name": descriptor.name,
+                            "requires_approval": descriptor.requires_approval,
+                            "confirmation": "review" if descriptor.requires_approval else "host",
+                        }
+                        for descriptor in WRITE_TOOL_DESCRIPTORS
+                    ],
                 },
                 "tools": descriptors(),
             }
@@ -811,11 +827,14 @@ def dispatch(args: argparse.Namespace) -> int:
             if not model:
                 from .study.providers import codex_model, codex_runtime
                 model, _notice = codex_model(codex_runtime())
+            if args.proposal_tools and not args.proposal_mode:
+                raise ValueError("--proposal-tool requires --proposal-mode")
             result = CodexAppServerRuntime(
                 academic_root=root,
                 profile_path=_profile_path(args),
                 model=model,
                 mcp_mode="proposal_only" if args.proposal_mode else "read_only",
+                proposal_tools=tuple(args.proposal_tools) if args.proposal_tools else None,
             ).run(RunRequest(
                 messages=({"role": "user", "content": args.message},),
                 scope=scope,

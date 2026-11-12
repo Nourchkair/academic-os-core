@@ -827,3 +827,19 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .task-proposal-edit-row { margin-top: 13px; }
 .task-proposal-editor { margin-top: 12px; }
+
+.account-card { display: grid; gap: 11px; }
+.account-heading { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
+.account-heading > div { align-items: center; display: flex; flex-wrap: wrap; gap: 9px; }
+.account-heading strong { color: #424242; font-size: 13px; }
+.account-badge { border-radius: 999px; font-size: 9px; font-weight: 750; padding: 5px 8px; text-transform: uppercase; }
+.account-badge.connected { background: #e9f2ec; color: #356b4b; }
+.account-badge.disconnected { background: #f4f0e6; color: #7d6a3e; }
+.account-note { color: #828282; font-size: 11px; line-height: 1.55; margin: 0; }
+.account-privacy { border-top: 1px solid #ededed; color: #979797; font-size: 10px; line-height: 1.5; margin: 2px 0 0; padding-top: 10px; }
+.account-login { background: #fafafa; border: 1px solid #e9e9e9; border-radius: 10px; display: grid; gap: 9px; padding: 12px; }
+.account-login p { color: #6f6f6f; font-size: 11px; margin: 0; }
+.account-code { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; }
+.account-code code { background: #ffffff; border: 1px solid #e2e2e2; border-radius: 7px; color: #3f3f3f; font-size: 15px; letter-spacing: .12em; padding: 8px 11px; }
+.account-code a { color: #5f765f; font-size: 10px; font-weight: 700; }
+.account-error { color: #8b4b45; }

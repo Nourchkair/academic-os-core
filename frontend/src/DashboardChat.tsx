@@ -242,6 +242,14 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
   const [effort, setEffort] = useState('medium')
   const [speed, setSpeed] = useState(localStorage.getItem('academia.chat.speed') || 'standard')
   const [proposalMode, setProposalMode] = useState(() => localStorage.getItem('academia.chat.proposals') === 'true')
+  const [proposalGrants, setProposalGrants] = useState<string[]>(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem('academia.chat.proposalGrants') || '["task","import"]')
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => item === 'task' || item === 'import') : ['task', 'import']
+    } catch {
+      return ['task', 'import']
+    }
+  })
   const [streaming, setStreaming] = useState<StreamState | null>(null)
   const streamRef = useRef<{ controller: AbortController; runId: string | null } | null>(null)
   const streamingRef = useRef<StreamState | null>(null)
@@ -322,6 +330,13 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
     if (!active) return
     active.controller.abort()
     if (active.runId) void api.chatCancel(active.runId).catch(() => undefined)
+  }
+  const toggleProposalGrant = (grant: 'task' | 'import') => {
+    setProposalGrants((current) => {
+      const next = current.includes(grant) ? current.filter((item) => item !== grant) : [...current, grant]
+      localStorage.setItem('academia.chat.proposalGrants', JSON.stringify(next))
+      return next
+    })
   }
   const refreshProposalStatuses = async (current: Message[] = messagesRef.current) => {
     const reviewIds = [...new Set(current.flatMap((message) => message.proposals?.map((proposal) => proposal.review_id) ?? []))]
@@ -687,7 +702,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
         boundedMessages.unshift(message)
         historyLength += message.content.length
       }
-      const chatPayload = { provider, messages: boundedMessages.map(({ role, content }) => ({ role, content })), model: model || defaultModel || null, effort, speed, attachments: uploaded.map((attachment) => ({ name: attachment.name, type: attachment.type, data: attachment.data })), course_context: courseContext, proposal_mode: proposalMode, course_id: courseId || null, semester: semester || null }
+      const chatPayload = { provider, messages: boundedMessages.map(({ role, content }) => ({ role, content })), model: model || defaultModel || null, effort, speed, attachments: uploaded.map((attachment) => ({ name: attachment.name, type: attachment.type, data: attachment.data })), course_context: courseContext, proposal_mode: proposalMode, course_id: courseId || null, semester: semester || null, granted_proposal_tools: proposalMode ? proposalGrants : [] }
       let result: ChatResult
       if (proposalMode && !isTauriEnvironment()) {
         const controller = new AbortController()
@@ -1016,7 +1031,12 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
         </div>
         <div className="chat-composer-wrap">
           {error && <p className="chat-error" role="alert">{error}</p>}
-          {proposalMode && <p className="chat-proposal-mode-note" role="note">Proposal mode is on: the assistant can prepare exact task or import proposals for Review. It cannot approve, execute, or write.</p>}
+          {proposalMode && <div className="chat-proposal-mode-note" role="note">
+            <span>Proposal mode is on. Grant only what the assistant may prepare:</span>
+            <label><input type="checkbox" checked={proposalGrants.includes('task')} onChange={() => toggleProposalGrant('task')} /> Tasks</label>
+            <label><input type="checkbox" checked={proposalGrants.includes('import')} onChange={() => toggleProposalGrant('import')} /> Imports</label>
+            <small>{proposalGrants.length ? 'It cannot approve, execute, or write.' : 'Select at least one proposal tool before sending.'}</small>
+          </div>}
           {showAttachMenu && <div className="chat-attach-menu" role="menu" aria-label="Add to this chat">
             <button role="menuitem" onClick={() => { setShowAttachMenu(false); fileInputRef.current?.click() }}><span>↑</span><span><strong>Add a file to this chat</strong><small>Images, PDF, DOCX, PPTX, and text · 12 MB each</small></span></button>
             <button role="menuitem" onClick={() => { setShowAttachMenu(false); setShowSourcePicker(true) }}><span>▤</span><span><strong>Add Academia sources</strong><small>Choose materials from any class</small></span></button>
@@ -1050,7 +1070,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
                   </svg>
                 </button>}
                 {streaming && <button type="button" className="chat-cancel-run" onClick={cancelRun} aria-label="Cancel assistant run"><span aria-hidden="true">■</span> Stop</button>}
-                <button className="chat-send" type="submit" disabled={busy || studyGenerationInProgress || (!draft.trim() && !attachments.length) || !isAvailable} aria-label={busy || studyGenerationInProgress ? 'Sending message' : 'Send message'} aria-busy={busy || studyGenerationInProgress}>{busy || studyGenerationInProgress ? <span className="chat-loading-dots compact" aria-hidden="true"><span /><span /><span /></span> : '↑'}</button>
+                <button className="chat-send" type="submit" disabled={busy || studyGenerationInProgress || (!draft.trim() && !attachments.length) || !isAvailable || (proposalMode && proposalGrants.length === 0)} aria-label={busy || studyGenerationInProgress ? 'Sending message' : 'Send message'} aria-busy={busy || studyGenerationInProgress}>{busy || studyGenerationInProgress ? <span className="chat-loading-dots compact" aria-hidden="true"><span /><span /><span /></span> : '↑'}</button>
               </div>
             </div>
           </form>

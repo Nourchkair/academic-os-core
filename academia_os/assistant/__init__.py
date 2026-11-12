@@ -13,11 +13,12 @@ from .contracts import (
     SideEffect,
     ToolCall,
     ToolDescriptor,
+    ToolGrant,
     ToolResult,
 )
 from .policy import PolicyContext, PolicyDecision, PolicyDenied, authorize_tool, policy_context
 from .providers import CancelToken, CodexAppServerRuntime, FakeProvider, ProviderAdapter, ProviderRequest, ProviderResponse, ProviderToolCall
-from .registry import READ_TOOLS, descriptor, descriptors, invoke
+from .registry import READ_TOOLS, WRITE_TOOLS, descriptor, descriptors, invoke, invoke_granted, write_descriptors
 from .runtime import RunController, tools_for_scope
 from .tools.read import ReadContext
 from .tools.write import IMPORT_PROPOSAL_DESCRIPTOR, WRITE_TOOL_DESCRIPTORS
@@ -50,12 +51,16 @@ __all__ = [
     "SideEffect",
     "ToolCall",
     "ToolDescriptor",
+    "ToolGrant",
     "ToolResult",
     "WRITE_TOOL_DESCRIPTORS",
+    "WRITE_TOOLS",
     "authorize_tool",
     "descriptor",
     "descriptors",
     "invoke",
+    "invoke_granted",
     "policy_context",
     "tools_for_scope",
+    "write_descriptors",
 ]

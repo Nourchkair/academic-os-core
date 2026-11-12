@@ -162,3 +162,48 @@ def test_tools_for_scope_narrows_course_and_source_tools() -> None:
     assert "course.list" not in course_names
     assert "review.attention" not in course_names
     assert {tool["name"] for tool in tools_for_scope(source_scope())} == {"library.get"}
+
+
+def test_write_tools_are_hidden_without_an_explicit_grant(tmp_path: Path) -> None:
+    context, _ = make_context(tmp_path)
+    provider = FakeProvider([
+        {"tool_calls": [{"name": "task.propose", "arguments": {"action": "create", "title": "Read Week 5", "course": COURSE, "evidence_source": "Course reading list", "evidence_path": SOURCE}}]},
+        {"text": "I could not use an ungranted proposal tool."},
+    ])
+
+    result = RunController(context, provider).run(user_request(course_scope()))
+
+    assert result.status == "completed"
+    assert all(tool["name"] not in {"task.propose", "import.propose", "domain.propose", "study.create"} for tool in provider.requests[0].tools)
+    tool_event = next(event for event in result.events if event.event_type.value == "tool_result")
+    assert tool_event.data["ok"] is False
+    assert tool_event.data["code"] == "tool_not_granted"
+
+
+def test_granted_task_proposal_routes_through_review_without_writing(tmp_path: Path) -> None:
+    from academia_os.assistant import ToolGrant
+
+    context, root = make_context(tmp_path)
+    grant = ToolGrant(tools=frozenset({"task.propose"}))
+    provider = FakeProvider([
+        {"tool_calls": [{"name": "task.propose", "arguments": {
+            "action": "create",
+            "title": "Read Week 5",
+            "course": COURSE,
+            "due_date": "2026-10-01",
+            "evidence_source": "Course reading list",
+            "evidence_path": SOURCE,
+        }}]},
+        {"text": "I prepared the proposal."},
+    ])
+
+    result = RunController(context, provider).run(user_request(course_scope()), grants=grant)
+
+    assert result.status == "completed"
+    assert "task.propose" in {tool["name"] for tool in provider.requests[0].tools}
+    proposal = result.tool_results[0].data
+    assert proposal["status"] == "approval_required"
+    assert proposal["review_id"]
+    assert not (root / "Fall 2026" / "SEMESTER_TASKS.md").exists()
+    tool_event = next(event for event in result.events if event.event_type.value == "tool_result")
+    assert tool_event.data["data"]["review_id"] == proposal["review_id"]

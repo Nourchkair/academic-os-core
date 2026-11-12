@@ -14,6 +14,7 @@ from academia_os.assistant.contracts import (
     ScopeKind,
     SideEffect,
     ToolDescriptor,
+    ToolGrant,
     validate_json_schema,
     validate_tool_call,
 )
@@ -159,3 +160,22 @@ def test_run_request_accepts_bounded_context_and_local_images() -> None:
         RunRequest(messages=({"role": "user", "content": "hello"},), scope=Scope(), image_paths=[f"/tmp/{index}.png" for index in range(6)])
     with pytest.raises(AssistantError, match="image path"):
         RunRequest(messages=({"role": "user", "content": "hello"},), scope=Scope(), image_paths=[""])
+
+
+def test_json_schema_validator_accepts_nullable_types() -> None:
+    schema = {"type": ["string", "null"], "maxLength": 5}
+    validate_json_schema("ok", schema)
+    validate_json_schema(None, schema)
+    with pytest.raises(AssistantError, match="allowed type"):
+        validate_json_schema(5, schema)
+    with pytest.raises(AssistantError, match="too long"):
+        validate_json_schema("too-long", schema)
+
+
+def test_tool_grants_are_exact_and_validated() -> None:
+    grant = ToolGrant(tools=frozenset({"task.propose"}))
+    assert grant.allows("task.propose")
+    assert not grant.allows("import.propose")
+    assert ToolGrant.none().tools == frozenset()
+    with pytest.raises(AssistantError, match="non-empty"):
+        ToolGrant(tools=frozenset({""}))

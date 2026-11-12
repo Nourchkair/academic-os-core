@@ -47,3 +47,15 @@ def test_assistant_capabilities_cli_reports_the_provider_gate_as_pending() -> No
     assert value["providers"][0]["writes"] is False
     assert value["providers"][0]["proposal_mode"] is True
     assert len(value["tools"]) == 12
+
+
+def test_assistant_capabilities_reports_exact_write_grants() -> None:
+    result = run_cli("assistant", "capabilities", "--json")
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    grants = {item["name"]: item for item in value["tool_grants"]["allowed_write_tools"]}
+    assert value["tool_grants"]["default"] == "read_only"
+    assert grants["task.propose"]["requires_approval"] is True
+    assert grants["task.propose"]["confirmation"] == "review"
+    assert grants["study.create"]["requires_approval"] is False
+    assert grants["study.create"]["confirmation"] == "host"

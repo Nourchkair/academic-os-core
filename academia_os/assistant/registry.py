@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping
 
 from .contracts import (
@@ -9,13 +10,25 @@ from .contracts import (
     Disclosure,
     PermissionClass,
     Scope,
+    ScopeKind,
     SideEffect,
     ToolDescriptor,
+    ToolGrant,
     ToolResult,
     validate_tool_call,
 )
 from .policy import PolicyContext, PolicyDenied, authorize_tool, resolve_course, scope_within
 from .tools import read
+from .tools.write import (
+    DOMAIN_CHANGE_DESCRIPTOR,
+    IMPORT_PROPOSAL_DESCRIPTOR,
+    STUDY_CREATE_DESCRIPTOR,
+    TASK_PROPOSAL_DESCRIPTOR,
+    create_study_set,
+    propose_domain_change,
+    propose_import,
+    propose_task_change,
+)
 from ..source_identity import SourceIdentityError, validate_source_id
 
 
@@ -219,6 +232,97 @@ def descriptors() -> list[dict[str, Any]]:
     return [spec.descriptor.as_dict() for spec in READ_TOOLS.values()]
 
 
+def _propose_import_handler(context: read.ReadContext, arguments: dict[str, Any]) -> ToolResult:
+    return ToolResult(
+        tool="import.propose",
+        data=propose_import(
+            context,
+            source_path=arguments["source_path"],
+            target_id=arguments["target_id"],
+            source_label=arguments.get("source_label"),
+        ),
+    )
+
+
+def _propose_task_handler(context: read.ReadContext, arguments: dict[str, Any]) -> ToolResult:
+    optional = {
+        key: arguments[key]
+        for key in ("task_id", "title", "course", "due_date", "due_time", "source_location", "confidence", "authority")
+        if key in arguments
+    }
+    return ToolResult(
+        tool="task.propose",
+        data=propose_task_change(
+            context,
+            action=arguments["action"],
+            evidence_source=arguments["evidence_source"],
+            evidence_path=arguments["evidence_path"],
+            **optional,
+        ),
+    )
+
+
+def _propose_domain_handler(context: read.ReadContext, arguments: dict[str, Any]) -> ToolResult:
+    optional = {
+        key: arguments[key]
+        for key in ("source_location", "confidence", "authority")
+        if key in arguments
+    }
+    return ToolResult(
+        tool="domain.propose",
+        data=propose_domain_change(
+            context,
+            course=arguments["course"],
+            entity_type=arguments["entity_type"],
+            entity_id=arguments["entity_id"],
+            field=arguments["field"],
+            after=arguments["after"],
+            evidence_source=arguments["evidence_source"],
+            evidence_path=arguments["evidence_path"],
+            **optional,
+        ),
+    )
+
+
+def _create_study_handler(context: read.ReadContext, arguments: dict[str, Any]) -> ToolResult:
+    optional = {
+        key: arguments[key]
+        for key in ("source_ids", "query", "pages", "limit", "deep")
+        if key in arguments
+    }
+    return ToolResult(
+        tool="study.create",
+        data=create_study_set(
+            context,
+            course=arguments["course"],
+            payload=arguments["payload"],
+            **optional,
+        ),
+    )
+
+
+WRITE_TOOLS: dict[str, ToolSpec] = {
+    spec.descriptor.name: spec
+    for spec in [
+        ToolSpec(IMPORT_PROPOSAL_DESCRIPTOR, _propose_import_handler),
+        ToolSpec(STUDY_CREATE_DESCRIPTOR, _create_study_handler),
+        ToolSpec(DOMAIN_CHANGE_DESCRIPTOR, _propose_domain_handler),
+        ToolSpec(TASK_PROPOSAL_DESCRIPTOR, _propose_task_handler),
+    ]
+}
+
+
+def write_descriptors() -> list[dict[str, Any]]:
+    return [spec.descriptor.as_dict() for spec in WRITE_TOOLS.values()]
+
+
+def write_spec(name: str) -> ToolSpec:
+    try:
+        return WRITE_TOOLS[name]
+    except KeyError as exc:
+        raise AssistantError(f"unknown assistant write tool: {name}", code="unknown_tool") from exc
+
+
 def descriptor(name: str) -> ToolDescriptor:
     try:
         return READ_TOOLS[name].descriptor
@@ -260,3 +364,84 @@ def invoke(
     if not decision.allowed:
         raise PolicyDenied(decision.reason)
     return spec.handler(context, values)
+
+
+def _validate_write_scope(name: str, values: dict[str, Any], context: read.ReadContext, parent_scope: Scope | None) -> None:
+    if parent_scope is None or parent_scope.kind is ScopeKind.WORKSPACE:
+        return
+    if parent_scope.kind is ScopeKind.SOURCE:
+        raise PolicyDenied("write tools are unavailable in source scope", reason="tool_not_granted")
+    if parent_scope.kind is ScopeKind.COURSE:
+        course_id = str(parent_scope.course_id)
+        if name == "import.propose":
+            target = str(values.get("target_id") or "")
+            if target != f"{parent_scope.semester}/{course_id}/00_INBOX":
+                raise PolicyDenied("import target is outside the selected course", reason="scope_denied")
+            return
+        if name == "task.propose":
+            if values.get("action") == "update":
+                from ..tasks import TaskStore
+                try:
+                    task = TaskStore(context.root, context.semester).get(str(values.get("task_id") or ""))
+                except (KeyError, ValueError) as exc:
+                    raise AssistantError(str(exc), code="unknown_task") from exc
+                if task.get("course_id") != course_id:
+                    raise PolicyDenied("task is outside the selected course", reason="scope_denied")
+            if values.get("course"):
+                try:
+                    requested = resolve_course(context.policy, str(values["course"]))
+                except PolicyDenied:
+                    raise
+                if str(requested["id"]) != course_id:
+                    raise PolicyDenied("course is outside the selected course", reason="scope_denied")
+            else:
+                values["course"] = course_id
+            return
+        if name in {"domain.propose", "study.create"}:
+            try:
+                requested = resolve_course(context.policy, str(values.get("course") or ""))
+            except PolicyDenied as exc:
+                raise AssistantError(str(exc), code="unknown_course") from exc
+            if str(requested["id"]) != course_id:
+                raise PolicyDenied("course is outside the selected course", reason="scope_denied")
+            return
+    if parent_scope.kind is ScopeKind.SEMESTER:
+        if name == "import.propose":
+            target = str(values.get("target_id") or "")
+            if not target.startswith(f"{parent_scope.semester}/"):
+                raise PolicyDenied("import target is outside the selected semester", reason="scope_denied")
+
+
+def invoke_granted(
+    name: str,
+    arguments: Any,
+    context: read.ReadContext,
+    *,
+    grants: ToolGrant | None,
+    parent_scope: Scope | None = None,
+    confirm: Callable[[ToolDescriptor, dict[str, Any]], bool] | None = None,
+) -> ToolResult:
+    """Invoke a read tool or one explicitly granted write/proposal tool."""
+    if name in READ_TOOLS:
+        return invoke(name, arguments, context, parent_scope=parent_scope)
+    spec = WRITE_TOOLS.get(name)
+    if spec is None:
+        raise AssistantError(f"unknown assistant tool: {name}", code="unknown_tool")
+    if grants is None or not grants.allows(name):
+        raise AssistantError("this tool was not granted by the host", code="tool_not_granted")
+    values = validate_tool_call(spec.descriptor, arguments)
+    _validate_write_scope(name, values, context, parent_scope)
+    if not spec.descriptor.requires_approval:
+        if confirm is None or not confirm(spec.descriptor, dict(values)):
+            raise AssistantError("this write requires explicit host confirmation", code="confirmation_required")
+    result = spec.handler(context, values)
+    if result.scope is None and parent_scope is not None:
+        result = ToolResult(
+            tool=result.tool,
+            data=result.data,
+            scope=parent_scope,
+            citations=result.citations,
+            warnings=result.warnings,
+            truncated=result.truncated,
+        )
+    return result

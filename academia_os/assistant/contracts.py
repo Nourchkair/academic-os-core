@@ -218,6 +218,27 @@ class RunEvent:
 
 
 @dataclass(frozen=True)
+class ToolGrant:
+    """Exact tool permissions granted by the host for one assistant run."""
+
+    tools: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        tools = frozenset(self.tools)
+        for name in tools:
+            if not isinstance(name, str) or not name.strip():
+                raise AssistantError("tool grants must be non-empty tool names", code="invalid_grant")
+        object.__setattr__(self, "tools", tools)
+
+    def allows(self, name: str) -> bool:
+        return name in self.tools
+
+    @classmethod
+    def none(cls) -> "ToolGrant":
+        return cls()
+
+
+@dataclass(frozen=True)
 class RunRequest:
     messages: tuple[dict[str, str], ...]
     scope: Scope
@@ -276,6 +297,33 @@ def validate_json_schema(value: Any, schema: Mapping[str, Any], *, path: str = "
     """Validate the small JSON Schema subset used by Academia tool contracts."""
 
     expected = schema.get("type")
+    if isinstance(expected, list):
+        matched = None
+        for candidate in expected:
+            if candidate == "null" and value is None:
+                matched = candidate
+                break
+            if candidate == "string" and isinstance(value, str):
+                matched = candidate
+                break
+            if candidate == "integer" and isinstance(value, int) and not isinstance(value, bool):
+                matched = candidate
+                break
+            if candidate == "number" and isinstance(value, (int, float)) and not isinstance(value, bool):
+                matched = candidate
+                break
+            if candidate == "boolean" and isinstance(value, bool):
+                matched = candidate
+                break
+            if candidate == "object" and isinstance(value, dict):
+                matched = candidate
+                break
+            if candidate == "array" and isinstance(value, list):
+                matched = candidate
+                break
+        if matched is None:
+            raise AssistantError(f"{path} does not match any allowed type", code="invalid_arguments")
+        expected = matched
     if expected is not None:
         if expected == "object":
             if not isinstance(value, dict):

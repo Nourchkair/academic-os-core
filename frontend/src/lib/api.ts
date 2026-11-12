@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, TaskInput, TaskListPayload, TaskProposalAmendment, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
+import type { AccountStatus, ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, TaskInput, TaskListPayload, TaskProposalAmendment, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
@@ -203,6 +203,10 @@ export const api = {
   chat: <T>(payload: Record<string, unknown>) => isTauriEnvironment() ? invoke<string>('academia_chat', { payload }).then((raw) => JSON.parse(raw) as T) : browserChat(payload) as Promise<T>,
   chatStream: <T>(payload: Record<string, unknown>, onEvent: (event: ChatStreamEvent) => void, signal?: AbortSignal) => browserChatStream<T>(payload, onEvent, signal),
   chatCancel: (runId: string) => fetch('/api/v1/chat/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ run_id: runId }) }).then(readJsonResponse<{ run_id: string; cancelled: boolean }>),
+  accountStatus: () => fetch('/api/v1/account').then(readJsonResponse<AccountStatus>),
+  accountLogin: () => fetch('/api/v1/account/login', { method: 'POST' }).then(readJsonResponse<AccountStatus>),
+  accountLoginCancel: () => fetch('/api/v1/account/login/cancel', { method: 'POST' }).then(readJsonResponse<AccountStatus>),
+  accountLogout: () => fetch('/api/v1/account/logout', { method: 'POST' }).then(readJsonResponse<AccountStatus>),
   chatProviders: <T>() => isTauriEnvironment() ? command<T>('study', ['providers']) : fetch('/api/v1/chat/providers').then(readJsonResponse<T>),
   status: () => command<StatusPayload>('status'),
   startupStatus: () => command<StatusPayload>('status', ['--fast']),

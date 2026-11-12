@@ -344,8 +344,21 @@ export type AgentStatus = {
   dedicated_adapter?: string
 }
 
-export type StatusPayload = {
-  version: string
+export type AccountStatus = {
+  provider: string
+  available: boolean
+  authenticated: boolean
+  status: string
+  account: { email?: string | null; plan_type?: string | null; workspace_name?: string | null } | null
+  login_id?: string | null
+  verification_url?: string | null
+  user_code?: string | null
+  error?: string | null
+  notice?: string | null
+  updated_at?: string
+}
+
+export type StatusPayload = {  version: string
   profile: string
   student: WorkspaceSnapshot['student']
   workspace: WorkspaceSnapshot

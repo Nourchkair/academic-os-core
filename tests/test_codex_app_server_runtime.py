@@ -100,6 +100,16 @@ def test_read_only_mcp_command_is_the_default(tmp_path: Path, monkeypatch: pytes
     proposal = CodexAppServerRuntime(academic_root=root, profile_path=profile, mcp_mode="proposal_only")
     assert "--proposal-only" in proposal._resolved_mcp_command()
 
+    granted = CodexAppServerRuntime(
+        academic_root=root,
+        profile_path=profile,
+        mcp_mode="proposal_only",
+        proposal_tools=("propose_task",),
+    )
+    command = granted._resolved_mcp_command()
+    assert command[-2:] == ["--proposal-tool", "propose_task"]
+    assert "--proposal-tool" in command and "propose_import" not in command
+
 
 def test_turn_carries_context_images_effort_and_fast_tier(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     capture = tmp_path / "turn.json"

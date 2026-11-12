@@ -189,6 +189,8 @@ class DashboardServer:
         self.runner = runner or self._default_runner
         self.chat_runs: dict[str, Any] = {}
         self._chat_runs_lock = threading.Lock()
+        from .assistant.account import CodexAccountManager
+        self.account_manager = CodexAccountManager()
         server_class = _DashboardHTTPServerV6 if ":" in self.host else _DashboardHTTPServer
         self._httpd = server_class((self.host, port), _DashboardRequestHandler)
         self.allowed_origins = _allowed_origins(self.host, self.port)
@@ -238,6 +240,7 @@ class DashboardServer:
         self._httpd.serve_forever()
 
     def shutdown(self) -> None:
+        self.account_manager.close()
         self._httpd.shutdown()
 
     def server_close(self) -> None:
@@ -386,6 +389,8 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 self._handle_file(origin, head_only=False)
             elif self.request_path == "/api/v1/chat/providers":
                 self._handle_chat_providers(origin)
+            elif self.request_path == "/api/v1/account":
+                self._handle_account(origin)
             else:
                 self._send_api_error(
                     DashboardRequestError(404, "NotFound", "API endpoint not found"),
@@ -426,6 +431,15 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             return
         if self.request_path == "/api/v1/chat/cancel":
             self._handle_chat_cancel(origin)
+            return
+        if self.request_path == "/api/v1/account/login":
+            self._handle_account_action(origin, "login")
+            return
+        if self.request_path == "/api/v1/account/login/cancel":
+            self._handle_account_action(origin, "cancel")
+            return
+        if self.request_path == "/api/v1/account/logout":
+            self._handle_account_action(origin, "logout")
             return
         if self.request_path != "/api/v1/command":
             if self._is_api_request():
@@ -600,6 +614,25 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
         except (OSError, subprocess.TimeoutExpired, ValueError):
             self._send_json(200, {"available": False, "models": [], "default_model": None,
                                   "provider": "Codex CLI using ChatGPT sign-in"}, cors_origin=origin)
+
+    def _handle_account(self, origin: str | None) -> None:
+        try:
+            self._send_json(200, self.dashboard.account_manager.status(), cors_origin=origin)
+        except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError) as exc:
+            self._send_json(200, {"provider": "codex", "available": False, "authenticated": False, "status": "failed", "error": str(exc)}, cors_origin=origin)
+
+    def _handle_account_action(self, origin: str | None, action: str) -> None:
+        try:
+            manager = self.dashboard.account_manager
+            if action == "login":
+                value = manager.start_login()
+            elif action == "cancel":
+                value = manager.cancel_login()
+            else:
+                value = manager.logout()
+            self._send_json(200, value, cors_origin=origin)
+        except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(502, "AccountUnavailable", str(exc)), cors_origin=origin)
 
     def _handle_chat(self, origin: str | None) -> None:
         try:

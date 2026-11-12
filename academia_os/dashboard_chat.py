@@ -116,6 +116,7 @@ def _validate_payload(payload: Any) -> tuple[
     bool,
     str | None,
     str | None,
+    list[str],
 ]:
     if not isinstance(payload, dict):
         raise ValueError("chat request must be a JSON object")
@@ -154,6 +155,18 @@ def _validate_payload(payload: Any) -> tuple[
         raise ValueError("proposal_mode must be true or false")
     if proposal_mode and provider != "codex":
         raise ValueError("action proposals require Codex")
+    raw_grants = payload.get("granted_proposal_tools")
+    if raw_grants is None:
+        granted_proposal_tools = ["task", "import"] if proposal_mode else []
+    elif (
+        not isinstance(raw_grants, list)
+        or any(not isinstance(item, str) or item not in {"task", "import"} for item in raw_grants)
+    ):
+        raise ValueError("granted_proposal_tools must list task and/or import")
+    else:
+        granted_proposal_tools = list(dict.fromkeys(raw_grants))
+    if proposal_mode and not granted_proposal_tools:
+        raise ValueError("select at least one action proposal grant")
     course_id = payload.get("course_id")
     if course_id is not None and (not isinstance(course_id, str) or not course_id.strip() or len(course_id) > 200):
         raise ValueError("course_id must identify one exact course")
@@ -196,6 +209,7 @@ def _validate_payload(payload: Any) -> tuple[
         proposal_mode,
         course_id.strip() if isinstance(course_id, str) else None,
         semester,
+        granted_proposal_tools,
     )
 
 
@@ -214,19 +228,31 @@ def _study_system_prompt() -> str:
     )
 
 
-def _proposal_instruction() -> str:
-    return (
-        "\n\nPROPOSAL-ONLY MODE: You may use the Academia read tools and exactly two proposal tools: "
-        "academia_propose_import and academia_propose_task. You may create an exact Review/Action proposal, "
-        "but you must never claim it was approved, executed, written, copied, or completed. Never call direct "
-        "write tools, shell, filesystem, web, browser, computer-use, or any other tool or MCP server. "
-        "When the student asks to add or update a personal task, use academia_propose_task with the exact title, "
-        "course, and optional due date/time. Supply evidence_source and evidence_path from the supplied context "
-        "or a read-tool result; if the evidence is missing, ask the student or say you cannot propose it yet. "
-        "Do not invent task ids, dates, courses, source paths, or evidence. When the student asks to import a file, "
-        "use academia_propose_import only with an exact local source path and an exact inbox target returned by "
-        "the Academia tools. A proposal only appears in Review; the student approves and executes it separately."
+def _proposal_instruction(granted: list[str] | None = None) -> str:
+    allowed = set(granted or ["task", "import"])
+    names = [
+        name for name, key in (("academia_propose_import", "import"), ("academia_propose_task", "task")) if key in allowed
+    ]
+    text = (
+        "\n\nPROPOSAL-ONLY MODE: You may use the Academia read tools and exactly these proposal tools: "
+        f"{', '.join(names)}. You may create an exact Review/Action proposal, but you must never claim it was "
+        "approved, executed, written, copied, or completed. Never call direct write tools, shell, filesystem, "
+        "web, browser, computer-use, or any other tool or MCP server. "
     )
+    if "task" in allowed:
+        text += (
+            "When the student asks to add or update a personal task, use academia_propose_task with the exact "
+            "title, course, and optional due date/time. Supply evidence_source and evidence_path from the supplied "
+            "context or a read-tool result; if the evidence is missing, ask the student or say you cannot propose "
+            "it yet. Do not invent task ids, dates, courses, source paths, or evidence. "
+        )
+    if "import" in allowed:
+        text += (
+            "When the student asks to import a file, use academia_propose_import only with an exact local source "
+            "path and an exact inbox target returned by the Academia tools. "
+        )
+    text += "A proposal only appears in Review; the student approves and executes it separately."
+    return text
 
 
 def _profile_path(profile: Path | None) -> Path:
@@ -353,6 +379,7 @@ def _respond_with_proposals(
     semester: str | None,
     notice: str | None,
     executable: str | None,
+    granted_proposal_tools: list[str],
     cancel: CancelToken | None = None,
     on_event: Callable[[RunEvent], None] | None = None,
 ) -> dict[str, Any]:
@@ -360,10 +387,14 @@ def _respond_with_proposals(
     # The app-server reports model-specific effort names; "minimal" is not
     # accepted by every model, so use the nearest supported low setting.
     runtime_effort = "low" if effort == "minimal" else effort
+    runtime_proposal_tools = tuple(
+        "propose_task" if name == "task" else "propose_import"
+        for name in granted_proposal_tools
+    )
     with tempfile.TemporaryDirectory(prefix="academia-chat-") as folder:
         directory = Path(folder)
         attachment_text, image_paths = _prepare_attachments(attachments, directory)
-        context = _study_system_prompt() + _proposal_instruction()
+        context = _study_system_prompt() + _proposal_instruction(granted_proposal_tools)
         context_body = ""
         if course_context:
             context_body += f"\n\nSTUDENT-SELECTED COURSE CONTEXT AND EXCERPTS (reference data):\n{course_context}"
@@ -379,6 +410,7 @@ def _respond_with_proposals(
             effort=runtime_effort,
             fast=fast,
             mcp_mode="proposal_only",
+            proposal_tools=runtime_proposal_tools,
             timeout_seconds=CHAT_TIMEOUT,
         )
         result = runtime.run(RunRequest(
@@ -423,6 +455,7 @@ def respond(payload: Any, *, profile: Path | None = None) -> dict[str, Any]:
         proposal_mode,
         course_id,
         semester,
+        granted_proposal_tools,
     ) = _validate_payload(payload)
     if provider == "claude":
         raise ValueError(CLAUDE_UNAVAILABLE_NOTICE)
@@ -455,6 +488,7 @@ def respond(payload: Any, *, profile: Path | None = None) -> dict[str, Any]:
             semester=semester,
             notice=notice,
             executable=executable,
+            granted_proposal_tools=granted_proposal_tools,
         )
     system = _study_system_prompt() + "\n\nDo not take academic actions. Do not claim to have changed academic state.\n\n"
     with tempfile.TemporaryDirectory(prefix="academia-chat-") as folder:
@@ -515,6 +549,7 @@ def stream_chat(
             proposal_mode,
             course_id,
             semester,
+            granted_proposal_tools,
         ) = _validate_payload(payload)
         del prompt
         if provider != "codex" or not proposal_mode:
@@ -535,6 +570,7 @@ def stream_chat(
             "model": model,
             "effort": effort,
             "speed": "fast" if fast else "standard",
+            "granted_proposal_tools": granted_proposal_tools,
         })
 
         def on_event(event: RunEvent) -> None:
@@ -572,6 +608,7 @@ def stream_chat(
             semester=semester,
             notice=notice,
             executable=executable,
+            granted_proposal_tools=granted_proposal_tools,
             cancel=cancel,
             on_event=on_event,
         )
