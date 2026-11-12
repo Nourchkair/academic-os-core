@@ -42,7 +42,7 @@ def available_catalog() -> dict[str, Any]:
 
 
 def test_validate_payload_accepts_minimal_codex_chat() -> None:
-    prompt, messages, provider, model, effort, fast, attachments, context, proposal_mode, course_id, semester, grants = _validate_payload(payload())
+    prompt, messages, provider, model, effort, fast, attachments, context, proposal_mode, course_id, semester, grants, web_search = _validate_payload(payload())
 
     assert prompt == "USER: hello"
     assert messages == [{"role": "user", "content": "hello"}]
@@ -56,6 +56,13 @@ def test_validate_payload_accepts_minimal_codex_chat() -> None:
     assert course_id is None
     assert semester is None
     assert grants == []
+    assert web_search is False
+
+
+def test_validate_payload_requires_explicit_boolean_web_search() -> None:
+    assert _validate_payload(payload(web_search=True))[-1] is True
+    with pytest.raises(ValueError, match="web_search"):
+        _validate_payload(payload(web_search="yes"))
 
 
 def test_validate_payload_bounds_messages_and_prompt_size() -> None:
@@ -174,6 +181,25 @@ def test_respond_runs_constrained_codex_and_returns_answer(monkeypatch: pytest.M
     assert "OPENAI_API_KEY" not in captured["environment"]
 
 
+def test_respond_enables_live_web_search_only_with_the_grant(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_run(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        captured["command"] = command
+        output = Path(command[command.index("--output-last-message") + 1])
+        output.write_text("Searched answer.", encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(dashboard_chat, "provider_catalog", available_catalog)
+    monkeypatch.setattr(dashboard_chat, "codex_runtime", lambda: {"executable": "/fake/codex", "models": [], "recommended_model": None})
+    monkeypatch.setattr(dashboard_chat, "codex_model", lambda runtime, requested: ("test-model", None))
+    monkeypatch.setattr(dashboard_chat.subprocess, "run", fake_run)
+
+    respond(payload(web_search=True))
+    assert 'web_search="live"' in captured["command"]
+    assert 'web_search="disabled"' not in captured["command"]
+
+
 def test_respond_reports_plan_limit_and_generic_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(dashboard_chat, "provider_catalog", available_catalog)
     monkeypatch.setattr(dashboard_chat, "codex_runtime", lambda: {"executable": "/fake/codex", "models": [], "recommended_model": None})
@@ -217,7 +243,7 @@ def test_respond_reports_timeout_and_empty_answer(monkeypatch: pytest.MonkeyPatc
 
 
 def test_validate_payload_accepts_and_bounds_proposal_scope() -> None:
-    *_, proposal_mode, course_id, semester, grants = _validate_payload(
+    *_, proposal_mode, course_id, semester, grants, web_search = _validate_payload(
         payload(proposal_mode=True, course_id="POL 2103", semester="Fall 2026")
     )
     assert proposal_mode is True
@@ -225,7 +251,7 @@ def test_validate_payload_accepts_and_bounds_proposal_scope() -> None:
     assert semester == "Fall 2026"
     assert grants == ["task", "import"]
 
-    *_, grants = _validate_payload(payload(proposal_mode=True, granted_proposal_tools=["task"]))
+    *_, grants, web_search = _validate_payload(payload(proposal_mode=True, granted_proposal_tools=["task"]))
     assert grants == ["task"]
     with pytest.raises(ValueError, match="at least one"):
         _validate_payload(payload(proposal_mode=True, granted_proposal_tools=[]))

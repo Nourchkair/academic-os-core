@@ -83,7 +83,7 @@ Remaining within this stage: ensure import/artefact actions have clear student c
 
 ### Stage 4 — Integrations and automation
 
-**Not implemented.** Add browser acquisition and Google services incrementally. Begin with visible portal read/download and read-only calendar/email/document access. Add calendar edits only through approval, duplicate checks, and verification. Never submit schoolwork or send school-account messages. Background jobs require a separate, visible opt-in and local audit trail.
+**Partially implemented.** Study chat can explicitly enable Codex's built-in live web search for a conversation; this is a Codex host capability, not an Academia search connector, and results remain external evidence that must be cited. Add portal read/download and Google services incrementally. Begin with visible portal read/download and read-only calendar/email/document access. Add calendar edits only through approval, duplicate checks, and verification. Never submit schoolwork or send school-account messages. Background jobs require a separate, visible opt-in and local audit trail.
 
 ## Completion criteria
 

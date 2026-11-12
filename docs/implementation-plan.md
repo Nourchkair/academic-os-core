@@ -158,7 +158,7 @@ This is the next product phase agreed with the student. The app remains local-fi
 
 ### Stage D — External integrations and acquisition
 
-**Not implemented.** Add integrations one at a time. Begin with visible, read-only portal/browser acquisition and read-only Google services. The portal-to-Academia flow must confirm the exact downloaded file and inbox destination, preserve originals, record provenance, process locally, and verify the result. Calendar writes require duplicate detection and explicit approval. School submissions, school-account messages, credential access, and payments remain prohibited.
+**Partially implemented.** Study chat can explicitly enable Codex's built-in live web search for a conversation and must describe it as a Codex capability, not an Academia connector. Add other integrations one at a time. Begin with visible, read-only portal/browser acquisition and read-only Google services. The portal-to-Academia flow must confirm the exact downloaded file and inbox destination, preserve originals, record provenance, process locally, and verify the result. Calendar writes require duplicate detection and explicit approval. School submissions, school-account messages, credential access, and payments remain prohibited.
 
 ### Stage E — Cross-host verification and release
 

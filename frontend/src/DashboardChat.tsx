@@ -242,6 +242,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
   const [effort, setEffort] = useState('medium')
   const [speed, setSpeed] = useState(localStorage.getItem('academia.chat.speed') || 'standard')
   const [proposalMode, setProposalMode] = useState(() => localStorage.getItem('academia.chat.proposals') === 'true')
+  const [webSearch, setWebSearch] = useState(() => localStorage.getItem('academia.chat.webSearch') === 'true')
   const [proposalGrants, setProposalGrants] = useState<string[]>(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem('academia.chat.proposalGrants') || '["task","import"]')
@@ -702,7 +703,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
         boundedMessages.unshift(message)
         historyLength += message.content.length
       }
-      const chatPayload = { provider, messages: boundedMessages.map(({ role, content }) => ({ role, content })), model: model || defaultModel || null, effort, speed, attachments: uploaded.map((attachment) => ({ name: attachment.name, type: attachment.type, data: attachment.data })), course_context: courseContext, proposal_mode: proposalMode, course_id: courseId || null, semester: semester || null, granted_proposal_tools: proposalMode ? proposalGrants : [] }
+      const chatPayload = { provider, messages: boundedMessages.map(({ role, content }) => ({ role, content })), model: model || defaultModel || null, effort, speed, attachments: uploaded.map((attachment) => ({ name: attachment.name, type: attachment.type, data: attachment.data })), course_context: courseContext, proposal_mode: proposalMode, course_id: courseId || null, semester: semester || null, granted_proposal_tools: proposalMode ? proposalGrants : [], web_search: webSearch }
       let result: ChatResult
       if (proposalMode) {
         const controller = new AbortController()
@@ -1055,6 +1056,12 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
                 <ChatPicker id="provider" label="AI" value={provider} ariaLabel="AI provider" options={providerOptions.map((entry) => ({ value: entry.id, label: entry.name, disabled: !entry.available, reason: entry.reason }))} disabled={!providerOptions.length} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { if (value === 'codex') localStorage.setItem('academia.chat.provider', value) }} />
                 <ChatPicker id="model" label="Model" value={model || defaultModel} placeholder="Provider default" ariaLabel="Model" options={modelOptions.map((entry) => ({ value: entry.id, label: entry.name }))} disabled={!modelOptions.length} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { setModel(value); localStorage.setItem(`academia.chat.model.${provider}`, value); if (provider === 'codex') localStorage.setItem('academia.chat.model', value) }} />
                 <ChatPicker id="effort" label="Thinking" value={effort} ariaLabel="Thinking effort" options={thinkingOptions.map(([value, label]) => ({ value, label }))} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { setEffort(value); localStorage.setItem(`academia.chat.effort.${provider}`, value); localStorage.setItem('academia.chat.effort', value) }} />
+                <button className={`chat-search-toggle ${webSearch ? 'active' : ''}`} type="button" aria-label={webSearch ? 'Web search enabled' : 'Enable web search'} aria-pressed={webSearch} disabled={busy || studyGenerationInProgress || provider !== 'codex'} data-tooltip={webSearch ? 'Web search is on · Codex can use live web results; sources stay external and must be cited' : 'Enable web search · Codex may look up live web results for this chat'} data-tooltip-side="top" onClick={() => { const next = !webSearch; setWebSearch(next); localStorage.setItem('academia.chat.webSearch', String(next)) }}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <circle cx="12" cy="12" r="8.5" />
+                    <path d="M3.5 12h17M12 3.5c2.4 2.5 3.6 5.3 3.6 8.5s-1.2 6-3.6 8.5c-2.4-2.5-3.6-5.3-3.6-8.5S9.6 6 12 3.5Z" />
+                  </svg>
+                </button>
                 <button className={`chat-proposal-toggle ${proposalMode ? 'active' : ''}`} type="button" aria-label={proposalMode ? 'Action proposals enabled' : 'Enable action proposals'} aria-pressed={proposalMode} disabled={busy || studyGenerationInProgress} data-tooltip={proposalMode ? 'Proposal mode is on · the assistant can create Review items but cannot approve or execute them' : 'Enable action proposals · the assistant can prepare exact task or import changes for Review'} data-tooltip-side="top" onClick={() => { const next = !proposalMode; setProposalMode(next); localStorage.setItem('academia.chat.proposals', String(next)) }}>
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                     <path d="M7 3.5h7l3 3v14H7z" />

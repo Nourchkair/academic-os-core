@@ -145,3 +145,16 @@ def test_runtime_disables_shell_and_unified_execution(tmp_path: Path, monkeypatc
     assert "features.unified_exec=false" in command
     assert "features.multi_agent=false" in command
     assert 'web_search="disabled"' in command
+
+
+def test_runtime_enables_live_web_search_only_when_granted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime = make_runtime(tmp_path, monkeypatch)
+    granted = CodexAppServerRuntime(
+        academic_root=runtime.academic_root,
+        profile_path=runtime.profile_path,
+        codex_command=runtime.codex_command,
+        mcp_command=runtime.mcp_command,
+        web_search=True,
+    )
+    assert 'web_search="live"' in granted._command()
+    assert 'web_search="disabled"' not in granted._command()

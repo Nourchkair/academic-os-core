@@ -49,6 +49,7 @@ class CodexAppServerRuntime:
     proposal_tools: tuple[str, ...] | None = None
     effort: str | None = None
     fast: bool = False
+    web_search: bool = False
 
     def __post_init__(self) -> None:
         self.academic_root = Path(self.academic_root).expanduser().resolve()
@@ -67,6 +68,8 @@ class CodexAppServerRuntime:
             raise ValueError("effort must be a non-empty reasoning level")
         if not isinstance(self.fast, bool):
             raise ValueError("fast must be true or false")
+        if not isinstance(self.web_search, bool):
+            raise ValueError("web_search must be true or false")
 
     def _resolved_auth_path(self) -> Path:
         if self.auth_path is not None:
@@ -116,6 +119,7 @@ class CodexAppServerRuntime:
         os.chmod(config, 0o600)
 
     def _command(self) -> list[str]:
+        search_mode = "live" if self.web_search else "disabled"
         return [
             *[str(value) for value in self.codex_command],
             "-c", "features.shell_tool=false",
@@ -123,7 +127,7 @@ class CodexAppServerRuntime:
             "-c", "features.multi_agent=false",
             "-c", "features.apps=false",
             "-c", "features.plugins=false",
-            "-c", 'web_search="disabled"',
+            "-c", f'web_search="{search_mode}"',
         ]
 
     def run(self, request: RunRequest, *, cancel: CancelToken | None = None, on_event: Callable[[RunEvent], None] | None = None) -> RunResult:
