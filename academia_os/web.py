@@ -8,12 +8,14 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import urllib.parse
 import webbrowser
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Sequence
+from uuid import uuid4
 
 from .config import SEMESTER_PATTERN, load_config
 from .file_preview import FilePreviewError, IMAGE_EXTENSIONS, IMAGE_MIME_TYPES, MAX_IMAGE_PREVIEW_BYTES, TEXT_EXTENSIONS, preview_file, resolve_library_file
@@ -185,6 +187,8 @@ class DashboardServer:
         self.dist_dir = (dist_dir or Path(__file__).resolve().parents[1] / "frontend" / "dist").expanduser()
         self.command_timeout = command_timeout
         self.runner = runner or self._default_runner
+        self.chat_runs: dict[str, Any] = {}
+        self._chat_runs_lock = threading.Lock()
         server_class = _DashboardHTTPServerV6 if ":" in self.host else _DashboardHTTPServer
         self._httpd = server_class((self.host, port), _DashboardRequestHandler)
         self.allowed_origins = _allowed_origins(self.host, self.port)
@@ -211,6 +215,24 @@ class DashboardServer:
     def _default_runner(self, command: str, args: list[str]) -> CommandResult:
         timeout = max(self.command_timeout, 300.0) if command == "study" and "--deep" in args else self.command_timeout
         return run_cli_command(command, args, profile=self.profile, timeout=timeout)
+
+    def register_chat_run(self, run_id: str, cancel: Any) -> None:
+        with self._chat_runs_lock:
+            if len(self.chat_runs) >= 8:
+                raise ValueError("too many active chat runs; wait for one to finish or cancel it")
+            self.chat_runs[run_id] = cancel
+
+    def unregister_chat_run(self, run_id: str) -> None:
+        with self._chat_runs_lock:
+            self.chat_runs.pop(run_id, None)
+
+    def cancel_chat_run(self, run_id: str) -> bool:
+        with self._chat_runs_lock:
+            cancel = self.chat_runs.get(run_id)
+        if cancel is None:
+            return False
+        cancel.cancel()
+        return True
 
     def serve_forever(self) -> None:
         self._httpd.serve_forever()
@@ -399,6 +421,12 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
         if self.request_path == "/api/v1/chat":
             self._handle_chat(origin)
             return
+        if self.request_path == "/api/v1/chat/stream":
+            self._handle_chat_stream(origin)
+            return
+        if self.request_path == "/api/v1/chat/cancel":
+            self._handle_chat_cancel(origin)
+            return
         if self.request_path != "/api/v1/command":
             if self._is_api_request():
                 self._send_api_error(DashboardRequestError(404, "NotFound", "API endpoint not found"), cors_origin=origin)
@@ -585,6 +613,79 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             self._send_api_error(DashboardRequestError(422, "ChatError", str(exc)), cors_origin=origin)
         except (OSError, subprocess.TimeoutExpired):
             self._send_api_error(DashboardRequestError(502, "ChatUnavailable", "Codex could not complete this chat request"), cors_origin=origin)
+
+    def _handle_chat_stream(self, origin: str | None) -> None:
+        try:
+            payload = self._chat_payload()
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+            return
+        from .assistant.providers.base import CancelToken
+        from .dashboard_chat import stream_chat
+
+        run_id = str(uuid4())
+        cancel = CancelToken()
+        try:
+            self.dashboard.register_chat_run(run_id, cancel)
+        except ValueError as exc:
+            self._send_api_error(DashboardRequestError(429, "TooManyRuns", str(exc)), cors_origin=origin)
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+        self.end_headers()
+        self.close_connection = True
+
+        def emit(value: dict[str, Any]) -> None:
+            body = (json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+            self.wfile.write(body)
+            self.wfile.flush()
+
+        try:
+            stream_chat(
+                payload,
+                profile=self.dashboard.profile,
+                run_id=run_id,
+                cancel=cancel,
+                emit=emit,
+            )
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            cancel.cancel()
+        finally:
+            self.dashboard.unregister_chat_run(run_id)
+
+    def _handle_chat_cancel(self, origin: str | None) -> None:
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.casefold().startswith("application/json"):
+            self._send_api_error(DashboardRequestError(415, "UnsupportedMediaType", "cancel requests must use application/json"), cors_origin=origin)
+            return
+        content_length = self.headers.get("Content-Length")
+        if content_length is None:
+            self._send_api_error(DashboardRequestError(400, "MissingContentLength", "cancel request body is required"), cors_origin=origin)
+            return
+        try:
+            length = int(content_length)
+        except ValueError:
+            self._send_api_error(DashboardRequestError(400, "InvalidContentLength", "Content-Length must be an integer"), cors_origin=origin)
+            return
+        if length < 0 or length > 4096:
+            self._send_api_error(DashboardRequestError(400, "InvalidContentLength", "cancel request body is too large"), cors_origin=origin)
+            return
+        try:
+            value = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._send_api_error(DashboardRequestError(400, "MalformedJSON", "cancel request must be valid UTF-8 JSON"), cors_origin=origin)
+            return
+        run_id = value.get("run_id") if isinstance(value, dict) else None
+        if not isinstance(run_id, str) or not run_id.strip() or len(run_id) > 80:
+            self._send_api_error(DashboardRequestError(400, "InvalidRunID", "run_id must be an exact active chat run id"), cors_origin=origin)
+            return
+        self._send_json(200, {"run_id": run_id, "cancelled": self.dashboard.cancel_chat_run(run_id)}, cors_origin=origin)
 
     def _handle_upload(self, origin: str | None) -> None:
         try:

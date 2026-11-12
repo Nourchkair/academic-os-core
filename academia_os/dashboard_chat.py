@@ -7,11 +7,12 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from pypdf import PdfReader
 
-from .assistant.contracts import RunRequest, Scope, ScopeKind, ToolResult
+from .assistant.contracts import EventType, RunEvent, RunRequest, Scope, ScopeKind, ToolResult
+from .assistant.providers.base import CancelToken
 from .assistant.providers.codex_app_server import CodexAppServerRuntime
 from .config import SEMESTER_PATTERN, load_config
 from .course_identity import resolve_course_identifier
@@ -284,36 +285,43 @@ def _resolve_proposal_scope(profile: Path | None, semester: str | None, course_i
     return root, Scope(kind=ScopeKind.SEMESTER, semester=selected)
 
 
+def _proposal_card(tool: str, data: Any) -> dict[str, Any] | None:
+    if tool not in PROPOSAL_TOOLS or not isinstance(data, dict):
+        return None
+    review_id = data.get("review_id")
+    if not isinstance(review_id, str) or not review_id:
+        return None
+    effects = [item for item in data.get("effects", []) if isinstance(item, str)]
+    if tool == "academia_propose_task":
+        kind = "task"
+        title = "Personal task update proposal" if data.get("action") == "update" else "Personal task proposal"
+        summary = str(data.get("after") or "Task change proposal")
+    else:
+        kind = "import"
+        title = "File import proposal"
+        target = data.get("target_id")
+        source = data.get("source_path")
+        filename = Path(source).name if isinstance(source, str) and source else "one local file"
+        summary = f"Copy {filename} into {target}" if isinstance(target, str) and target else f"Copy {filename} into the workspace"
+    return {
+        "kind": kind,
+        "title": title,
+        "summary": summary,
+        "effects": effects[:6],
+        "review_id": review_id,
+        "proposal_id": data.get("proposal_id"),
+    }
+
+
 def _proposal_cards(tool_results: tuple[ToolResult, ...]) -> list[dict[str, Any]]:
     cards: list[dict[str, Any]] = []
     seen: set[str] = set()
     for result in tool_results:
-        if result.tool not in PROPOSAL_TOOLS or not isinstance(result.data, dict):
+        card = _proposal_card(result.tool, result.data)
+        if card is None or card["review_id"] in seen:
             continue
-        review_id = result.data.get("review_id")
-        if not isinstance(review_id, str) or not review_id or review_id in seen:
-            continue
-        seen.add(review_id)
-        effects = [item for item in result.data.get("effects", []) if isinstance(item, str)]
-        if result.tool == "academia_propose_task":
-            kind = "task"
-            title = "Personal task update proposal" if result.data.get("action") == "update" else "Personal task proposal"
-            summary = str(result.data.get("after") or "Task change proposal")
-        else:
-            kind = "import"
-            title = "File import proposal"
-            target = result.data.get("target_id")
-            source = result.data.get("source_path")
-            filename = Path(source).name if isinstance(source, str) and source else "one local file"
-            summary = f"Copy {filename} into {target}" if isinstance(target, str) and target else f"Copy {filename} into the workspace"
-        cards.append({
-            "kind": kind,
-            "title": title,
-            "summary": summary,
-            "effects": effects[:6],
-            "review_id": review_id,
-            "proposal_id": result.data.get("proposal_id"),
-        })
+        seen.add(card["review_id"])
+        cards.append(card)
     return cards
 
 
@@ -345,6 +353,8 @@ def _respond_with_proposals(
     semester: str | None,
     notice: str | None,
     executable: str | None,
+    cancel: CancelToken | None = None,
+    on_event: Callable[[RunEvent], None] | None = None,
 ) -> dict[str, Any]:
     root, scope = _resolve_proposal_scope(profile, semester, course_id)
     # The app-server reports model-specific effort names; "minimal" is not
@@ -377,7 +387,7 @@ def _respond_with_proposals(
             context=context,
             image_paths=tuple(str(path) for path in image_paths),
             timeout_seconds=CHAT_TIMEOUT,
-        ))
+        ), cancel=cancel, on_event=on_event)
     if result.status == "cancelled":
         raise ValueError("The assistant run was cancelled.")
     if result.status != "completed":
@@ -481,3 +491,93 @@ def respond(payload: Any, *, profile: Path | None = None) -> dict[str, Any]:
             raise ValueError(f"{selected_provider['name']} returned an empty response. Please try again.")
     return {"message": answer, "provider": provider, "model": model or None, "effort": effort,
             "speed": "fast" if fast and provider == "codex" else "standard", "notice": notice}
+
+
+def stream_chat(
+    payload: Any,
+    *,
+    profile: Path | None,
+    run_id: str,
+    cancel: CancelToken,
+    emit: Callable[[dict[str, Any]], None],
+) -> None:
+    """Stream proposal-mode progress as bounded NDJSON-ready event dictionaries."""
+    try:
+        (
+            prompt,
+            messages,
+            provider,
+            requested_model,
+            effort,
+            fast,
+            attachments,
+            course_context,
+            proposal_mode,
+            course_id,
+            semester,
+        ) = _validate_payload(payload)
+        del prompt
+        if provider != "codex" or not proposal_mode:
+            raise ValueError("Streaming chat is available only in Codex proposal mode.")
+        catalog = provider_catalog()
+        selected_provider = next(entry for entry in catalog["providers"] if entry["id"] == provider)
+        if not selected_provider["available"]:
+            raise ValueError(selected_provider["notice"])
+        runtime = codex_runtime()
+        executable = runtime.get("executable")
+        if not executable:
+            raise ValueError("Codex CLI is unavailable. Install it and sign in with ChatGPT to use dashboard chat.")
+        model, notice = codex_model(runtime, requested_model)
+        emit({
+            "type": "started",
+            "run_id": run_id,
+            "provider": "codex",
+            "model": model,
+            "effort": effort,
+            "speed": "fast" if fast else "standard",
+        })
+
+        def on_event(event: RunEvent) -> None:
+            if event.event_type == EventType.TOOL_STARTED:
+                emit({
+                    "type": "tool_started",
+                    "tool": event.data.get("name"),
+                    "call_id": event.data.get("call_id"),
+                })
+            elif event.event_type == EventType.TOOL_RESULT:
+                tool = str(event.data.get("name") or "")
+                emit({
+                    "type": "tool_result",
+                    "tool": tool,
+                    "call_id": event.data.get("call_id"),
+                    "ok": bool(event.data.get("ok")),
+                })
+                card = _proposal_card(tool, event.data.get("data"))
+                if card is not None:
+                    emit({"type": "proposal", "proposal": card})
+            elif event.event_type == EventType.MESSAGE_DELTA:
+                delta = event.data.get("delta")
+                if isinstance(delta, str) and delta:
+                    emit({"type": "delta", "delta": delta})
+
+        result = _respond_with_proposals(
+            messages=messages,
+            profile=profile,
+            model=model,
+            effort=effort,
+            fast=fast,
+            attachments=attachments,
+            course_context=course_context,
+            course_id=course_id,
+            semester=semester,
+            notice=notice,
+            executable=executable,
+            cancel=cancel,
+            on_event=on_event,
+        )
+        emit({"type": "final", **result})
+    except Exception as exc:
+        if cancel.cancelled:
+            emit({"type": "cancelled"})
+        else:
+            emit({"type": "error", "message": _provider_failure_message(exc)})

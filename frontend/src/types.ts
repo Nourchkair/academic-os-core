@@ -34,6 +34,13 @@ export type TaskInput = {
   due_time?: string | null
 }
 
+export type TaskProposalAmendment = {
+  title?: string
+  course_id?: string | null
+  due_date?: string | null
+  due_time?: string | null
+}
+
 export type TaskListPayload = {
   semester: string
   path: string
@@ -108,6 +115,7 @@ export type ReviewItem = {
   course?: string
   details: Record<string, unknown>
   status: string
+  action_status?: string | null
   priority: string
   created_at: string
   updated_at: string

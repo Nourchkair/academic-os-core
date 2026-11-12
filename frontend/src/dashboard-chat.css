@@ -384,3 +384,18 @@
   .chat-proposal-actions { align-items: flex-start; flex-direction: column; }
 }
 .chat-proposal-toggle:disabled { cursor: default; opacity: .5; }
+.chat-proposal-status { border-radius: 999px; font-size: 8px; font-weight: 700; margin-left: auto; padding: 4px 7px; }
+.chat-proposal-status.open { background: #f4f0e6; color: #7d6a3e; }
+.chat-proposal-status.approved { background: #eef1ee; color: #5d735d; }
+.chat-proposal-status.complete { background: #e9f2ec; color: #356b4b; }
+.chat-proposal-status.failed { background: #f7e9e7; color: #8b4b45; }
+.chat-progress { color: #757575; display: grid; gap: 5px; list-style: none; margin: 9px 0 4px; padding: 0; }
+.chat-progress li { align-items: center; display: flex; font-size: 10px; gap: 7px; line-height: 1.45; }
+.chat-progress li.done { color: #777f77; }
+.chat-progress-mark { align-items: center; background: #f0f0f0; border-radius: 50%; color: #7f7f7f; display: grid; flex: 0 0 16px; font-size: 9px; height: 16px; place-items: center; width: 16px; }
+.chat-progress li.done .chat-progress-mark { background: #e8f0e9; color: #4f7459; }
+.chat-stream-placeholder { color: #969696; font-size: 12px; }
+.chat-cancel-run { align-items: center; background: #f7ecea; border: 1px solid #e7d2ce; border-radius: 8px; color: #8b4b45; cursor: pointer; display: flex; font-size: 9px; font-weight: 700; gap: 5px; height: 36px; padding: 0 10px; white-space: nowrap; }
+.chat-cancel-run:hover { background: #f2dfdc; border-color: #dcbdb7; }
+.chat-cancel-run:focus-visible { outline: 2px solid #c58d85; outline-offset: 2px; }
+.chat-proposal-done { color: #5d735d; font-size: 8px; font-weight: 700; }

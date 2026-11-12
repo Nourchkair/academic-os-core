@@ -6,6 +6,9 @@ export type ChatProposal = {
   effects: string[]
   review_id: string
   proposal_id?: string | null
+  status?: string | null
+  action_status?: string | null
+  status_label?: string
 }
 export type ChatMessage = { role: 'user' | 'assistant'; content: string; attachments?: ChatMessageAttachment[]; proposals?: ChatProposal[] }
 

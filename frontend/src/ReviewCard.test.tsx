@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { ReviewCard } from './ReviewCard'
-import type { ReviewItem } from './types'
+import type { Course, ReviewItem } from './types'
 
 const item: ReviewItem = {
   id: 'review-1',
@@ -64,6 +64,12 @@ describe('ReviewCard', () => {
           before: 'No personal task',
           after: 'Read Week 5 · POL 2103 - Politics · due 2026-10-01 09:00',
           effects: ["add 'Read Week 5' to Fall 2026/SEMESTER_TASKS.md", 'preserve unrelated Markdown and every existing task'],
+          task_after: {
+            title: 'Read Week 5',
+            course_id: 'POL 2103 - Politics',
+            due_date: '2026-10-01',
+            due_time: '09:00',
+          },
         },
       },
     }
@@ -74,5 +80,52 @@ describe('ReviewCard', () => {
     expect(onDecision).toHaveBeenCalledWith('approve_action')
     fireEvent.click(screen.getByRole('button', { name: 'Keep task unchanged' }))
     expect(onDecision).toHaveBeenCalledWith('reject_action')
+  })
+
+  it('edits a task proposal before approval', () => {
+    const onAmend = vi.fn().mockResolvedValue(undefined)
+    const course: Course = {
+      id: 'POL 2103 - Politics',
+      code: 'POL 2103',
+      name: 'POL 2103 - Politics',
+      path: '/workspace/Fall 2026/POL 2103 - Politics',
+      inbox_count: 0,
+      material_count: 1,
+      review_required: false,
+    }
+    const taskItem: ReviewItem = {
+      ...item,
+      kind: 'action_approval',
+      title: 'Add task: Read Week 5',
+      action_proposal_id: 'action-1',
+      details: {
+        action_type: 'task_change',
+        proposal_details: {
+          action_type: 'task_change',
+          action: 'create',
+          before: 'No personal task',
+          after: 'Read Week 5 · POL 2103 - Politics · due 2026-10-01 09:00',
+          effects: ["add 'Read Week 5' to Fall 2026/SEMESTER_TASKS.md"],
+          task_after: {
+            title: 'Read Week 5',
+            course_id: 'POL 2103 - Politics',
+            due_date: '2026-10-01',
+            due_time: '09:00',
+          },
+        },
+      },
+    }
+    render(<ReviewCard item={taskItem} courses={[course]} busy={false} onDecision={vi.fn()} onAmend={onAmend} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit proposal' }))
+    fireEvent.change(screen.getByLabelText('Task'), { target: { value: 'Read Week 6' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save proposal' }))
+
+    expect(onAmend).toHaveBeenCalledWith({
+      title: 'Read Week 6',
+      course_id: 'POL 2103 - Politics',
+      due_date: '2026-10-01',
+      due_time: '09:00',
+    })
   })
 })

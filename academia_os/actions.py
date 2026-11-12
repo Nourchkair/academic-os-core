@@ -108,6 +108,30 @@ class ActionStore:
         items = self._all()
         return [item for item in items if status is None or item.status == status]
 
+    def amend(self, proposal_id: str, details: dict[str, Any], *, title: str | None = None) -> ActionProposal:
+        """Replace the details of one still-unapproved proposal."""
+        selected: list[ActionProposal] = []
+
+        def transition(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            items = [ActionProposal.from_dict(value) for value in raw]
+            for index, item in enumerate(items):
+                if item.id != proposal_id:
+                    continue
+                if item.status != ActionStatus.PROPOSED.value:
+                    raise ValueError(f"proposal is not proposed: {item.status}")
+                item.details = dict(details)
+                if title is not None:
+                    item.title = title
+                item.updated_at = _now()
+                item.failure_reason = None
+                items[index] = item
+                selected.append(item)
+                return [asdict(value) for value in items]
+            raise KeyError(proposal_id)
+
+        self.store.update_strict([], transition)
+        return selected[0]
+
     def get(self, proposal_id: str) -> ActionProposal:
         for item in self._all():
             if item.id == proposal_id:

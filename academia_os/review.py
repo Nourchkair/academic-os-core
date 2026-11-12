@@ -147,7 +147,7 @@ class ReviewQueue:
     def find_by_action_proposal_id(self, proposal_id: str) -> ReviewItem | None:
         return next((item for item in self._items() if item.action_proposal_id == proposal_id), None)
 
-    def update(self, item_id: str, *, status: ReviewStatus | str | None = None, details: dict[str, Any] | None = None) -> ReviewItem:
+    def update(self, item_id: str, *, status: ReviewStatus | str | None = None, details: dict[str, Any] | None = None, title: str | None = None) -> ReviewItem:
         selected: list[ReviewItem] = []
 
         def transition(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -158,6 +158,8 @@ class ReviewQueue:
                 item.status = ReviewStatus(status) if status is not None else item.status
                 if details is not None:
                     item.details = details
+                if title is not None:
+                    item.title = title
                 item.updated_at = datetime.now(timezone.utc).isoformat()
                 items[index] = item
                 selected.append(item)

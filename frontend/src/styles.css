@@ -824,3 +824,6 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .review-card-anchor { border-radius: 12px; scroll-margin-top: 22px; }
 .review-card-anchor.review-card-focus { outline: 3px solid #b9c9b9; outline-offset: 3px; }
+
+.task-proposal-edit-row { margin-top: 13px; }
+.task-proposal-editor { margin-top: 12px; }

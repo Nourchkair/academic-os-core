@@ -16,7 +16,7 @@ from ...actions import ActionProposal, ActionStore, ActionType
 from ...activity import ActivityLog
 from ...domain import DomainProjection, Evidence
 from ...processing import ProcessingStore
-from ...review import ReviewQueue
+from ...review import ReviewItem, ReviewQueue, ReviewStatus
 from ...source_identity import SourceIdentityError, fingerprint, safe_workspace_path
 from ...study import StudyService
 from ...tasks import TaskStateError, TaskStore
@@ -229,6 +229,8 @@ def propose_import(
         "status": "approval_required",
         "proposal_id": proposal.id,
         "review_id": review.id,
+        "source_path": str(source),
+        "source_name": source.name,
         "source_sha256": digest,
         "target_id": target_id,
         "destination": str(destination),
@@ -631,3 +633,131 @@ def execute_task_change(proposal: ActionProposal, *, workspace_root: Path) -> di
         raise ValueError(str(exc)) from exc
     except KeyError as exc:
         raise ValueError("the personal task no longer exists") from exc
+
+
+def amend_task_proposal(
+    review_id: str,
+    *,
+    workspace_root: Path,
+    title: str | None = None,
+    course_id: Any = ...,
+    due_date: Any = ...,
+    due_time: Any = ...,
+    actor: str = "user",
+) -> ReviewItem:
+    """Edit one proposed personal-task action before the student decides."""
+    state_root = Path(workspace_root).expanduser().resolve() / ".academia"
+    reviews = ReviewQueue(state_root / "review.json")
+    actions = ActionStore(state_root / "actions.json")
+    activity = ActivityLog(state_root / "activity.jsonl")
+    review = reviews.get(review_id)
+    if review.status is not ReviewStatus.OPEN:
+        raise ValueError("only an open Review item can be amended")
+    if not review.action_proposal_id:
+        raise ValueError("Review item has no linked action proposal")
+    proposal = actions.get(review.action_proposal_id)
+    if proposal.action_type != ActionType.TASK_CHANGE.value:
+        raise ValueError("only personal-task proposals can be amended")
+    if proposal.status != "proposed":
+        raise ValueError("only an unapproved proposal can be amended")
+    details = dict(proposal.details)
+    action = details.get("action")
+    semester = details.get("semester")
+    after = details.get("task_after") if isinstance(details.get("task_after"), dict) else {}
+    evidence = details.get("evidence") if isinstance(details.get("evidence"), dict) else {}
+    if action not in {"create", "update"} or not isinstance(semester, str):
+        raise ValueError("task proposal is missing its action or semester")
+
+    desired_title = title if title is not None else after.get("title")
+    desired_course = course_id if course_id is not ... else after.get("course_id")
+    desired_due_date = due_date if due_date is not ... else after.get("due_date")
+    desired_due_time = due_time if due_time is not ... else after.get("due_time")
+    if desired_due_date in {None, ""}:
+        desired_due_time = None
+    store = TaskStore(workspace_root, semester)
+    try:
+        if action == "create":
+            future = store.new_task(
+                title=desired_title,
+                course_id=desired_course if isinstance(desired_course, str) else None,
+                due_date=desired_due_date,
+                due_time=desired_due_time,
+                provenance="AI-GENERATED",
+                source=str(evidence.get("source") or "assistant"),
+            )
+            before_task = None
+            before_label = str(details.get("before") or "No personal task")
+            effects = [
+                f"add '{future['title']}' to {semester}/SEMESTER_TASKS.md",
+                "preserve unrelated Markdown and every existing task",
+                "record the new task in Activity",
+            ]
+        else:
+            task_id = details.get("task_id")
+            before_task = details.get("task_before") if isinstance(details.get("task_before"), dict) else None
+            if not isinstance(task_id, str) or before_task is None:
+                raise ValueError("task update proposal is missing its exact task")
+            current = store.get(task_id)
+            if current.get("updated_at") != before_task.get("updated_at"):
+                raise ValueError("the personal task changed after the proposal; create a new proposal")
+            future = store.preview_update(
+                task_id,
+                title=desired_title,
+                course_id=desired_course if isinstance(desired_course, str) else None,
+                due_date=desired_due_date,
+                due_time=desired_due_time,
+            )
+            before_label = str(details.get("before") or _task_summary(before_task))
+            changes = [
+                f"{key.replace('_', ' ')}: {before_task.get(key)!s} → {future.get(key)!s}"
+                for key in ("title", "course_id", "due_date", "due_time")
+                if future.get(key) != before_task.get(key)
+            ]
+            effects = [
+                *changes,
+                "preserve other tasks and unrelated Markdown",
+                "record the update in Activity",
+            ]
+    except TaskStateError as exc:
+        raise ValueError(str(exc)) from exc
+    except KeyError as exc:
+        raise ValueError("the personal task no longer exists") from exc
+
+    if all(future.get(key) == after.get(key) for key in ("title", "course_id", "due_date", "due_time")):
+        raise ValueError("the proposal already matches these values")
+    after_label = _task_summary(future)
+    new_details = {
+        **details,
+        "before": before_label,
+        "after": after_label,
+        "task_after": _task_snapshot(future),
+        "effects": effects,
+    }
+    old_details = details
+    old_title = proposal.title
+    proposal_title = f"Add task: {future['title']}" if action == "create" else f"Update task: {future['title']}"
+    actions.amend(proposal.id, new_details, title=proposal_title)
+    try:
+        review_details = dict(review.details)
+        review_details.update({
+            "proposal_details": new_details,
+            "current": before_label,
+            "proposed": after_label,
+            "effects": effects,
+        })
+        updated_review = reviews.update(
+            review.id,
+            title=proposal_title,
+            details=review_details,
+        )
+    except Exception:
+        actions.amend(proposal.id, old_details, title=old_title)
+        raise
+    activity.append(
+        event_type="action.amended",
+        title=f"Amended proposal: {future['title']}",
+        course=future.get("course_id"),
+        details={"proposal_id": proposal.id, "review_id": review.id, "effects": effects},
+        actor=actor,
+    )
+    return updated_review

@@ -545,12 +545,19 @@ def build_parser() -> argparse.ArgumentParser:
     semester.add_argument("--timezone", default="UTC")
     semester.add_argument("--json", action="store_true")
     review = sub.add_parser("review")
-    review.add_argument("action", choices=["list", "show", "approve", "reject", "resolve", "decide", "execute"], nargs="?", default="list")
+    review.add_argument("action", choices=["list", "show", "approve", "reject", "resolve", "decide", "execute", "amend"], nargs="?", default="list")
     review.add_argument("item_id", nargs="?")
     review.add_argument("decision", nargs="?", help="Typed decision such as use_new or choose_course:...")
     review.add_argument("--actor", choices=("user", "agent:mcp"), default="user", help="Audit attribution for a user-authorized review action")
     review.add_argument("--semester", help="Resolve course choices against a specific recognized semester")
     review.add_argument("--pending-execution", action="store_true", help="Include approved action-linked items that still need execution")
+    review.add_argument("--task-title", dest="amend_title", help="Amended title for a proposed personal task")
+    review.add_argument("--course", dest="amend_course_id", default=argparse.SUPPRESS, help="Amended course for a proposed personal task")
+    review.add_argument("--clear-course", action="store_true", help="Clear the course on a proposed personal task")
+    review.add_argument("--due-date", dest="amend_due_date", default=argparse.SUPPRESS, help="Amended due date in YYYY-MM-DD")
+    review.add_argument("--clear-due-date", action="store_true", help="Clear the due date on a proposed personal task")
+    review.add_argument("--due-time", dest="amend_due_time", default=argparse.SUPPRESS, help="Amended local due time in HH:MM")
+    review.add_argument("--clear-due-time", action="store_true", help="Clear the due time on a proposed personal task")
     review.add_argument("--json", action="store_true")
     course = sub.add_parser("course")
     course.add_argument("course_id", nargs="?")
@@ -1200,14 +1207,22 @@ def dispatch(args: argparse.Namespace) -> int:
             review_item = queue.get(args.item_id)
             details = review_item.details if isinstance(review_item.details, dict) else {}
             proposal_details = details.get("proposal_details") if isinstance(details.get("proposal_details"), dict) else {}
+            action_status = None
+            if review_item.action_proposal_id:
+                try:
+                    action_status = ActionStore(state_root / "actions.json").get(review_item.action_proposal_id).status
+                except KeyError:
+                    action_status = None
             value = {
                 "id": review_item.id,
                 "kind": review_item.kind,
                 "title": _sanitize_value(review_item.title, Path(snapshot["academic_root"])),
                 "course": _sanitize_value(review_item.course, Path(snapshot["academic_root"])),
                 "status": review_item.status.value,
+                "action_status": action_status,
                 "action_proposal_id": review_item.action_proposal_id,
                 "action_type": _sanitize_value(details.get("action_type") or proposal_details.get("action_type"), Path(snapshot["academic_root"]), key="action_type"),
+                "details": _sanitize_value(details, Path(snapshot["academic_root"])),
                 "created_at": review_item.created_at,
                 "updated_at": review_item.updated_at,
             }
@@ -1255,6 +1270,26 @@ def dispatch(args: argparse.Namespace) -> int:
                     ))
                 else:
                     raise ValueError(f"no supported executor for approved action type: {action_type}")
+            elif args.action == "amend":
+                from .assistant.tools.write import amend_task_proposal
+                fields: dict[str, Any] = {}
+                if args.amend_title is not None:
+                    fields["title"] = args.amend_title
+                if args.clear_course:
+                    fields["course_id"] = None
+                elif hasattr(args, "amend_course_id"):
+                    fields["course_id"] = args.amend_course_id
+                if args.clear_due_date:
+                    fields["due_date"] = None
+                elif hasattr(args, "amend_due_date"):
+                    fields["due_date"] = args.amend_due_date
+                if args.clear_due_time:
+                    fields["due_time"] = None
+                elif hasattr(args, "amend_due_time"):
+                    fields["due_time"] = args.amend_due_time
+                if not fields:
+                    raise ValueError("review amend requires at least one task field")
+                value = asdict(amend_task_proposal(args.item_id, workspace_root=Path(snapshot["academic_root"]), actor=args.actor, **fields))
             elif args.action == "approve":
                 value = asdict(workflow.approve_review(args.item_id, actor=args.actor))
             elif args.action == "reject":

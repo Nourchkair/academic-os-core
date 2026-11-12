@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from academia_os import dashboard_chat
+from academia_os.assistant.providers.base import CancelToken
 from tests.test_web import request, running_server
 
 
@@ -114,3 +117,70 @@ def test_chat_route_is_not_available_over_get(tmp_path: Path) -> None:
 
     assert status == 404
     assert json.loads(payload)["type"] == "NotFound"
+
+
+def post_stream(server: Any, body: bytes) -> tuple[int, dict[str, str], bytes]:
+    return request(server, "POST", "/api/v1/chat/stream", body=body, headers={"Content-Type": "application/json"})
+
+
+def post_cancel(server: Any, body: dict[str, Any]) -> tuple[int, dict[str, str], bytes]:
+    return request(server, "POST", "/api/v1/chat/cancel", body=json.dumps(body).encode("utf-8"), headers={"Content-Type": "application/json"})
+
+
+def test_chat_stream_route_returns_ndjson_progress(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def stream_chat(payload: dict[str, Any], *, profile: Path, run_id: str, cancel: CancelToken, emit: Any) -> None:
+        emit({"type": "started", "run_id": run_id, "model": "test-model"})
+        emit({"type": "tool_started", "tool": "academia_propose_task", "call_id": "call-1"})
+        emit({"type": "proposal", "proposal": {"kind": "task", "review_id": "review-1"}})
+        emit({"type": "final", "message": "Prepared a proposal.", "proposals": [{"review_id": "review-1"}]})
+
+    monkeypatch.setattr(dashboard_chat, "stream_chat", stream_chat)
+    body = json.dumps({"messages": [{"role": "user", "content": "hello"}], "proposal_mode": True}).encode("utf-8")
+    with running_server(tmp_path) as server:
+        status, headers, payload = post_stream(server, body)
+
+    assert status == 200
+    assert headers["content-type"].startswith("application/x-ndjson")
+    events = [json.loads(line) for line in payload.decode("utf-8").splitlines() if line.strip()]
+    assert [event["type"] for event in events] == ["started", "tool_started", "proposal", "final"]
+    assert events[0]["run_id"]
+
+
+def test_chat_cancel_route_cancels_an_active_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def stream_chat(payload: dict[str, Any], *, profile: Path, run_id: str, cancel: CancelToken, emit: Any) -> None:
+        emit({"type": "started", "run_id": run_id})
+        for _ in range(50):
+            if cancel.cancelled:
+                emit({"type": "cancelled"})
+                return
+            time.sleep(0.01)
+        emit({"type": "final", "message": "late", "proposals": []})
+
+    monkeypatch.setattr(dashboard_chat, "stream_chat", stream_chat)
+    body = json.dumps({"messages": [{"role": "user", "content": "hello"}], "proposal_mode": True}).encode("utf-8")
+    with running_server(tmp_path) as server:
+        result: dict[str, Any] = {}
+
+        def run_stream() -> None:
+            result["value"] = post_stream(server, body)
+
+        thread = threading.Thread(target=run_stream)
+        thread.start()
+        deadline = time.monotonic() + 2
+        while not server.chat_runs and time.monotonic() < deadline:
+            time.sleep(0.01)
+        run_id = next(iter(server.chat_runs))
+        status, _, payload = post_cancel(server, {"run_id": run_id})
+        thread.join(timeout=5)
+
+    assert status == 200
+    assert json.loads(payload)["cancelled"] is True
+    events = [json.loads(line) for line in result["value"][2].decode("utf-8").splitlines() if line.strip()]
+    assert events[-1]["type"] == "cancelled"
+
+
+def test_chat_cancel_route_reports_unknown_run(tmp_path: Path) -> None:
+    with running_server(tmp_path) as server:
+        status, _, payload = post_cancel(server, {"run_id": "missing"})
+    assert status == 200
+    assert json.loads(payload) == {"run_id": "missing", "cancelled": False}

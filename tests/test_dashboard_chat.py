@@ -9,8 +9,9 @@ from typing import Any
 import pytest
 
 from academia_os import dashboard_chat
-from academia_os.assistant.contracts import AssistantError, RunResult, ToolResult
-from academia_os.dashboard_chat import _validate_payload, respond
+from academia_os.assistant.contracts import AssistantError, EventType, RunEvent, RunResult, ToolResult
+from academia_os.assistant.providers.base import CancelToken
+from academia_os.dashboard_chat import _validate_payload, respond, stream_chat
 from academia_os.study.providers import CLAUDE_UNAVAILABLE_NOTICE
 from tests.test_agent_interface import prepared_workspace
 
@@ -240,7 +241,7 @@ def test_respond_proposal_mode_uses_app_server_and_returns_cards(tmp_path: Path,
         def __init__(self, **kwargs: Any) -> None:
             captured["init"] = kwargs
 
-        def run(self, request: Any) -> RunResult:
+        def run(self, request: Any, **kwargs: Any) -> RunResult:
             captured["request"] = request
             return RunResult(
                 run_id="run-1",
@@ -317,7 +318,7 @@ def test_respond_proposal_mode_rejects_unknown_course_and_runtime_failure(tmp_pa
         def __init__(self, **kwargs: Any) -> None:
             pass
 
-        def run(self, request: Any) -> RunResult:
+        def run(self, request: Any, **kwargs: Any) -> RunResult:
             return RunResult(
                 run_id="run-1",
                 status="error",
@@ -340,7 +341,7 @@ def test_respond_proposal_mode_maps_minimal_effort_to_low(tmp_path: Path, monkey
         def __init__(self, **kwargs: Any) -> None:
             captured.update(kwargs)
 
-        def run(self, request: Any) -> RunResult:
+        def run(self, request: Any, **kwargs: Any) -> RunResult:
             return RunResult(run_id="run-1", status="completed", message="ready")
 
     monkeypatch.setattr(dashboard_chat, "provider_catalog", available_catalog)
@@ -362,7 +363,7 @@ def test_respond_proposal_mode_bounds_oversized_context(tmp_path: Path, monkeypa
         def __init__(self, **kwargs: Any) -> None:
             pass
 
-        def run(self, request: Any) -> RunResult:
+        def run(self, request: Any, **kwargs: Any) -> RunResult:
             captured["request"] = request
             return RunResult(run_id="run-1", status="completed", message="ready")
 
@@ -377,3 +378,88 @@ def test_respond_proposal_mode_bounds_oversized_context(tmp_path: Path, monkeypa
     assert len(request.context) <= 240_000
     assert "Additional selected context was truncated" in request.context
     assert "PROPOSAL-ONLY MODE" in request.context
+
+
+def test_stream_chat_emits_tool_progress_proposal_and_final(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+    proposal_data = {
+        "status": "approval_required",
+        "action": "create",
+        "proposal_id": "proposal-1",
+        "review_id": "review-1",
+        "before": "No personal task",
+        "after": "Read Week 5 · POL 2103 - Politics · due 2026-10-01",
+        "effects": ["add 'Read Week 5' to Fall 2026/SEMESTER_TASKS.md"],
+    }
+
+    class FakeRuntime:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def run(self, request: Any, *, cancel: Any = None, on_event: Any = None) -> RunResult:
+            if on_event is not None:
+                on_event(RunEvent(run_id="r", sequence=0, event_type=EventType.TOOL_STARTED, data={"name": "academia_propose_task", "call_id": "call-1"}))
+                on_event(RunEvent(run_id="r", sequence=1, event_type=EventType.TOOL_RESULT, data={"name": "academia_propose_task", "call_id": "call-1", "ok": True, "data": proposal_data}))
+                on_event(RunEvent(run_id="r", sequence=2, event_type=EventType.MESSAGE_DELTA, data={"delta": "Prepared a task proposal."}))
+            return RunResult(
+                run_id="r",
+                status="completed",
+                message="Prepared a task proposal.",
+                tool_results=(ToolResult(tool="academia_propose_task", data=proposal_data),),
+            )
+
+    monkeypatch.setattr(dashboard_chat, "provider_catalog", available_catalog)
+    monkeypatch.setattr(dashboard_chat, "codex_runtime", lambda: {"executable": "/fake/codex", "models": [], "recommended_model": None})
+    monkeypatch.setattr(dashboard_chat, "codex_model", lambda runtime, requested: ("test-model", None))
+    monkeypatch.setattr(dashboard_chat, "CodexAppServerRuntime", FakeRuntime)
+    events: list[dict[str, Any]] = []
+
+    stream_chat(
+        payload(proposal_mode=True, semester="Fall 2026", course_id="POL 2103"),
+        profile=profile,
+        run_id="run-1",
+        cancel=CancelToken(),
+        emit=events.append,
+    )
+
+    assert [event["type"] for event in events] == ["started", "tool_started", "tool_result", "proposal", "delta", "final"]
+    assert events[0]["run_id"] == "run-1"
+    assert events[1]["tool"] == "academia_propose_task"
+    assert events[3]["proposal"]["review_id"] == "review-1"
+    assert events[4]["delta"] == "Prepared a task proposal."
+    assert events[5]["proposals"][0]["review_id"] == "review-1"
+
+
+def test_stream_chat_reports_cancellation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+
+    class CancelledRuntime:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def run(self, request: Any, *, cancel: Any = None, on_event: Any = None) -> RunResult:
+            assert cancel is not None
+            cancel.cancel()
+            return RunResult(run_id="r", status="cancelled")
+
+    monkeypatch.setattr(dashboard_chat, "provider_catalog", available_catalog)
+    monkeypatch.setattr(dashboard_chat, "codex_runtime", lambda: {"executable": "/fake/codex", "models": [], "recommended_model": None})
+    monkeypatch.setattr(dashboard_chat, "codex_model", lambda runtime, requested: (None, None))
+    monkeypatch.setattr(dashboard_chat, "CodexAppServerRuntime", CancelledRuntime)
+    events: list[dict[str, Any]] = []
+
+    stream_chat(payload(proposal_mode=True, semester="Fall 2026"), profile=profile, run_id="run-1", cancel=CancelToken(), emit=events.append)
+
+    assert [event["type"] for event in events] == ["started", "cancelled"]
+
+
+def test_proposal_card_names_an_import_source() -> None:
+    card = dashboard_chat._proposal_card("academia_propose_import", {
+        "review_id": "review-1",
+        "proposal_id": "proposal-1",
+        "source_path": "/tmp/lecture-notes.md",
+        "target_id": "Fall 2026/POL 2103 - Politics/00_INBOX",
+        "effects": ["copy lecture-notes.md"],
+    })
+    assert card is not None
+    assert card["summary"] == "Copy lecture-notes.md into Fall 2026/POL 2103 - Politics/00_INBOX"

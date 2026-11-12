@@ -3,11 +3,11 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import { api } from './lib/api'
+import { api, ChatCancelledError, isTauriEnvironment, type ChatStreamEvent } from './lib/api'
 import { ChatProposals } from './ChatProposals'
 import { deleteChatConversation, listChatConversations, saveChatConversation, stripChatAttachmentPreviews, type ChatConversation, type ChatMessage, type ChatProposal, type StudyChatRequest } from './lib/chat-history'
 import { ChatStudyStudio, type ChatStudyRequest, type ModeId } from './ChatStudyStudio'
-import type { Course, CourseworkHistoryRecord, LibraryItem, Task } from './types'
+import type { Course, CourseworkHistoryRecord, LibraryItem, ReviewItem, Task } from './types'
 import 'katex/dist/katex.min.css'
 import './dashboard-chat.css'
 
@@ -37,6 +37,8 @@ type ChatProviders = {
 }
 type Attachment = { name: string; type: string; data: string; preview: string; size: number }
 type ChatResult = { message: string; model: string | null; effort: string; speed: string; notice: string | null; proposal_mode?: boolean; proposals?: ChatProposal[] }
+type StreamProgress = { id: string; tool: string; label: string; state: 'running' | 'done' }
+type StreamState = { content: string; progress: StreamProgress[]; proposals: ChatProposal[] }
 type StudySourceContext = {
   sources?: Array<{ id: string; name: string; complete?: boolean; pages_scanned?: number | null; page_count?: number | null }>
   chunks: { source_name: string; locator: string; text: string }[]
@@ -194,7 +196,30 @@ function makeClassSuggestions(course: Course | undefined, context: CourseAcademi
   return [assessmentSuggestion, reviewSuggestion, explainSuggestion]
 }
 
-export function DashboardChat({ courses, items, semester, onOpenReview, onProposalCreated, onResumeStudySession, studyChatRequest, onStudyChatRequestConsumed }: { courses: Course[]; items: LibraryItem[]; semester: string; onOpenReview: (reviewId: string) => void; onProposalCreated: () => void; onResumeStudySession: (courseId: string, sessionId: string) => void; studyChatRequest: StudyChatRequest | null; onStudyChatRequestConsumed: () => void }) {
+function toolProgressLabel(tool: string) {
+  if (tool === 'academia_propose_task') return 'Preparing a personal-task proposal'
+  if (tool === 'academia_propose_import') return 'Preparing a file-import proposal'
+  if (tool === 'academia_library') return 'Searching the class library'
+  if (tool === 'academia_read_library_item') return 'Reading a selected source'
+  if (tool === 'academia_agent_context') return 'Checking academic context'
+  if (tool === 'academia_tasks') return 'Checking tasks'
+  if (tool === 'academia_status') return 'Checking the workspace'
+  return 'Using an Academia tool'
+}
+
+function proposalStatusLabel(item: ReviewItem) {
+  const action = item.action_status
+  if (action === 'verified') return 'Completed and verified'
+  if (action === 'executed') return 'Executed; verification pending'
+  if (action === 'failed') return 'Execution failed; back in Review'
+  if (action === 'approved') return 'Approved; ready to execute'
+  if (action === 'rejected' || item.status === 'rejected') return 'Rejected'
+  if (item.status === 'resolved') return 'Completed'
+  if (item.status === 'approved') return 'Approved; ready to execute'
+  return 'Waiting for your review'
+}
+
+export function DashboardChat({ courses, items, semester, onOpenReview, onProposalCreated, reviewRevision, onResumeStudySession, studyChatRequest, onStudyChatRequestConsumed }: { courses: Course[]; items: LibraryItem[]; semester: string; onOpenReview: (reviewId: string) => void; onProposalCreated: () => void; reviewRevision: number; onResumeStudySession: (courseId: string, sessionId: string) => void; studyChatRequest: StudyChatRequest | null; onStudyChatRequestConsumed: () => void }) {
   const [providers, setProviders] = useState<ChatProviders | null>(null)
   const [provider] = useState<'codex'>('codex')
   const [messages, setMessages] = useState<Message[]>([])
@@ -217,6 +242,11 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
   const [effort, setEffort] = useState('medium')
   const [speed, setSpeed] = useState(localStorage.getItem('academia.chat.speed') || 'standard')
   const [proposalMode, setProposalMode] = useState(() => localStorage.getItem('academia.chat.proposals') === 'true')
+  const [streaming, setStreaming] = useState<StreamState | null>(null)
+  const streamRef = useRef<{ controller: AbortController; runId: string | null } | null>(null)
+  const streamingRef = useRef<StreamState | null>(null)
+  const deltaBufferRef = useRef('')
+  const deltaTimerRef = useRef<number | null>(null)
   const [showAttachMenu, setShowAttachMenu] = useState(false)
   const [showSourcePicker, setShowSourcePicker] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -263,6 +293,66 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
     } catch (reason) {
       setConversationHistoryError(`This conversation is visible for now, but could not be saved on this device. ${String(reason)}`)
     }
+  }
+  const updateStreaming = (update: (current: StreamState) => StreamState) => {
+    const next = update(streamingRef.current ?? { content: '', progress: [], proposals: [] })
+    streamingRef.current = next
+    setStreaming(next)
+  }
+  const flushDeltas = () => {
+    if (deltaTimerRef.current !== null) {
+      window.clearTimeout(deltaTimerRef.current)
+      deltaTimerRef.current = null
+    }
+    const buffered = deltaBufferRef.current
+    deltaBufferRef.current = ''
+    if (buffered) updateStreaming((current) => ({ ...current, content: current.content + buffered }))
+  }
+  const clearStreaming = () => {
+    if (deltaTimerRef.current !== null) {
+      window.clearTimeout(deltaTimerRef.current)
+      deltaTimerRef.current = null
+    }
+    deltaBufferRef.current = ''
+    streamingRef.current = null
+    setStreaming(null)
+  }
+  const cancelRun = () => {
+    const active = streamRef.current
+    if (!active) return
+    active.controller.abort()
+    if (active.runId) void api.chatCancel(active.runId).catch(() => undefined)
+  }
+  const refreshProposalStatuses = async (current: Message[] = messagesRef.current) => {
+    const reviewIds = [...new Set(current.flatMap((message) => message.proposals?.map((proposal) => proposal.review_id) ?? []))]
+    if (!reviewIds.length) return
+    const results = await Promise.all(reviewIds.map((reviewId) => api.reviewShow(reviewId).catch(() => null)))
+    const byId = new Map(results.filter((item): item is ReviewItem => Boolean(item)).map((item) => [item.id, item]))
+    if (!byId.size) return
+    const updated = current.map((message) => message.proposals?.length
+      ? {
+          ...message,
+          proposals: message.proposals.map((proposal) => {
+            const item = byId.get(proposal.review_id)
+            if (!item) return proposal
+            const proposalDetails = item.details?.proposal_details
+            const details = proposalDetails && typeof proposalDetails === 'object' && !Array.isArray(proposalDetails) ? proposalDetails as Record<string, unknown> : null
+            const summary = typeof details?.after === 'string' && details.after.trim() ? details.after : proposal.summary
+            const effects = Array.isArray(details?.effects) ? details.effects.filter((effect): effect is string => typeof effect === 'string') : proposal.effects
+            return {
+              ...proposal,
+              summary,
+              effects,
+              status: item.status,
+              action_status: item.action_status ?? null,
+              status_label: proposalStatusLabel(item),
+            }
+          }),
+        }
+      : message)
+    messagesRef.current = updated
+    setMessages(updated)
+    await persistConversation(updated)
   }
   const suggestions = useMemo(() => makeClassSuggestions(course, academicContext, items.filter((item) => item.course_id === courseId && readableExtensions.has(item.extension.toLowerCase()))), [academicContext, course, courseId, items])
   const readableItems = useMemo(() => items.filter((item) => readableExtensions.has(item.extension.toLowerCase())), [items])
@@ -329,6 +419,9 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
   }, [provider])
 
   useEffect(() => { void api.chatProviders<ChatProviders>().then(setProviders).catch((reason) => setError(String(reason))) }, [])
+  useEffect(() => {
+    if (reviewRevision > 0) void refreshProposalStatuses()
+  }, [reviewRevision])
   useEffect(() => {
     let current = true
     void listChatConversations().then((conversations) => {
@@ -594,12 +687,109 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
         boundedMessages.unshift(message)
         historyLength += message.content.length
       }
-      const result = await api.chat<ChatResult>({ provider, messages: boundedMessages.map(({ role, content }) => ({ role, content })), model: model || defaultModel || null, effort, speed, attachments: uploaded.map((attachment) => ({ name: attachment.name, type: attachment.type, data: attachment.data })), course_context: courseContext, proposal_mode: proposalMode, course_id: courseId || null, semester: semester || null })
+      const chatPayload = { provider, messages: boundedMessages.map(({ role, content }) => ({ role, content })), model: model || defaultModel || null, effort, speed, attachments: uploaded.map((attachment) => ({ name: attachment.name, type: attachment.type, data: attachment.data })), course_context: courseContext, proposal_mode: proposalMode, course_id: courseId || null, semester: semester || null }
+      let result: ChatResult
+      if (proposalMode && !isTauriEnvironment()) {
+        const controller = new AbortController()
+        streamRef.current = { controller, runId: null }
+        streamingRef.current = { content: '', progress: [], proposals: [] }
+        setStreaming(streamingRef.current)
+        const handleEvent = (event: ChatStreamEvent) => {
+          if (event.type === 'started') {
+            if (streamRef.current && typeof event.run_id === 'string') streamRef.current.runId = event.run_id
+            return
+          }
+          if (event.type === 'tool_started') {
+            const tool = typeof event.tool === 'string' ? event.tool : 'academia'
+            const callId = typeof event.call_id === 'string' ? event.call_id : ''
+            const id = callId || `${tool}-${Date.now()}-${Math.random()}`
+            updateStreaming((current) => ({
+              ...current,
+              progress: [...current.progress.filter((item) => item.id !== id), { id, tool, label: toolProgressLabel(tool), state: 'running' }],
+            }))
+            return
+          }
+          if (event.type === 'tool_result') {
+            const tool = typeof event.tool === 'string' ? event.tool : ''
+            const callId = typeof event.call_id === 'string' ? event.call_id : ''
+            updateStreaming((current) => ({
+              ...current,
+              progress: current.progress.map((item) => item.id === callId || (!callId && item.tool === tool && item.state === 'running') ? { ...item, state: 'done' } : item),
+            }))
+            return
+          }
+          if (event.type === 'proposal' && event.proposal && typeof event.proposal === 'object') {
+            const proposal = event.proposal as ChatProposal
+            updateStreaming((current) => ({ ...current, proposals: current.proposals.some((item) => item.review_id === proposal.review_id) ? current.proposals : [...current.proposals, proposal] }))
+            return
+          }
+          if (event.type === 'delta' && typeof event.delta === 'string') {
+            deltaBufferRef.current += event.delta
+            if (deltaTimerRef.current === null) {
+              deltaTimerRef.current = window.setTimeout(() => {
+                deltaTimerRef.current = null
+                const buffered = deltaBufferRef.current
+                deltaBufferRef.current = ''
+                if (buffered) updateStreaming((current) => ({ ...current, content: current.content + buffered }))
+              }, 60)
+            }
+          }
+        }
+        try {
+          result = await api.chatStream<ChatResult>(chatPayload, handleEvent, controller.signal)
+        } catch (reason) {
+          flushDeltas()
+          const partial = streamingRef.current
+          streamRef.current = null
+          clearStreaming()
+          if (reason instanceof ChatCancelledError || (reason instanceof Error && reason.name === 'AbortError')) {
+            const cancelledMessage: Message = {
+              role: 'assistant' as const,
+              content: partial?.content.trim() || 'Assistant run cancelled before a final answer.',
+              ...(partial?.proposals.length ? { proposals: partial.proposals } : {}),
+            }
+            const completed = [...nextMessages, cancelledMessage]
+            messagesRef.current = completed
+            setMessages(completed)
+            await persistConversation(completed)
+            if (partial?.proposals.length) {
+              onProposalCreated()
+              void refreshProposalStatuses(completed)
+            }
+            return
+          }
+          if (partial && (partial.content.trim() || partial.proposals.length)) {
+            const detail = reason instanceof Error ? reason.message : String(reason)
+            const failedMessage: Message = {
+              role: 'assistant' as const,
+              content: `${partial.content.trim()}${partial.content.trim() ? '\n\n' : ''}The assistant run ended before a final answer. ${detail}`,
+              ...(partial.proposals.length ? { proposals: partial.proposals } : {}),
+            }
+            const completed = [...nextMessages, failedMessage]
+            messagesRef.current = completed
+            setMessages(completed)
+            await persistConversation(completed)
+            if (partial.proposals.length) {
+              onProposalCreated()
+              void refreshProposalStatuses(completed)
+            }
+            setError(detail)
+            return
+          }
+          throw reason
+        }
+        flushDeltas()
+        streamRef.current = null
+        clearStreaming()
+      } else {
+        result = await api.chat<ChatResult>(chatPayload)
+      }
       const assistantMessage: Message = { role: 'assistant' as const, content: result.message, ...(result.proposals?.length ? { proposals: result.proposals } : {}) }
       const completedMessages = [...nextMessages, assistantMessage]
       setMessages(completedMessages)
       await persistConversation(completedMessages)
       if (result.proposals?.length) onProposalCreated()
+      if (result.proposals?.length) void refreshProposalStatuses(completedMessages)
       setChatAttachments(uploaded)
       setLastRetrievedSourceIds([...new Set(retrievedSourceIds)])
       if (result.notice) setError(result.notice)
@@ -722,7 +912,9 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
     setChatStudyRequest(null)
     archiveCurrentConversation()
     setActiveConversationId(conversation.id)
+    messagesRef.current = conversation.messages
     setMessages(conversation.messages)
+    void refreshProposalStatuses(conversation.messages)
     setCourseId(conversation.courseId)
     setSourceIds(conversation.sourceIds)
     setExcludedCourseSourceIds(conversation.excludedCourseSourceIds)
@@ -811,7 +1003,16 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
         <header className="chat-conversation-heading"><div className="chat-heading-start"><div className="chat-heading-title"><p className="eyebrow">Conversation</p></div></div><div className="chat-heading-end"><strong>{course ? `${course.code} · ${course.name}` : 'General study chat'}</strong><button className="chat-history-button" onClick={() => void openHistory()} disabled={busy || studyGenerationInProgress} aria-label="Open study history"><svg className="chat-action-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3.4 7.2A7 7 0 1 1 3 11"/><path d="M3 3.8v3.8h3.8M10 6.5V10l2.5 1.5"/></svg><span>History</span></button><button className="chat-new-session" onClick={startNewChat} disabled={busy || studyGenerationInProgress} aria-label="Start a new study chat"><svg className="chat-action-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M11.8 3.2H5.5A1.5 1.5 0 0 0 4 4.7v10.8A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5V9.2"/><path d="m9 12.8.5-2.6L15.7 4a1.6 1.6 0 0 1 2.3 2.3l-6.2 6.2-2.8.3Z"/></svg><span>New chat</span></button></div></header>
         <div className="chat-messages" ref={listRef} aria-live="polite">
           {messages.length === 0 ? <div className="chat-welcome"><p className="eyebrow">{course ? `Your ${course.code} study space` : 'Ready when you are'}</p><h3>{course ? `What’s next in ${course.code}?` : 'What are you studying?'}</h3><p>{course ? 'Pick a goal based on this class, or ask about an idea that still feels unclear.' : 'Choose a class to get study suggestions based on its course context, or start a general study chat.'}</p><div className="chat-suggestions">{course ? suggestions.map((suggestion) => <button key={suggestion.label} onClick={() => setDraft(suggestion.prompt)}>{suggestion.label} <span>↗</span></button>) : <span className="chat-suggestions-empty">Select a class in the composer for tailored study prompts.</span>}</div></div> : messages.map((message, index) => <article className={`chat-message ${message.role}`} key={index}><span className="chat-avatar">{message.role === 'user' ? 'You' : 'A'}</span><div className="chat-message-content"><small>{message.role === 'user' ? 'You' : 'Academia study assistant'}</small>{message.attachments?.length ? <div className="chat-message-attachments">{message.attachments.map((attachment, attachmentIndex) => attachment.preview ? <figure className="chat-message-image" key={`${attachment.name}-${attachmentIndex}`}><img src={attachment.preview} alt={`Attached image: ${attachment.name}`} /><figcaption>{attachment.name}</figcaption></figure> : <div className="chat-message-file" key={`${attachment.name}-${attachmentIndex}`}><span aria-hidden="true">▤</span><span><strong>{attachment.name}</strong><small>{attachment.type.startsWith('image/') ? 'Image attachment · reattach to view' : attachment.type === 'application/pdf' ? 'PDF document' : 'Attached document'}</small></span></div>)}</div> : null}<div className="chat-rich-text"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={chatMarkdownComponents}>{message.content}</ReactMarkdown></div>{message.proposals?.length ? <ChatProposals proposals={message.proposals} onOpenReview={onOpenReview} /> : null}</div></article>)}
-          {(busy || studyGenerationInProgress) && <div className="chat-thinking" role="status" aria-live="polite"><span className="chat-avatar">A</span><span className="chat-thinking-copy">{studyGenerationInProgress ? 'Creating source-grounded study material in Studio' : selectedItems.length ? 'Reading selected sources and thinking through your question' : 'Thinking through your question'}<span className="chat-loading-dots" aria-hidden="true"><span /><span /><span /></span></span></div>}
+          {streaming && <article className="chat-message assistant streaming">
+            <span className="chat-avatar">A</span>
+            <div className="chat-message-content">
+              <small>Academia study assistant · working</small>
+              {streaming.progress.length > 0 && <ul className="chat-progress" aria-label="Assistant progress">{streaming.progress.map((item) => <li className={item.state} key={item.id}><span className="chat-progress-mark" aria-hidden="true">{item.state === 'done' ? '✓' : '·'}</span>{item.label}</li>)}</ul>}
+              <div className="chat-rich-text">{streaming.content ? <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={chatMarkdownComponents}>{streaming.content}</ReactMarkdown> : <span className="chat-stream-placeholder">{streaming.progress.length ? 'Working through the proposal…' : 'Starting the proposal run…'}</span>}</div>
+              {streaming.proposals.length > 0 && <ChatProposals proposals={streaming.proposals} onOpenReview={onOpenReview} />}
+            </div>
+          </article>}
+          {(busy || studyGenerationInProgress) && !streaming && <div className="chat-thinking" role="status" aria-live="polite"><span className="chat-avatar">A</span><span className="chat-thinking-copy">{studyGenerationInProgress ? 'Creating source-grounded study material in Studio' : selectedItems.length ? 'Reading selected sources and thinking through your question' : 'Thinking through your question'}<span className="chat-loading-dots" aria-hidden="true"><span /><span /><span /></span></span></div>}
         </div>
         <div className="chat-composer-wrap">
           {error && <p className="chat-error" role="alert">{error}</p>}
@@ -848,6 +1049,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
                     <circle className="chat-speed-center" cx="12" cy="13" r="1.35" />
                   </svg>
                 </button>}
+                {streaming && <button type="button" className="chat-cancel-run" onClick={cancelRun} aria-label="Cancel assistant run"><span aria-hidden="true">■</span> Stop</button>}
                 <button className="chat-send" type="submit" disabled={busy || studyGenerationInProgress || (!draft.trim() && !attachments.length) || !isAvailable} aria-label={busy || studyGenerationInProgress ? 'Sending message' : 'Send message'} aria-busy={busy || studyGenerationInProgress}>{busy || studyGenerationInProgress ? <span className="chat-loading-dots compact" aria-hidden="true"><span /><span /><span /></span> : '↑'}</button>
               </div>
             </div>

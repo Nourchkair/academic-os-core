@@ -11,7 +11,7 @@ import { ReviewView } from './ReviewView'
 import { SettingsView } from './SettingsView'
 import { api, BridgeUnavailableError, isTauriEnvironment } from './lib/api'
 import type { StudyChatRequest } from './lib/chat-history'
-import type { ActivityEvent, Course, CourseworkHistoryRecord, CourseworkKind, LibraryItem, ProcessingRecord, ReviewItem, StatusPayload, Task, TaskInput } from './types'
+import type { ActivityEvent, Course, CourseworkHistoryRecord, CourseworkKind, LibraryItem, ProcessingRecord, ReviewItem, StatusPayload, Task, TaskInput, TaskProposalAmendment } from './types'
 
 const nav = [
   { id: 'home', label: 'Home', icon: '⌂' },
@@ -156,6 +156,7 @@ function App() {
   const [reviewBusy, setReviewBusy] = useState(false)
   const [reviewError, setReviewError] = useState('')
   const [reviewFocusId, setReviewFocusId] = useState<string | null>(null)
+  const [reviewRevision, setReviewRevision] = useState(0)
   const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([])
   const [inbox, setInbox] = useState<ProcessingRecord[]>([])
   const [selectedSemester, setSelectedSemester] = useState(cachedStartup?.workspace.semester || '')
@@ -355,6 +356,7 @@ function App() {
       setReviews((current) => updated.status === 'approved' && updated.action_proposal_id
         ? current.map((item) => item.id === itemId ? updated : item)
         : current.filter((item) => item.id !== itemId))
+      setReviewRevision((current) => current + 1)
       try { setActivity(await api.activity()) } catch { /* Activity is a secondary audit refresh. */ }
     } catch (reason) {
       setReviewError(`The decision could not be recorded: ${String(reason)}`)
@@ -369,9 +371,26 @@ function App() {
     try {
       await api.reviewExecute(itemId)
       await refreshReviews()
+      setReviewRevision((current) => current + 1)
       try { setActivity(await api.activity()) } catch { /* Activity is a secondary audit refresh. */ }
     } catch (reason) {
       setReviewError(`The approved action could not be executed: ${String(reason)}`)
+    } finally {
+      setReviewBusy(false)
+    }
+  }
+
+  const amendReview = async (itemId: string, fields: TaskProposalAmendment) => {
+    setReviewBusy(true)
+    setReviewError('')
+    try {
+      const updated = await api.amendReview(itemId, fields)
+      setReviews((current) => current.map((item) => item.id === itemId ? updated : item))
+      setReviewRevision((current) => current + 1)
+      try { setActivity(await api.activity()) } catch { /* Activity is a secondary audit refresh. */ }
+    } catch (reason) {
+      setReviewError(`The proposal could not be updated: ${String(reason)}`)
+      throw reason
     } finally {
       setReviewBusy(false)
     }
@@ -490,9 +509,9 @@ function App() {
       {view === 'chat' && <header className="topbar topbar-study-chat"><details className="chat-nav-dropdown" ref={chatNavRef}><summary aria-label="Open navigation menu"><span aria-hidden="true">☰</span><strong>Menu</strong><span className="chat-menu-caret" aria-hidden="true">⌄</span></summary><div className="chat-nav-menu" role="menu" aria-label="Main navigation">{chatMenuItems.map((item) => <button key={item.view} role="menuitem" data-tooltip={item.label} data-tooltip-side="right" onClick={() => setView(item.view)}><span aria-hidden="true">{item.icon}</span>{item.label}</button>)}</div></details></header>}
       {error && <p className="dashboard-inline-error" role="alert">{error}</p>}
       {view === 'home' && <HomeView status={status} courses={courses} tasks={tasks} activity={activity} inbox={inbox} semester={selectedSemester || status?.workspace.semester || ''} semesters={semesters} loading={semesterLoading} onSemesterChange={changeSemester} onOpenCourse={openCourse} onOpenIntake={() => openActionPanel('import')} onNavigate={navigate} />}
-      {view === 'review' && <ReviewView items={reviews} courses={courses} activity={activity} busy={reviewBusy} error={reviewError} focusId={reviewFocusId} onFocusConsumed={() => setReviewFocusId(null)} onDecision={decideReview} onExecute={executeReview} />}
+      {view === 'review' && <ReviewView items={reviews} courses={courses} activity={activity} busy={reviewBusy} error={reviewError} focusId={reviewFocusId} onFocusConsumed={() => setReviewFocusId(null)} onDecision={decideReview} onExecute={executeReview} onAmend={amendReview} />}
       {view === 'courses' && <CoursesView semesters={semesters} semester={selectedSemester || status?.workspace.semester || ''} courses={courses} items={libraryItems} inbox={inbox} loading={semesterLoading} onSemesterChange={changeSemester} onOpenActions={openActionPanel} onHistoryChanged={() => refresh()} studyResumeRequest={studyResumeRequest} onStudyResumeConsumed={clearStudyResumeRequest} onOpenStudyConversation={openStudyConversation} onStartStudyChat={startStudyChat} courseOpenRequest={courseOpenRequest} onCourseOpenConsumed={clearCourseOpenRequest} onBackHome={() => setView('home')} />}
-      <div className={`chat-route-shell ${view === 'chat' ? 'active' : ''}`} aria-hidden={view !== 'chat'}><DashboardChat courses={courses} items={libraryItems} semester={selectedSemester || status?.workspace.semester || ''} onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} onProposalCreated={() => void refreshReviews()} onResumeStudySession={resumeStudySession} studyChatRequest={studyChatRequest} onStudyChatRequestConsumed={clearStudyChatRequest} /></div>
+      <div className={`chat-route-shell ${view === 'chat' ? 'active' : ''}`} aria-hidden={view !== 'chat'}><DashboardChat courses={courses} items={libraryItems} semester={selectedSemester || status?.workspace.semester || ''} onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} onProposalCreated={() => void refreshReviews()} reviewRevision={reviewRevision} onResumeStudySession={resumeStudySession} studyChatRequest={studyChatRequest} onStudyChatRequestConsumed={clearStudyChatRequest} /></div>
       {view === 'tasks' && <Tasks tasks={tasks} courses={courses} semester={selectedSemester || status?.workspace.semester || ''} timezone={status?.workspace.timezone} stateError={taskStateError} onNavigate={navigate} onChanged={() => refresh()} />}
       {view === 'activity' && <ActivityView activity={activity} processing={inbox} onNavigate={navigate} />}
       {view === 'settings' && status && <SettingsView status={status} onSaved={() => refresh()} />}

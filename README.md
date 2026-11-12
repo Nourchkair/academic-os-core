@@ -30,7 +30,7 @@ The shared core composes workspace, courses, tasks, Library, domain projections,
 
 ## Study with your agent or the dashboard
 
-Each course now has a shared study workspace for cited quizzes, written practice, flashcards, mind maps, explanations, saved attempts, review schedules, annotations, exam preparation and time-bounded study plans. Ask your authorized agent to study with you using `academia study`; the same sets and sessions are available in Courses → Study. Dashboard Study chat currently uses Codex with the user's ChatGPT plan sign-in, with model, reasoning effort, selected course excerpts, document attachments, and PDF text extraction. Codex also supports image attachments and Fast mode. Proposal mode can prepare exact personal-task or file-import Review items, but cannot approve or execute them. Chat history persists in browser storage on the current device; attachments are not saved. Study material can be generated through Codex or a loopback local model. Claude Code can still connect to Academia as an external agent using its own supported interface.
+Each course now has a shared study workspace for cited quizzes, written practice, flashcards, mind maps, explanations, saved attempts, review schedules, annotations, exam preparation and time-bounded study plans. Ask your authorized agent to study with you using `academia study`; the same sets and sessions are available in Courses → Study. Dashboard Study chat currently uses Codex with the user's ChatGPT plan sign-in, with model, reasoning effort, selected course excerpts, document attachments, and PDF text extraction. Codex also supports image attachments and Fast mode. Proposal mode can prepare exact personal-task or file-import Review items; browser runs stream progress, support Stop, show live Review status, and let you edit a task proposal before approving it. The assistant cannot approve or execute proposals. Chat history persists in browser storage on the current device; attachments are not saved. Study material can be generated through Codex or a loopback local model. Claude Code can still connect to Academia as an external agent using its own supported interface.
 
 Start with `academia study capabilities --json`. Read [the study interface and examples](docs/study.md) for source retrieval, conversational practice, saved preferences, corrections, source-change detection and JSON/Markdown backup. Study data stays local under each course's `06_KNOWLEDGE/STUDY/`. Explicit generation sends selected excerpts to the chosen provider; it does not submit work or change real grades. Dashboard chat history is stored separately in local browser storage, not in the academic workspace.
 
@@ -142,6 +142,7 @@ academia history update --course "POL 2103 - Politics" --id RECORD_ID --status g
 academia review --json
 academia review decide REVIEW_ID use_new --json
 academia review execute REVIEW_ID --json
+academia review amend REVIEW_ID --task-title "Read Week 6" --due-date 2026-10-08 --json
 academia domain --json
 academia library --json
 academia library --category syllabi --json
@@ -360,6 +361,7 @@ academia extract syllabus /path/to/syllabus.pdf --course "COURSE ID" --json
 academia extract syllabus /path/to/syllabus.pdf --course "COURSE ID" --verified-current --apply --json
 academia review decide REVIEW_ID use_new --json
 academia review execute REVIEW_ID --json
+academia review amend REVIEW_ID --task-title "Read Week 6" --due-date 2026-10-08 --json
 ```
 
 Supported source formats are PDF, DOCX, PPTX, plain text, Markdown, and common image files. Text-based PDFs retain page references; text and Markdown retain line/segment references; presentations retain slide references. PDF text extraction uses the lightweight `pypdf` dependency. PPTX extraction reads visible slide text from the local Open XML package and warns that embedded images and speaker notes are not extracted. On macOS, scanned PDFs and images use local Apple Vision OCR, with page and text limits and an explicit warning that OCR may contain errors. No source is sent to a model or hosted service. On other platforms without a local OCR provider, scanned PDFs and images return `unsupported_without_ocr`; normal manual import still preserves them in `00_INBOX/`.

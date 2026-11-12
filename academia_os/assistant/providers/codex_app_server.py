@@ -24,7 +24,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 from uuid import uuid4
 
 from ..contracts import AssistantError, EventType, RunEvent, RunRequest, RunResult, Scope, ScopeKind, ToolResult
@@ -115,7 +115,7 @@ class CodexAppServerRuntime:
             "-c", 'web_search="disabled"',
         ]
 
-    def run(self, request: RunRequest, *, cancel: CancelToken | None = None) -> RunResult:
+    def run(self, request: RunRequest, *, cancel: CancelToken | None = None, on_event: Callable[[RunEvent], None] | None = None) -> RunResult:
         if not self.academic_root.is_dir():
             raise AssistantError("academic workspace does not exist", code="workspace_unavailable")
         if not self.profile_path.is_file():
@@ -132,12 +132,15 @@ class CodexAppServerRuntime:
         tool_results: list[ToolResult] = []
 
         def emit(event_type: EventType, data: dict[str, Any] | None = None) -> None:
-            events.append(RunEvent(
+            event = RunEvent(
                 run_id=run_id,
                 sequence=len(events),
                 event_type=event_type,
                 data=data or {},
-            ))
+            )
+            events.append(event)
+            if on_event is not None:
+                on_event(event)
 
         emit(EventType.RUN_STARTED, {
             "provider": "codex-app-server",
@@ -412,13 +415,16 @@ def _handle_item_completed(params: dict[str, Any], emit: Any, tool_results: list
             data = raw
     if error_value is None:
         tool_results.append(ToolResult(tool=str(item.get("tool") or "academia"), data=data))
-    emit(EventType.TOOL_RESULT, {
+    event_data: dict[str, Any] = {
         "name": item.get("tool"),
         "server": item.get("server"),
         "call_id": item.get("id"),
         "ok": error_value is None,
         "error": error_value.get("message") if error_value else None,
-    })
+    }
+    if error_value is None and data is not None and str(item.get("tool") or "").startswith("academia_propose_"):
+        event_data["data"] = data
+    emit(EventType.TOOL_RESULT, event_data)
 
 
 

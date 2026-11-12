@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { ReviewCard } from './ReviewCard'
-import type { ActivityEvent, Course, ReviewItem } from './types'
+import type { ActivityEvent, Course, ReviewItem, TaskProposalAmendment } from './types'
 
 type ReviewViewProps = {
   items: ReviewItem[]
@@ -12,6 +12,7 @@ type ReviewViewProps = {
   onFocusConsumed?: () => void
   onDecision: (itemId: string, decision: string) => Promise<void>
   onExecute: (itemId: string) => Promise<void>
+  onAmend?: (itemId: string, fields: TaskProposalAmendment) => Promise<void>
 }
 
 const actionLabels: Record<string, string> = {
@@ -22,7 +23,7 @@ const actionLabels: Record<string, string> = {
   configuration_change: 'Settings change',
 }
 
-export function ReviewView({ items, courses, activity, busy, error, focusId, onFocusConsumed, onDecision, onExecute }: ReviewViewProps) {
+export function ReviewView({ items, courses, activity, busy, error, focusId, onFocusConsumed, onDecision, onExecute, onAmend }: ReviewViewProps) {
   const open = items.filter((item) => item.status === 'open')
   const approved = items.filter((item) => item.status === 'approved' && item.action_proposal_id)
   const timeline = activity.filter((event) => event.event_type.startsWith('action.') || event.event_type.startsWith('review.')).slice(0, 16)
@@ -56,7 +57,7 @@ export function ReviewView({ items, courses, activity, busy, error, focusId, onF
           <div><p className="eyebrow">Waiting for you</p><h3>{open.length} open decision{open.length === 1 ? '' : 's'}</h3></div>
           <span className="review-count-badge">{open.length}</span>
         </div>
-        {open.map((item) => <div id={`review-${item.id}`} className="review-card-anchor" key={item.id}><ReviewCard item={item} courses={courses} busy={busy} onDecision={(decision) => onDecision(item.id, decision)} /></div>)}
+        {open.map((item) => <div id={`review-${item.id}`} className="review-card-anchor" key={item.id}><ReviewCard item={item} courses={courses} busy={busy} onDecision={(decision) => onDecision(item.id, decision)} onAmend={onAmend ? (fields) => onAmend(item.id, fields) : undefined} /></div>)}
         {!open.length && <ReviewEmpty title="No decisions waiting" body="When Academia finds conflicting evidence or an action needs approval, it appears here. Reading, studying, and local organization do not require a decision." />}
 
         {approved.length > 0 && <div className="approved-action-section">

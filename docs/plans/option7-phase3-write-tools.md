@@ -79,6 +79,7 @@ academia review execute REVIEW_ID --json
 - Proposals may create or update a personal task; they cannot mark work complete.
 - Evidence must identify an existing workspace file.
 - The proposition validates the exact future task before creating Review.
+- A student can amend the proposed title, course, due date, or due time in Review before approving it.
 - Execution revalidates the task's `updated_at`; a student edit after approval
   fails safely instead of overwriting the edit.
 - Created tasks carry `AI-GENERATED` provenance and remain non-authoritative.
@@ -112,8 +113,12 @@ human can approve and run it.
 Dashboard Study chat uses the same proposal-only path when the student enables
 **Proposal mode**. The chat can create task/import proposals, renders the exact
 before/after, effects, and Review id, and links to the matching Review card.
-Ordinary chat remains tool-disabled. The chat cannot approve or execute, and no
-academic file is written until the student acts in Review.
+Browser proposal runs stream tool/proposal progress, provide a Stop control that
+interrupts the model run, refresh each proposal's live status from Review, and
+allow editing a task proposal before approval. Ordinary chat remains
+tool-disabled. The chat cannot approve or execute, and no academic file is
+written until the student acts in Review. The packaged Tauri shell still uses the
+non-streaming transport.
 
 ## Boundaries
 

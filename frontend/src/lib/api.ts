@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, TaskInput, TaskListPayload, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
+import type { ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, TaskInput, TaskListPayload, TaskProposalAmendment, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
@@ -18,6 +18,25 @@ export class DashboardApiError extends Error {
     this.status = status
     this.type = type
   }
+}
+
+export class ChatStreamError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ChatStreamError'
+  }
+}
+
+export class ChatCancelledError extends Error {
+  constructor() {
+    super('The assistant run was cancelled.')
+    this.name = 'ChatCancelledError'
+  }
+}
+
+export type ChatStreamEvent = {
+  type: string
+  [key: string]: unknown
 }
 
 export function isTauriEnvironment() {
@@ -114,6 +133,65 @@ async function browserChat(payload: Record<string, unknown>): Promise<{ message:
   return readJsonResponse(response)
 }
 
+async function browserChatStream<T>(payload: Record<string, unknown>, onEvent: (event: ChatStreamEvent) => void, signal?: AbortSignal): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch('/api/v1/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal,
+    })
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw error
+    throw new BridgeUnavailableError()
+  }
+  if (!response.ok) return readJsonResponse<never>(response)
+  if (!response.body) throw new ChatStreamError('The local dashboard did not return a chat stream.')
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let final: T | null = null
+  const processLine = (line: string) => {
+    const trimmed = line.trim()
+    if (!trimmed) return
+    let event: ChatStreamEvent
+    try {
+      event = JSON.parse(trimmed) as ChatStreamEvent
+    } catch {
+      throw new ChatStreamError('The local chat stream returned invalid data.')
+    }
+    onEvent(event)
+    if (event.type === 'final') {
+      final = event as unknown as T
+    } else if (event.type === 'error') {
+      throw new ChatStreamError(typeof event.message === 'string' ? event.message : 'Codex could not complete this chat request.')
+    } else if (event.type === 'cancelled') {
+      throw new ChatCancelledError()
+    }
+  }
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let newline = buffer.indexOf('\n')
+      while (newline >= 0) {
+        processLine(buffer.slice(0, newline))
+        buffer = buffer.slice(newline + 1)
+        newline = buffer.indexOf('\n')
+      }
+    }
+    buffer += decoder.decode()
+    processLine(buffer)
+  } catch (error) {
+    await reader.cancel().catch(() => undefined)
+    throw error
+  }
+  if (final === null) throw new ChatStreamError('The local chat stream ended before a final answer.')
+  return final
+}
+
 export function fileUrl(path: string, semester?: string): string {
   const query = new URLSearchParams({ path })
   if (semester) query.set('semester', semester)
@@ -123,6 +201,8 @@ export function fileUrl(path: string, semester?: string): string {
 export const api = {
   study: <T>(args: string[]) => command<T>("study", args),
   chat: <T>(payload: Record<string, unknown>) => isTauriEnvironment() ? invoke<string>('academia_chat', { payload }).then((raw) => JSON.parse(raw) as T) : browserChat(payload) as Promise<T>,
+  chatStream: <T>(payload: Record<string, unknown>, onEvent: (event: ChatStreamEvent) => void, signal?: AbortSignal) => browserChatStream<T>(payload, onEvent, signal),
+  chatCancel: (runId: string) => fetch('/api/v1/chat/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ run_id: runId }) }).then(readJsonResponse<{ run_id: string; cancelled: boolean }>),
   chatProviders: <T>() => isTauriEnvironment() ? command<T>('study', ['providers']) : fetch('/api/v1/chat/providers').then(readJsonResponse<T>),
   status: () => command<StatusPayload>('status'),
   startupStatus: () => command<StatusPayload>('status', ['--fast']),
@@ -134,10 +214,12 @@ export const api = {
   reopenTask: (semester: string, taskId: string) => command<Task>('task', ['reopen', taskId, '--semester', semester]),
   agentCourseContext: (courseId: string, semester: string) => command<{ current_state?: { open_tasks?: Task[] } }>('agent', ['context', '--scope', 'course', '--course', courseId, '--semester', semester, '--detail', 'deep']),
   review: () => command<ReviewItem[]>('review'),
+  reviewShow: (itemId: string) => command<ReviewItem>('review', ['show', itemId]),
   reviewPendingExecution: () => command<ReviewItem[]>('review', ['list', '--pending-execution']),
   reviewAction: (action: 'approve' | 'reject' | 'resolve', itemId: string) => command<ReviewItem>('review', [action, itemId]),
   reviewDecision: (itemId: string, decision: string) => command<ReviewItem>('review', ['decide', itemId, decision]),
   reviewExecute: (itemId: string) => command<Record<string, unknown>>('review', ['execute', itemId]),
+  amendReview: (itemId: string, fields: TaskProposalAmendment) => command<ReviewItem>('review', ['amend', itemId, ...taskAmendmentArgs(fields)]),
   activity: () => command<ActivityEvent[]>('activity'),
   processingStatus: () => command<ProcessingRecord[]>('process', ['status']),
   domain: (entityType?: string) => command<DomainEntity[]>('domain', entityType ? [entityType] : []),
@@ -220,6 +302,24 @@ export const api = {
     return command<WorkflowSetPayload>('workflow', args)
   },
   semester: (timezone: string) => command<{ semester: string; timezone: string }>('semester', ['--timezone', timezone]),
+}
+
+function taskAmendmentArgs(input: TaskProposalAmendment): string[] {
+  const args: string[] = []
+  if (input.title !== undefined) args.push('--task-title', input.title)
+  if (input.course_id !== undefined) {
+    if (input.course_id) args.push('--course', input.course_id)
+    else args.push('--clear-course')
+  }
+  if (input.due_date !== undefined) {
+    if (input.due_date) args.push('--due-date', input.due_date)
+    else args.push('--clear-due-date')
+  }
+  if (input.due_time !== undefined) {
+    if (input.due_time) args.push('--due-time', input.due_time)
+    else args.push('--clear-due-time')
+  }
+  return args
 }
 
 function taskInputArgs(input: TaskInput): string[] {

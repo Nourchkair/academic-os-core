@@ -11,6 +11,8 @@ const proposals: ChatProposal[] = [
     effects: ["add 'Read Week 5' to Fall 2026/SEMESTER_TASKS.md", 'preserve unrelated Markdown and every existing task'],
     review_id: 'review-1',
     proposal_id: 'proposal-1',
+    status: 'open',
+    status_label: 'Waiting for your review',
   },
   {
     kind: 'import',
@@ -19,6 +21,9 @@ const proposals: ChatProposal[] = [
     effects: ['preserve the original source file'],
     review_id: 'review-2',
     proposal_id: 'proposal-2',
+    status: 'resolved',
+    action_status: 'verified',
+    status_label: 'Completed and verified',
   },
 ]
 
@@ -31,6 +36,8 @@ describe('ChatProposals', () => {
     expect(screen.getByText('Personal task proposal')).toBeInTheDocument()
     expect(screen.getByText('File import proposal')).toBeInTheDocument()
     expect(screen.getByText('Read Week 5 · POL 2103 - Politics · due 2026-10-01')).toBeInTheDocument()
+    expect(screen.getByText('Waiting for your review')).toBeInTheDocument()
+    expect(screen.getByText('Completed and verified')).toBeInTheDocument()
     expect(screen.getAllByText('Approval and execution happen only in Review.')).toHaveLength(2)
   })
 
@@ -38,7 +45,8 @@ describe('ChatProposals', () => {
     const onOpenReview = vi.fn()
     render(<ChatProposals proposals={proposals} onOpenReview={onOpenReview} />)
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Review this action' })[1])
-    expect(onOpenReview).toHaveBeenCalledWith('review-2')
+    expect(screen.getByText('No further action needed')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Review this action' }))
+    expect(onOpenReview).toHaveBeenCalledWith('review-1')
   })
 })
