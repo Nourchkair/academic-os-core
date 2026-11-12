@@ -70,7 +70,7 @@ the file picker.
 ## Limits
 
 - Gmail and Calendar reads are bounded and read-only.
-- Study chat does not call the Google tools yet.
+- Study chat can include bounded Gmail/Calendar context only when the student enables the Gmail or Calendar grant for that message.
 - Calendar create/edit is not implemented. It must go through Review with
   duplicate detection and post-write verification.
 - Academia never sends school-account messages, submits coursework, or requests

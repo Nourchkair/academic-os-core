@@ -204,6 +204,7 @@ function toolProgressLabel(tool: string) {
   if (tool === 'academia_agent_context') return 'Checking academic context'
   if (tool === 'academia_tasks') return 'Checking tasks'
   if (tool === 'academia_status') return 'Checking the workspace'
+  if (tool === 'academia_google_context') return 'Reading granted Gmail and Calendar context'
   return 'Using an Academia tool'
 }
 
@@ -243,6 +244,15 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
   const [speed, setSpeed] = useState(localStorage.getItem('academia.chat.speed') || 'standard')
   const [proposalMode, setProposalMode] = useState(() => localStorage.getItem('academia.chat.proposals') === 'true')
   const [webSearch, setWebSearch] = useState(() => localStorage.getItem('academia.chat.webSearch') === 'true')
+  const [googleAvailable, setGoogleAvailable] = useState(false)
+  const [googleGrants, setGoogleGrants] = useState<string[]>(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem('academia.chat.googleGrants') || '[]')
+      return Array.isArray(parsed) ? parsed.filter((item) => item === 'gmail' || item === 'calendar') : []
+    } catch {
+      return []
+    }
+  })
   const [proposalGrants, setProposalGrants] = useState<string[]>(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem('academia.chat.proposalGrants') || '["task","import"]')
@@ -336,6 +346,13 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
     setProposalGrants((current) => {
       const next = current.includes(grant) ? current.filter((item) => item !== grant) : [...current, grant]
       localStorage.setItem('academia.chat.proposalGrants', JSON.stringify(next))
+      return next
+    })
+  }
+  const toggleGoogleGrant = (grant: 'gmail' | 'calendar') => {
+    setGoogleGrants((current) => {
+      const next = current.includes(grant) ? current.filter((item) => item !== grant) : [...current, grant]
+      localStorage.setItem('academia.chat.googleGrants', JSON.stringify(next))
       return next
     })
   }
@@ -435,6 +452,23 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
   }, [provider])
 
   useEffect(() => { void api.chatProviders<ChatProviders>().then(setProviders).catch((reason) => setError(String(reason))) }, [])
+  useEffect(() => {
+    let current = true
+    const refresh = () => {
+      void api.googleConnectorStatus().then((status) => {
+        if (!current) return
+        const available = status.auth_status === 'authorized'
+        setGoogleAvailable(available)
+        if (!available) {
+          setGoogleGrants([])
+          localStorage.setItem('academia.chat.googleGrants', '[]')
+        }
+      }).catch(() => { if (current) setGoogleAvailable(false) })
+    }
+    refresh()
+    window.addEventListener('focus', refresh)
+    return () => { current = false; window.removeEventListener('focus', refresh) }
+  }, [])
   useEffect(() => {
     if (reviewRevision > 0) void refreshProposalStatuses()
   }, [reviewRevision])
@@ -703,7 +737,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
         boundedMessages.unshift(message)
         historyLength += message.content.length
       }
-      const chatPayload = { provider, messages: boundedMessages.map(({ role, content }) => ({ role, content })), model: model || defaultModel || null, effort, speed, attachments: uploaded.map((attachment) => ({ name: attachment.name, type: attachment.type, data: attachment.data })), course_context: courseContext, proposal_mode: proposalMode, course_id: courseId || null, semester: semester || null, granted_proposal_tools: proposalMode ? proposalGrants : [], web_search: webSearch }
+      const chatPayload = { provider, messages: boundedMessages.map(({ role, content }) => ({ role, content })), model: model || defaultModel || null, effort, speed, attachments: uploaded.map((attachment) => ({ name: attachment.name, type: attachment.type, data: attachment.data })), course_context: courseContext, proposal_mode: proposalMode, course_id: courseId || null, semester: semester || null, granted_proposal_tools: proposalMode ? proposalGrants : [], web_search: webSearch, connector_grants: googleGrants }
       let result: ChatResult
       if (proposalMode) {
         const controller = new AbortController()
@@ -1038,6 +1072,10 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
             <label><input type="checkbox" checked={proposalGrants.includes('import')} onChange={() => toggleProposalGrant('import')} /> Imports</label>
             <small>{proposalGrants.length ? 'It cannot approve, execute, or write.' : 'Select at least one proposal tool before sending.'}</small>
           </div>}
+          {googleGrants.length > 0 && <div className="chat-proposal-mode-note" role="note">
+            <span>Google context is on for this message: {googleGrants.includes('gmail') ? 'recent Gmail messages' : ''}{googleGrants.length === 2 ? ' and ' : ''}{googleGrants.includes('calendar') ? 'upcoming Calendar events' : ''}.</span>
+            <small>That data is sent to the selected AI provider as external reference. Academia will not send mail or change your calendar.</small>
+          </div>}
           {showAttachMenu && <div className="chat-attach-menu" role="menu" aria-label="Add to this chat">
             <button role="menuitem" onClick={() => { setShowAttachMenu(false); fileInputRef.current?.click() }}><span>↑</span><span><strong>Add a file to this chat</strong><small>Images, PDF, DOCX, PPTX, and text · 12 MB each</small></span></button>
             <button role="menuitem" onClick={() => { setShowAttachMenu(false); setShowSourcePicker(true) }}><span>▤</span><span><strong>Add Academia sources</strong><small>Choose materials from any class</small></span></button>
@@ -1056,6 +1094,20 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
                 <ChatPicker id="provider" label="AI" value={provider} ariaLabel="AI provider" options={providerOptions.map((entry) => ({ value: entry.id, label: entry.name, disabled: !entry.available, reason: entry.reason }))} disabled={!providerOptions.length} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { if (value === 'codex') localStorage.setItem('academia.chat.provider', value) }} />
                 <ChatPicker id="model" label="Model" value={model || defaultModel} placeholder="Provider default" ariaLabel="Model" options={modelOptions.map((entry) => ({ value: entry.id, label: entry.name }))} disabled={!modelOptions.length} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { setModel(value); localStorage.setItem(`academia.chat.model.${provider}`, value); if (provider === 'codex') localStorage.setItem('academia.chat.model', value) }} />
                 <ChatPicker id="effort" label="Thinking" value={effort} ariaLabel="Thinking effort" options={thinkingOptions.map(([value, label]) => ({ value, label }))} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { setEffort(value); localStorage.setItem(`academia.chat.effort.${provider}`, value); localStorage.setItem('academia.chat.effort', value) }} />
+                {googleAvailable && <>
+                  <button className={`chat-proposal-toggle ${googleGrants.includes('gmail') ? 'active' : ''}`} type="button" aria-label={googleGrants.includes('gmail') ? 'Gmail context enabled' : 'Enable Gmail context'} aria-pressed={googleGrants.includes('gmail')} disabled={busy || studyGenerationInProgress} data-tooltip={googleGrants.includes('gmail') ? 'Gmail context is on · recent message metadata and snippets are sent to the selected AI provider for this message' : 'Use recent Gmail messages as external context for this message'} data-tooltip-side="top" onClick={() => toggleGoogleGrant('gmail')}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <rect x="3.5" y="5.5" width="17" height="13" rx="2" />
+                      <path d="m4.5 7 7.5 6 7.5-6" />
+                    </svg>
+                  </button>
+                  <button className={`chat-proposal-toggle ${googleGrants.includes('calendar') ? 'active' : ''}`} type="button" aria-label={googleGrants.includes('calendar') ? 'Calendar context enabled' : 'Enable Calendar context'} aria-pressed={googleGrants.includes('calendar')} disabled={busy || studyGenerationInProgress} data-tooltip={googleGrants.includes('calendar') ? 'Calendar context is on · upcoming events are sent to the selected AI provider for this message' : 'Use upcoming Calendar events as external context for this message'} data-tooltip-side="top" onClick={() => toggleGoogleGrant('calendar')}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <rect x="4" y="5.5" width="16" height="14" rx="2" />
+                      <path d="M8 3.5v4M16 3.5v4M4 10h16" />
+                    </svg>
+                  </button>
+                </>}
                 <button className={`chat-search-toggle ${webSearch ? 'active' : ''}`} type="button" aria-label={webSearch ? 'Web search enabled' : 'Enable web search'} aria-pressed={webSearch} disabled={busy || studyGenerationInProgress || provider !== 'codex'} data-tooltip={webSearch ? 'Web search is on · Codex can use live web results; sources stay external and must be cited' : 'Enable web search · Codex may look up live web results for this chat'} data-tooltip-side="top" onClick={() => { const next = !webSearch; setWebSearch(next); localStorage.setItem('academia.chat.webSearch', String(next)) }}>
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                     <circle cx="12" cy="12" r="8.5" />

@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -14,7 +15,7 @@ from pypdf import PdfReader
 from .assistant.contracts import EventType, RunEvent, RunRequest, Scope, ScopeKind, ToolResult
 from .assistant.providers.base import CancelToken
 from .assistant.providers.codex_app_server import CodexAppServerRuntime
-from .config import SEMESTER_PATTERN, load_config
+from .config import SEMESTER_PATTERN, load_config, runtime_directory
 from .course_identity import resolve_course_identifier
 from .file_preview import FilePreviewError, MAX_PREVIEW_CHARS, read_office_text
 from .pdf_ocr import ocr_pdf_pages
@@ -118,6 +119,7 @@ def _validate_payload(payload: Any) -> tuple[
     str | None,
     list[str],
     bool,
+    list[str],
 ]:
     if not isinstance(payload, dict):
         raise ValueError("chat request must be a JSON object")
@@ -171,6 +173,10 @@ def _validate_payload(payload: Any) -> tuple[
     web_search = payload.get("web_search", False)
     if not isinstance(web_search, bool):
         raise ValueError("web_search must be true or false")
+    raw_connectors = payload.get("connector_grants", [])
+    if not isinstance(raw_connectors, list) or any(item not in {"gmail", "calendar"} for item in raw_connectors):
+        raise ValueError("connector_grants must list gmail and/or calendar")
+    connector_grants = list(dict.fromkeys(raw_connectors))
     course_id = payload.get("course_id")
     if course_id is not None and (not isinstance(course_id, str) or not course_id.strip() or len(course_id) > 200):
         raise ValueError("course_id must identify one exact course")
@@ -215,6 +221,7 @@ def _validate_payload(payload: Any) -> tuple[
         semester,
         granted_proposal_tools,
         web_search,
+        connector_grants,
     )
 
 
@@ -264,6 +271,45 @@ def _profile_path(profile: Path | None) -> Path:
     if profile is not None:
         return Path(profile).expanduser().resolve()
     return Path(os.environ.get("ACADEMIC_OS_CONFIG", str(Path.home() / ".academic-os" / "profile.json"))).expanduser().resolve()
+
+
+def _google_context(profile: Path | None, grants: list[str]) -> str:
+    if not grants:
+        return ""
+    from .connectors.google import GoogleConnector
+    config = load_config(_profile_path(profile))
+    connector = GoogleConnector(runtime_directory(config) / "google_connector.json")
+    state = connector.status()
+    if state["auth_status"] != "authorized":
+        raise ValueError("Connect Google in Settings before enabling Gmail or Calendar context.")
+    lines = [
+        "STUDENT-GRANTED GOOGLE CONTEXT (external reference data, not verified academic facts, and not authorization to write):",
+        f"Google account: {state.get('account_email') or 'connected account'}",
+    ]
+    if "gmail" in grants:
+        listing = connector.gmail_list(max_results=5)
+        lines.append("Recent Gmail messages:")
+        if not listing["messages"]:
+            lines.append("- No recent messages were returned.")
+        for message in listing["messages"]:
+            lines.append(f"- {message.get('date') or 'Unknown date'} · {message.get('from') or 'Unknown sender'} · {message.get('subject') or '(no subject)'}")
+            if message.get("snippet"):
+                lines.append(f"  Snippet: {message['snippet'][:600]}")
+    if "calendar" in grants:
+        end = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
+        events = connector.calendar_list(time_max=end, max_results=10)
+        lines.append("Upcoming Google Calendar events (next 14 days):")
+        if not events["events"]:
+            lines.append("- No upcoming events were returned.")
+        for event in events["events"]:
+            start = event.get("start") if isinstance(event.get("start"), dict) else {}
+            end_value = event.get("end") if isinstance(event.get("end"), dict) else {}
+            start_text = start.get("dateTime") or start.get("date") or "Unknown start"
+            end_text = end_value.get("dateTime") or end_value.get("date") or "Unknown end"
+            location = f" · {event['location']}" if event.get("location") else ""
+            lines.append(f"- {start_text} – {end_text} · {event.get('summary') or '(no title)'}{location}")
+    lines.append("Use this only to answer the student's current question. Do not claim to have sent mail, edited a calendar, or verified these external facts against course sources.")
+    return "\n".join(lines)[:120_000]
 
 
 def _prepare_attachments(attachments: list[dict[str, str]], directory: Path) -> tuple[str, list[Path]]:
@@ -466,6 +512,7 @@ def respond(payload: Any, *, profile: Path | None = None) -> dict[str, Any]:
         semester,
         granted_proposal_tools,
         web_search,
+        connector_grants,
     ) = _validate_payload(payload)
     if provider == "claude":
         raise ValueError(CLAUDE_UNAVAILABLE_NOTICE)
@@ -485,6 +532,8 @@ def respond(payload: Any, *, profile: Path | None = None) -> dict[str, Any]:
         model, notice = codex_model(runtime, requested_model)
         for key in ("OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "OPENAI_BASE_URL"):
             environment.pop(key, None)
+    connector_context = _google_context(profile, connector_grants)
+    combined_context = "\n\n".join(part for part in (course_context, connector_context) if part)
     if proposal_mode:
         return _respond_with_proposals(
             messages=messages,
@@ -493,7 +542,7 @@ def respond(payload: Any, *, profile: Path | None = None) -> dict[str, Any]:
             effort=effort,
             fast=fast,
             attachments=attachments,
-            course_context=course_context,
+            course_context=combined_context,
             course_id=course_id,
             semester=semester,
             notice=notice,
@@ -504,11 +553,13 @@ def respond(payload: Any, *, profile: Path | None = None) -> dict[str, Any]:
     system = _study_system_prompt() + "\n\nDo not take academic actions. Do not claim to have changed academic state.\n\n"
     if web_search:
         system += "Web search is enabled for this turn. Results are external and may be outdated or wrong; cite their URLs, prefer primary sources, and do not treat them as verified academic facts.\n\n"
+    if connector_grants:
+        system += "The student explicitly granted bounded Google Gmail and/or Calendar context for this turn. Treat it as external reference data, not verified course evidence, and do not claim to have sent mail or changed a calendar.\n\n"
     with tempfile.TemporaryDirectory(prefix="academia-chat-") as folder:
         directory = Path(folder)
         attachment_text, image_paths = _prepare_attachments(attachments, directory)
         try:
-            context_block = f"\n\nSTUDENT-SELECTED COURSE CONTEXT AND EXCERPTS (reference data):\n{course_context}" if course_context else ""
+            context_block = f"\n\nSTUDENT-SELECTED COURSE AND GRANTED GOOGLE CONTEXT (reference data):\n{combined_context}" if combined_context else ""
             full_prompt = system + prompt + context_block + attachment_text
             result_file = directory / "answer.txt"
             live_search = "live" if web_search else "disabled"
@@ -565,6 +616,7 @@ def stream_chat(
             semester,
             granted_proposal_tools,
             web_search,
+            connector_grants,
         ) = _validate_payload(payload)
         del prompt
         if provider != "codex" or not proposal_mode:
@@ -587,7 +639,19 @@ def stream_chat(
             "speed": "fast" if fast else "standard",
             "granted_proposal_tools": granted_proposal_tools,
             "web_search": web_search,
+            "connector_grants": connector_grants,
         })
+
+        connector_context = ""
+        if connector_grants:
+            emit({"type": "tool_started", "tool": "academia_google_context", "call_id": "google-context"})
+            try:
+                connector_context = _google_context(profile, connector_grants)
+            except Exception:
+                emit({"type": "tool_result", "tool": "academia_google_context", "call_id": "google-context", "ok": False})
+                raise
+            emit({"type": "tool_result", "tool": "academia_google_context", "call_id": "google-context", "ok": True})
+        combined_context = "\n\n".join(part for part in (course_context, connector_context) if part)
 
         def on_event(event: RunEvent) -> None:
             if event.event_type == EventType.TOOL_STARTED:
@@ -619,7 +683,7 @@ def stream_chat(
             effort=effort,
             fast=fast,
             attachments=attachments,
-            course_context=course_context,
+            course_context=combined_context,
             course_id=course_id,
             semester=semester,
             notice=notice,

@@ -42,7 +42,7 @@ def available_catalog() -> dict[str, Any]:
 
 
 def test_validate_payload_accepts_minimal_codex_chat() -> None:
-    prompt, messages, provider, model, effort, fast, attachments, context, proposal_mode, course_id, semester, grants, web_search = _validate_payload(payload())
+    prompt, messages, provider, model, effort, fast, attachments, context, proposal_mode, course_id, semester, grants, web_search, connector_grants = _validate_payload(payload())
 
     assert prompt == "USER: hello"
     assert messages == [{"role": "user", "content": "hello"}]
@@ -57,12 +57,19 @@ def test_validate_payload_accepts_minimal_codex_chat() -> None:
     assert semester is None
     assert grants == []
     assert web_search is False
+    assert connector_grants == []
 
 
 def test_validate_payload_requires_explicit_boolean_web_search() -> None:
-    assert _validate_payload(payload(web_search=True))[-1] is True
+    assert _validate_payload(payload(web_search=True))[-2] is True
     with pytest.raises(ValueError, match="web_search"):
         _validate_payload(payload(web_search="yes"))
+
+
+def test_validate_payload_accepts_bounded_google_connector_grants() -> None:
+    assert _validate_payload(payload(connector_grants=["gmail", "calendar"]))[-1] == ["gmail", "calendar"]
+    with pytest.raises(ValueError, match="connector_grants"):
+        _validate_payload(payload(connector_grants=["gmail", "drive"]))
 
 
 def test_validate_payload_bounds_messages_and_prompt_size() -> None:
@@ -243,7 +250,7 @@ def test_respond_reports_timeout_and_empty_answer(monkeypatch: pytest.MonkeyPatc
 
 
 def test_validate_payload_accepts_and_bounds_proposal_scope() -> None:
-    *_, proposal_mode, course_id, semester, grants, web_search = _validate_payload(
+    *_, proposal_mode, course_id, semester, grants, web_search, connector_grants = _validate_payload(
         payload(proposal_mode=True, course_id="POL 2103", semester="Fall 2026")
     )
     assert proposal_mode is True
@@ -251,7 +258,7 @@ def test_validate_payload_accepts_and_bounds_proposal_scope() -> None:
     assert semester == "Fall 2026"
     assert grants == ["task", "import"]
 
-    *_, grants, web_search = _validate_payload(payload(proposal_mode=True, granted_proposal_tools=["task"]))
+    *_, grants, web_search, connector_grants = _validate_payload(payload(proposal_mode=True, granted_proposal_tools=["task"]))
     assert grants == ["task"]
     with pytest.raises(ValueError, match="at least one"):
         _validate_payload(payload(proposal_mode=True, granted_proposal_tools=[]))
@@ -464,6 +471,70 @@ def test_stream_chat_emits_tool_progress_proposal_and_final(tmp_path: Path, monk
     assert events[3]["proposal"]["review_id"] == "review-1"
     assert events[4]["delta"] == "Prepared a task proposal."
     assert events[5]["proposals"][0]["review_id"] == "review-1"
+
+
+def test_stream_chat_reports_granted_google_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+    captured: dict[str, Any] = {}
+
+    class FakeRuntime:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def run(self, request: Any, *, cancel: Any = None, on_event: Any = None) -> RunResult:
+            captured["context"] = request.context
+            return RunResult(run_id="r", status="completed", message="Used Google context.")
+
+    monkeypatch.setattr(dashboard_chat, "_google_context", lambda profile, grants: "GOOGLE CONTEXT MARKER")
+    monkeypatch.setattr(dashboard_chat, "provider_catalog", available_catalog)
+    monkeypatch.setattr(dashboard_chat, "codex_runtime", lambda: {"executable": "/fake/codex", "models": [], "recommended_model": None})
+    monkeypatch.setattr(dashboard_chat, "codex_model", lambda runtime, requested: ("test-model", None))
+    monkeypatch.setattr(dashboard_chat, "CodexAppServerRuntime", FakeRuntime)
+    events: list[dict[str, Any]] = []
+
+    stream_chat(
+        payload(proposal_mode=True, semester="Fall 2026", course_id="POL 2103", connector_grants=["gmail"]),
+        profile=profile,
+        run_id="run-google",
+        cancel=CancelToken(),
+        emit=events.append,
+    )
+
+    assert [event["type"] for event in events] == ["started", "tool_started", "tool_result", "final"]
+    assert events[1]["tool"] == "academia_google_context"
+    assert "GOOGLE CONTEXT MARKER" in captured["context"]
+
+
+def test_google_context_reads_only_granted_sources(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+
+    class FakeConnector:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def status(self) -> dict[str, Any]:
+            return {"auth_status": "authorized", "account_email": "student@example.edu"}
+
+        def gmail_list(self, *, max_results: int = 5) -> dict[str, Any]:
+            return {"messages": [{"date": "Mon, 10 Nov 2026", "from": "advisor@example.edu", "subject": "Essay extension", "snippet": "You may submit on Friday."}]}
+
+        def calendar_list(self, *, time_max: str | None = None, max_results: int = 10) -> dict[str, Any]:
+            return {"events": [{"start": {"dateTime": "2026-11-12T10:00:00-05:00"}, "end": {"dateTime": "2026-11-12T11:00:00-05:00"}, "summary": "Office hours", "location": "Room 203"}]}
+
+    from academia_os.connectors import google as google_module
+    monkeypatch.setattr(google_module, "GoogleConnector", FakeConnector)
+    text = dashboard_chat._google_context(profile, ["gmail", "calendar"])
+    assert "Essay extension" in text
+    assert "Office hours" in text
+    assert "student@example.edu" in text
+
+    class UnauthorizedConnector(FakeConnector):
+        def status(self) -> dict[str, Any]:
+            return {"auth_status": "configured", "account_email": None}
+
+    monkeypatch.setattr(google_module, "GoogleConnector", UnauthorizedConnector)
+    with pytest.raises(ValueError, match="Connect Google"):
+        dashboard_chat._google_context(profile, ["gmail"])
 
 
 def test_stream_chat_reports_cancellation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
