@@ -786,6 +786,22 @@ def build_parser() -> argparse.ArgumentParser:
     add_study_parser(sub)
     dashboard_chat = sub.add_parser("chat", help=argparse.SUPPRESS)
     dashboard_chat.add_argument("--input-file", required=True)
+    native_chat = sub.add_parser("chat-stream", help=argparse.SUPPRESS)
+    native_chat.add_argument("--input-file", required=True)
+    native_chat.add_argument("--run-id", required=True)
+    native_chat_cancel = sub.add_parser("chat-cancel", help=argparse.SUPPRESS)
+    native_chat_cancel.add_argument("--run-id", required=True)
+    native_chat_cancel.add_argument("--json", action="store_true")
+    account = sub.add_parser("account", help=argparse.SUPPRESS)
+    account_sub = account.add_subparsers(dest="account_command", required=True)
+    for action in ("status", "logout"):
+        account_command = account_sub.add_parser(action, help=argparse.SUPPRESS)
+        account_command.add_argument("--json", action="store_true")
+    account_cancel = account_sub.add_parser("login-cancel", help=argparse.SUPPRESS)
+    account_cancel.add_argument("--run-id", required=True)
+    account_cancel.add_argument("--json", action="store_true")
+    account_login = account_sub.add_parser("login-stream", help=argparse.SUPPRESS)
+    account_login.add_argument("--run-id", required=True)
     return parser
 
 
@@ -816,7 +832,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"process", "study", "chat", "courses", "today", "tasks", "task", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard", "mcp-connections"}:
+        if args.command in {"process", "study", "chat", "chat-stream", "chat-cancel", "account", "courses", "today", "tasks", "task", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard", "mcp-connections"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -1149,6 +1165,42 @@ def dispatch(args: argparse.Namespace) -> int:
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             _emit({"error": str(exc)}, as_json=True)
             return 2
+    if args.command == "chat-stream":
+        from .native_bridge import stream_chat
+
+        def emit(value: dict[str, Any]) -> None:
+            print(json.dumps(value, ensure_ascii=False, separators=(",", ":")), flush=True)
+
+        try:
+            payload = json.loads(Path(args.input_file).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            emit({"type": "error", "message": f"Chat request could not be read: {exc}"})
+            return 2
+        stream_chat(payload, profile=_profile_path(args), run_id=args.run_id, emit=emit)
+        return 0
+    if args.command == "chat-cancel":
+        from .native_bridge import request_cancel
+        _emit(request_cancel(_profile_path(args), "chat", args.run_id), as_json=args.json)
+        return 0
+    if args.command == "account":
+        from .native_bridge import account_logout, account_status, request_cancel, stream_account_login
+
+        if args.account_command == "status":
+            _emit(account_status(_profile_path(args)), as_json=args.json)
+            return 0
+        if args.account_command == "logout":
+            _emit(account_logout(_profile_path(args)), as_json=args.json)
+            return 0
+        if args.account_command == "login-cancel":
+            _emit(request_cancel(_profile_path(args), "account", args.run_id), as_json=args.json)
+            return 0
+        if args.account_command == "login-stream":
+            def emit_account(value: dict[str, Any]) -> None:
+                print(json.dumps(value, ensure_ascii=False, separators=(",", ":")), flush=True)
+
+            stream_account_login(profile=_profile_path(args), run_id=args.run_id, emit=emit_account)
+            return 0
+        raise ValueError(f"unsupported account command: {args.account_command}")
     if args.command == "dashboard":
         validate_loopback_host(args.host)
         serve_dashboard(host=args.host, port=args.port, open_browser=args.open, profile=args.profile)

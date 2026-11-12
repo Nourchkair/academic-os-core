@@ -1,8 +1,38 @@
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
+use tauri::ipc::Channel;
+use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 
 static CHAT_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn valid_run_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 80
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+fn stage_chat_payload(payload: &serde_json::Value) -> Result<std::path::PathBuf, String> {
+    let body = serde_json::to_vec(payload).map_err(|error| format!("Invalid chat request: {error}"))?;
+    if body.len() > 48 * 1024 * 1024 {
+        return Err("Chat request and attachments exceed 48 MB".to_string());
+    }
+    let sequence = CHAT_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "academia-chat-{}-{sequence}.json",
+        std::process::id()
+    ));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|error| format!("Could not stage the chat request: {error}"))?;
+    file.write_all(&body)
+        .map_err(|error| format!("Could not stage the chat request: {error}"))?;
+    Ok(path)
+}
 
 struct CommandOutput {
     success: bool,
@@ -66,6 +96,47 @@ async fn run_academia(app: &tauri::AppHandle, args: Vec<String>) -> Result<Strin
     }
 }
 
+async fn run_academia_stream<F>(app: &tauri::AppHandle, args: Vec<String>, mut on_line: F) -> Result<(), String>
+where
+    F: FnMut(String) + Send,
+{
+    let shell = app.shell();
+    let command = if let Ok(configured) = std::env::var("ACADEMIA_OS_CLI") {
+        shell.command(configured)
+    } else {
+        match shell.sidecar("academia") {
+            Ok(command) => command,
+            Err(_) if cfg!(debug_assertions) => shell.command("academia"),
+            Err(error) => return Err(format!("Bundled Academia CLI is unavailable: {error}")),
+        }
+    };
+    let (mut receiver, _child) = command
+        .args(args)
+        .spawn()
+        .map_err(|error| format!("Academia CLI could not start: {error}"))?;
+    while let Some(event) = receiver.recv().await {
+        match event {
+            CommandEvent::Stdout(line) => on_line(String::from_utf8_lossy(&line).into_owned()),
+            CommandEvent::Stderr(_) => {}
+            CommandEvent::Error(error) => {
+                return Err(format!("Academia CLI stream failed: {error}"))
+            }
+            CommandEvent::Terminated(payload) => {
+                if payload.code != Some(0) {
+                    let code = payload
+                        .code
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    return Err(format!("Academia CLI exited with status {code}"));
+                }
+                break;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<String>) -> Result<String, String> {
     let allowed = [
@@ -98,6 +169,7 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
         "workflow",
         "mcp-connections",
         "artifact",
+        "account",
     ];
     if !allowed.contains(&command.as_str()) {
         return Err(format!("Unsupported Academia command: {command}"));
@@ -121,6 +193,23 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
             return Err("Unsupported MCP connection action".to_string());
         }
     }
+    if command == "account" {
+        let action = args.first().map(String::as_str).unwrap_or("");
+        let json_ok = args.last().map(String::as_str) == Some("--json");
+        let core_len = if json_ok { args.len() - 1 } else { args.len() };
+        let valid = match action {
+            "status" | "logout" => core_len == 1,
+            "login-cancel" => {
+                core_len == 3
+                    && args.get(1).map(String::as_str) == Some("--run-id")
+                    && valid_run_id(args.get(2).map(String::as_str).unwrap_or(""))
+            }
+            _ => false,
+        };
+        if !valid {
+            return Err("Unsupported Academia account action".to_string());
+        }
+    }
     let mut cli_args = vec![command];
     cli_args.extend(args);
     run_academia(&app, cli_args).await
@@ -128,26 +217,76 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
 
 #[tauri::command]
 async fn academia_chat(app: tauri::AppHandle, payload: serde_json::Value) -> Result<String, String> {
-    let body = serde_json::to_vec(&payload).map_err(|error| format!("Invalid chat request: {error}"))?;
-    if body.len() > 48 * 1024 * 1024 {
-        return Err("Chat request and attachments exceed 48 MB".to_string());
-    }
-    let sequence = CHAT_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "academia-chat-{}-{sequence}.json",
-        std::process::id()
-    ));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .map_err(|error| format!("Could not stage the chat request: {error}"))?;
-    file.write_all(&body)
-        .map_err(|error| format!("Could not stage the chat request: {error}"))?;
-    drop(file);
+    let path = stage_chat_payload(&payload)?;
     let result = run_academia(&app, vec!["chat".to_string(), "--input-file".to_string(), path.to_string_lossy().into_owned()]).await;
     let _ = std::fs::remove_file(path);
     result
+}
+
+#[tauri::command]
+async fn academia_chat_stream(
+    app: tauri::AppHandle,
+    payload: serde_json::Value,
+    run_id: String,
+    on_event: Channel<serde_json::Value>,
+) -> Result<(), String> {
+    if !valid_run_id(&run_id) {
+        return Err("Invalid chat run id".to_string());
+    }
+    let path = stage_chat_payload(&payload)?;
+    let result = run_academia_stream(
+        &app,
+        vec![
+            "chat-stream".to_string(),
+            "--input-file".to_string(),
+            path.to_string_lossy().into_owned(),
+            "--run-id".to_string(),
+            run_id,
+        ],
+        move |line| {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+                let _ = on_event.send(value);
+            }
+        },
+    )
+    .await;
+    let _ = std::fs::remove_file(path);
+    result
+}
+
+#[tauri::command]
+async fn academia_chat_cancel(app: tauri::AppHandle, run_id: String) -> Result<serde_json::Value, String> {
+    if !valid_run_id(&run_id) {
+        return Err("Invalid chat run id".to_string());
+    }
+    let raw = run_academia(&app, vec!["chat-cancel".to_string(), "--run-id".to_string(), run_id, "--json".to_string()]).await?;
+    serde_json::from_str(&raw).map_err(|error| format!("Invalid cancel response: {error}"))
+}
+
+#[tauri::command]
+async fn academia_account_login_stream(
+    app: tauri::AppHandle,
+    run_id: String,
+    on_event: Channel<serde_json::Value>,
+) -> Result<(), String> {
+    if !valid_run_id(&run_id) {
+        return Err("Invalid account run id".to_string());
+    }
+    run_academia_stream(
+        &app,
+        vec![
+            "account".to_string(),
+            "login-stream".to_string(),
+            "--run-id".to_string(),
+            run_id,
+        ],
+        move |line| {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+                let _ = on_event.send(value);
+            }
+        },
+    )
+    .await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -158,7 +297,13 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![academia_command, academia_chat])
+        .invoke_handler(tauri::generate_handler![
+            academia_command,
+            academia_chat,
+            academia_chat_stream,
+            academia_chat_cancel,
+            academia_account_login_stream
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Academia OS desktop");
 }

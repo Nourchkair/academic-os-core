@@ -3,7 +3,7 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import { api, ChatCancelledError, isTauriEnvironment, type ChatStreamEvent } from './lib/api'
+import { api, ChatCancelledError, type ChatStreamEvent } from './lib/api'
 import { ChatProposals } from './ChatProposals'
 import { deleteChatConversation, listChatConversations, saveChatConversation, stripChatAttachmentPreviews, type ChatConversation, type ChatMessage, type ChatProposal, type StudyChatRequest } from './lib/chat-history'
 import { ChatStudyStudio, type ChatStudyRequest, type ModeId } from './ChatStudyStudio'
@@ -704,7 +704,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
       }
       const chatPayload = { provider, messages: boundedMessages.map(({ role, content }) => ({ role, content })), model: model || defaultModel || null, effort, speed, attachments: uploaded.map((attachment) => ({ name: attachment.name, type: attachment.type, data: attachment.data })), course_context: courseContext, proposal_mode: proposalMode, course_id: courseId || null, semester: semester || null, granted_proposal_tools: proposalMode ? proposalGrants : [] }
       let result: ChatResult
-      if (proposalMode && !isTauriEnvironment()) {
+      if (proposalMode) {
         const controller = new AbortController()
         streamRef.current = { controller, runId: null }
         streamingRef.current = { content: '', progress: [], proposals: [] }

@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { Channel, invoke } from '@tauri-apps/api/core'
 import type { AccountStatus, ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MCPAuthorizationStart, MCPAuthorizationStatus, MCPConnection, MCPConnectionInput, MCPRemoteInput, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, TaskInput, TaskListPayload, TaskProposalAmendment, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
@@ -192,6 +192,86 @@ async function browserChatStream<T>(payload: Record<string, unknown>, onEvent: (
   return final
 }
 
+function newRunId() {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
+  return `run-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+async function nativeChatStream<T>(payload: Record<string, unknown>, onEvent: (event: ChatStreamEvent) => void, signal?: AbortSignal): Promise<T> {
+  const runId = newRunId()
+  const channel = new Channel<ChatStreamEvent>()
+  let final: T | null = null
+  let failure: string | null = null
+  let cancelled = false
+  channel.onmessage = (event) => {
+    onEvent(event)
+    if (event.type === 'final') final = event as unknown as T
+    else if (event.type === 'error') failure = typeof event.message === 'string' ? event.message : 'Codex could not complete this chat request.'
+    else if (typeof event.error === 'string') failure = event.error
+    else if (event.type === 'cancelled') cancelled = true
+  }
+  const abort = () => { void invoke('academia_chat_cancel', { runId }).catch(() => undefined) }
+  signal?.addEventListener('abort', abort)
+  try {
+    await invoke('academia_chat_stream', { payload, runId, onEvent: channel })
+  } catch (reason) {
+    if (signal?.aborted || cancelled) throw new ChatCancelledError()
+    if (failure) throw new ChatStreamError(failure)
+    throw reason instanceof Error ? reason : new ChatStreamError(String(reason))
+  } finally {
+    signal?.removeEventListener('abort', abort)
+  }
+  if (signal?.aborted || cancelled) throw new ChatCancelledError()
+  if (failure) throw new ChatStreamError(failure)
+  if (final === null) throw new ChatStreamError('The native chat stream ended before a final answer.')
+  return final
+}
+
+type NativeAccountEvent = { type: string; state?: AccountStatus; message?: string; error?: unknown }
+
+let activeAccountRunId: string | null = null
+
+async function nativeAccountCommand<T>(args: string[]): Promise<T> {
+  const raw = await invoke<string>('academia_command', { command: 'account', args: [...args, '--json'] })
+  const value = JSON.parse(raw) as T & { error?: unknown }
+  if (value && typeof value === 'object' && typeof value.error === 'string') throw new Error(value.error)
+  return value
+}
+
+async function nativeAccountLogin(onUpdate?: (status: AccountStatus) => void): Promise<AccountStatus> {
+  const runId = newRunId()
+  activeAccountRunId = runId
+  const channel = new Channel<NativeAccountEvent>()
+  let latest: AccountStatus | null = null
+  let failure: string | null = null
+  channel.onmessage = (event) => {
+    if ((event.type === 'verification' || event.type === 'final') && event.state) {
+      latest = event.state
+      onUpdate?.(event.state)
+    } else if (event.type === 'error' && typeof event.message === 'string') {
+      failure = event.message
+    } else if (typeof event.error === 'string') {
+      failure = event.error
+    }
+  }
+  try {
+    await invoke('academia_account_login_stream', { runId, onEvent: channel })
+  } catch (reason) {
+    if (failure) throw new Error(failure)
+    throw reason instanceof Error ? reason : new Error(String(reason))
+  } finally {
+    if (activeAccountRunId === runId) activeAccountRunId = null
+  }
+  if (failure) throw new Error(failure)
+  return latest ?? nativeAccountCommand<AccountStatus>(['status'])
+}
+
+async function nativeAccountLoginCancel(): Promise<AccountStatus> {
+  const runId = activeAccountRunId
+  if (runId) await nativeAccountCommand<{ run_id: string; cancelled: boolean }>(['login-cancel', '--run-id', runId])
+  return nativeAccountCommand<AccountStatus>(['status'])
+}
+
 export function fileUrl(path: string, semester?: string): string {
   const query = new URLSearchParams({ path })
   if (semester) query.set('semester', semester)
@@ -211,12 +291,12 @@ async function postJson<T>(path: string, body: Record<string, unknown>): Promise
 export const api = {
   study: <T>(args: string[]) => command<T>("study", args),
   chat: <T>(payload: Record<string, unknown>) => isTauriEnvironment() ? invoke<string>('academia_chat', { payload }).then((raw) => JSON.parse(raw) as T) : browserChat(payload) as Promise<T>,
-  chatStream: <T>(payload: Record<string, unknown>, onEvent: (event: ChatStreamEvent) => void, signal?: AbortSignal) => browserChatStream<T>(payload, onEvent, signal),
-  chatCancel: (runId: string) => fetch('/api/v1/chat/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ run_id: runId }) }).then(readJsonResponse<{ run_id: string; cancelled: boolean }>),
-  accountStatus: () => fetch('/api/v1/account').then(readJsonResponse<AccountStatus>),
-  accountLogin: () => fetch('/api/v1/account/login', { method: 'POST' }).then(readJsonResponse<AccountStatus>),
-  accountLoginCancel: () => fetch('/api/v1/account/login/cancel', { method: 'POST' }).then(readJsonResponse<AccountStatus>),
-  accountLogout: () => fetch('/api/v1/account/logout', { method: 'POST' }).then(readJsonResponse<AccountStatus>),
+  chatStream: <T>(payload: Record<string, unknown>, onEvent: (event: ChatStreamEvent) => void, signal?: AbortSignal) => isTauriEnvironment() ? nativeChatStream<T>(payload, onEvent, signal) : browserChatStream<T>(payload, onEvent, signal),
+  chatCancel: (runId: string) => isTauriEnvironment() ? invoke<{ run_id: string; cancelled: boolean }>('academia_chat_cancel', { runId }) : fetch('/api/v1/chat/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ run_id: runId }) }).then(readJsonResponse<{ run_id: string; cancelled: boolean }>),
+  accountStatus: () => isTauriEnvironment() ? nativeAccountCommand<AccountStatus>(['status']) : fetch('/api/v1/account').then(readJsonResponse<AccountStatus>),
+  accountLogin: (onUpdate?: (status: AccountStatus) => void) => isTauriEnvironment() ? nativeAccountLogin(onUpdate) : fetch('/api/v1/account/login', { method: 'POST' }).then(readJsonResponse<AccountStatus>),
+  accountLoginCancel: () => isTauriEnvironment() ? nativeAccountLoginCancel() : fetch('/api/v1/account/login/cancel', { method: 'POST' }).then(readJsonResponse<AccountStatus>),
+  accountLogout: () => isTauriEnvironment() ? nativeAccountCommand<AccountStatus>(['logout']) : fetch('/api/v1/account/logout', { method: 'POST' }).then(readJsonResponse<AccountStatus>),
   mcpConnections: () => isTauriEnvironment() ? command<MCPConnection[]>('mcp-connections', ['list']) : fetch('/api/v1/mcp/connections').then(readJsonResponse<MCPConnection[]>),
   addMCPConnection: (input: MCPConnectionInput) => {
     if (isTauriEnvironment()) {

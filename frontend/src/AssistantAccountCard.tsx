@@ -5,6 +5,7 @@ import type { AccountStatus } from './types'
 export function AssistantAccountCard() {
   const [account, setAccount] = useState<AccountStatus | null>(null)
   const [busy, setBusy] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
   const [error, setError] = useState('')
   const native = isTauriEnvironment()
 
@@ -18,9 +19,8 @@ export function AssistantAccountCard() {
   }, [])
 
   useEffect(() => {
-    if (native) return
     void load()
-  }, [load, native])
+  }, [load])
 
   useEffect(() => {
     if (native || !account || !['starting', 'awaiting_user'].includes(account.status)) return
@@ -29,21 +29,25 @@ export function AssistantAccountCard() {
   }, [account, load, native])
 
   const act = async (action: 'login' | 'cancel' | 'logout') => {
-    setBusy(true)
+    if (action === 'cancel') setCancelling(true)
+    else setBusy(true)
     setError('')
     try {
-      const next = action === 'login' ? await api.accountLogin() : action === 'cancel' ? await api.accountLoginCancel() : await api.accountLogout()
-      setAccount(next)
+      if (action === 'login') {
+        const next = await api.accountLogin(setAccount)
+        setAccount(next)
+      } else {
+        const next = action === 'cancel' ? await api.accountLoginCancel() : await api.accountLogout()
+        setAccount(next)
+      }
     } catch (reason) {
       setError(`ChatGPT sign-in could not be updated. ${String(reason)}`)
     } finally {
-      setBusy(false)
+      if (action === 'cancel') setCancelling(false)
+      else setBusy(false)
     }
   }
 
-  if (native) {
-    return <p className="account-note">The app-level device-code sign-in is available in the browser dashboard. The desktop app continues to use the installed Codex CLI sign-in.</p>
-  }
   if (!account) {
     return <div className="account-card"><p className="account-note">{error || 'Checking ChatGPT sign-in…'}</p></div>
   }
@@ -63,7 +67,7 @@ export function AssistantAccountCard() {
     {awaiting && <div className="account-login">
       <p>Open the verification page and enter this one-time code:</p>
       <div className="account-code"><code>{account.user_code || 'Waiting for Codex…'}</code>{account.verification_url && <a href={account.verification_url} target="_blank" rel="noopener noreferrer">Open verification page ↗</a>}</div>
-      <button type="button" className="secondary-button" disabled={busy} onClick={() => void act('cancel')}>{busy ? 'Cancelling…' : 'Cancel sign-in'}</button>
+      <button type="button" className="secondary-button" disabled={cancelling} onClick={() => void act('cancel')}>{cancelling ? 'Cancelling…' : 'Cancel sign-in'}</button>
     </div>}
     {!signedIn && !awaiting && <p className="account-note">{account.error || account.notice || 'Academia starts the official Codex device-code flow. It never reads or stores your credentials.'}</p>}
     {account.status === 'failed' && account.error && <p className="account-note account-error">{account.error}</p>}
