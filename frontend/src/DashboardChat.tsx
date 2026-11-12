@@ -205,6 +205,7 @@ function toolProgressLabel(tool: string) {
   if (tool === 'academia_tasks') return 'Checking tasks'
   if (tool === 'academia_status') return 'Checking the workspace'
   if (tool === 'academia_google_context') return 'Reading granted Gmail and Calendar context'
+  if (tool === 'academia_propose_calendar') return 'Checking duplicates and preparing a Calendar proposal'
   return 'Using an Academia tool'
 }
 
@@ -256,7 +257,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
   const [proposalGrants, setProposalGrants] = useState<string[]>(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem('academia.chat.proposalGrants') || '["task","import"]')
-      return Array.isArray(parsed) ? parsed.filter((item): item is string => item === 'task' || item === 'import') : ['task', 'import']
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => item === 'task' || item === 'import' || item === 'calendar') : ['task', 'import']
     } catch {
       return ['task', 'import']
     }
@@ -342,7 +343,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
     active.controller.abort()
     if (active.runId) void api.chatCancel(active.runId).catch(() => undefined)
   }
-  const toggleProposalGrant = (grant: 'task' | 'import') => {
+  const toggleProposalGrant = (grant: 'task' | 'import' | 'calendar') => {
     setProposalGrants((current) => {
       const next = current.includes(grant) ? current.filter((item) => item !== grant) : [...current, grant]
       localStorage.setItem('academia.chat.proposalGrants', JSON.stringify(next))
@@ -462,12 +463,32 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
         if (!available) {
           setGoogleGrants([])
           localStorage.setItem('academia.chat.googleGrants', '[]')
+          setProposalGrants((current) => {
+            const next = current.filter((item) => item !== 'calendar')
+            localStorage.setItem('academia.chat.proposalGrants', JSON.stringify(next))
+            return next
+          })
         }
-      }).catch(() => { if (current) setGoogleAvailable(false) })
+      }).catch(() => {
+        if (!current) return
+        setGoogleAvailable(false)
+        setGoogleGrants([])
+        localStorage.setItem('academia.chat.googleGrants', '[]')
+        setProposalGrants((grants) => {
+          const next = grants.filter((item) => item !== 'calendar')
+          localStorage.setItem('academia.chat.proposalGrants', JSON.stringify(next))
+          return next
+        })
+      })
     }
     refresh()
     window.addEventListener('focus', refresh)
-    return () => { current = false; window.removeEventListener('focus', refresh) }
+    window.addEventListener('academia-google-connection-changed', refresh)
+    return () => {
+      current = false
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener('academia-google-connection-changed', refresh)
+    }
   }, [])
   useEffect(() => {
     if (reviewRevision > 0) void refreshProposalStatuses()
@@ -1070,7 +1091,8 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
             <span>Proposal mode is on. Grant only what the assistant may prepare:</span>
             <label><input type="checkbox" checked={proposalGrants.includes('task')} onChange={() => toggleProposalGrant('task')} /> Tasks</label>
             <label><input type="checkbox" checked={proposalGrants.includes('import')} onChange={() => toggleProposalGrant('import')} /> Imports</label>
-            <small>{proposalGrants.length ? 'It cannot approve, execute, or write.' : 'Select at least one proposal tool before sending.'}</small>
+            {googleAvailable && <label><input type="checkbox" checked={proposalGrants.includes('calendar')} onChange={() => toggleProposalGrant('calendar')} /> Google Calendar proposals</label>}
+            <small>{proposalGrants.length ? 'It cannot approve, execute, send email, or change Google Calendar directly. Calendar proposals still require a separate Review decision.' : 'Select at least one proposal tool before sending.'}</small>
           </div>}
           {googleGrants.length > 0 && <div className="chat-proposal-mode-note" role="note">
             <span>Google context is on for this message: {googleGrants.includes('gmail') ? 'recent Gmail messages' : ''}{googleGrants.length === 2 ? ' and ' : ''}{googleGrants.includes('calendar') ? 'upcoming Calendar events' : ''}.</span>

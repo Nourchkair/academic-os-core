@@ -11,7 +11,7 @@ import tempfile
 import threading
 import urllib.parse
 import webbrowser
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -411,6 +411,8 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 self._handle_mcp_connections(origin, "list")
             elif self.request_path == "/api/v1/connectors/google":
                 self._handle_google_connector(origin, "status")
+            elif self.request_path == "/api/v1/connectors/google/calendar/events":
+                self._handle_google_calendar_events(origin)
             else:
                 self._send_api_error(
                     DashboardRequestError(404, "NotFound", "API endpoint not found"),
@@ -484,6 +486,8 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             "/api/v1/connectors/google/oauth-status": "oauth-status",
             "/api/v1/connectors/google/oauth-cancel": "oauth-cancel",
             "/api/v1/connectors/google/disconnect": "disconnect",
+            "/api/v1/connectors/google/calendar/propose-create": "calendar-propose-create",
+            "/api/v1/connectors/google/calendar/propose-update": "calendar-propose-update",
         }
         if self.request_path in google_actions:
             self._handle_google_connector(origin, google_actions[self.request_path])
@@ -721,11 +725,55 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 value = connector.cancel_authorize()
             elif action == "disconnect":
                 value = connector.disconnect()
+            elif action in {"calendar-propose-create", "calendar-propose-update"}:
+                body = self._small_json_body()
+                config = load_config(self.dashboard.profile)
+                workspace_root = Path(str(config["academic"]["root_directory"])).expanduser().resolve()
+                state_root = workspace_root / ".academia"
+                from .actions import ActionStore
+                from .activity import ActivityLog
+                from .connectors.google_actions import propose_calendar_create, propose_calendar_update
+                from .review import ReviewQueue
+                from .workflow import ApprovalWorkflow
+
+                workflow = ApprovalWorkflow(
+                    actions=ActionStore(state_root / "actions.json"),
+                    reviews=ReviewQueue(state_root / "review.json"),
+                    activity=ActivityLog(state_root / "activity.jsonl"),
+                )
+                if action == "calendar-propose-create":
+                    proposal, review = propose_calendar_create(workflow, connector, body)
+                else:
+                    event_id = body.get("event_id")
+                    patch = body.get("patch")
+                    if not isinstance(event_id, str) or not isinstance(patch, dict):
+                        raise ValueError("calendar edit requires an exact event id and field patch")
+                    proposal, review = propose_calendar_update(workflow, connector, event_id=event_id, patch=patch)
+                value = {
+                    "proposal": asdict(proposal),
+                    "review": asdict(review),
+                    "next_step": f"Review item {review.id}: decide, then execute as a separate step.",
+                }
             else:
                 raise DashboardRequestError(404, "NotFound", "Google connector action not found")
             self._send_json(200, value, cors_origin=origin)
         except DashboardRequestError as exc:
             self._send_api_error(exc, cors_origin=origin)
+        except (OSError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(422, "GoogleConnectorError", str(exc)), cors_origin=origin)
+
+    def _handle_google_calendar_events(self, origin: str | None) -> None:
+        try:
+            connector = self.dashboard.get_google_connector()
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            time_min = query.get("time_min", [None])[0]
+            time_max = query.get("time_max", [None])[0]
+            try:
+                max_results = int(query.get("max", ["20"])[0] or "20")
+            except ValueError as exc:
+                raise ValueError("calendar max must be an integer") from exc
+            value = connector.calendar_list(time_min=time_min, time_max=time_max, max_results=max_results)
+            self._send_json(200, value, cors_origin=origin)
         except (OSError, ValueError) as exc:
             self._send_api_error(DashboardRequestError(422, "GoogleConnectorError", str(exc)), cors_origin=origin)
 

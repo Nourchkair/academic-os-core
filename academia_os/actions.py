@@ -153,6 +153,31 @@ class ActionStore:
     def reopen(self, proposal_id: str) -> ActionProposal:
         return self._transition(proposal_id, ActionStatus.PROPOSED, expected=ActionStatus.APPROVED)
 
+    def retry_failed(self, proposal_id: str) -> ActionProposal:
+        """Return one failed action to Review after a fresh human decision."""
+        selected: list[ActionProposal] = []
+
+        def transition(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            items = [ActionProposal.from_dict(value) for value in raw]
+            for index, item in enumerate(items):
+                if item.id != proposal_id:
+                    continue
+                if item.status != ActionStatus.FAILED.value:
+                    raise ValueError(f"proposal is not failed: {item.status}")
+                previous_failure = item.failure_reason
+                item.status = ActionStatus.PROPOSED.value
+                item.updated_at = _now()
+                item.failure_reason = None
+                item.details["last_failure_reason"] = previous_failure
+                item.details = _mark_operation(item.details, ActionStatus.PROPOSED.value)
+                items[index] = item
+                selected.append(item)
+                return [asdict(value) for value in items]
+            raise KeyError(f"action proposal not found: {proposal_id}")
+
+        self.store.update_strict([], transition)
+        return selected[0]
+
     def _transition(
         self,
         proposal_id: str,

@@ -2,11 +2,11 @@
 
 The app-server owns the model/tool loop and talks to Academia through a
 temporary, isolated ``CODEX_HOME``. The default mode exposes only
-``mcp serve --read-only``. ``mcp_mode="proposal_only"`` additionally exposes the
-exact ``academia_propose_import`` and ``academia_propose_task`` tools, which
-create Review/Action proposals but never copy, write, or execute. Direct write
-tools are never exposed because the app-server does not reliably route MCP write
-approval to the host.
+``mcp serve --read-only``. ``mcp_mode="proposal_only"`` additionally exposes exact
+``academia_propose_import``, ``academia_propose_task``, and
+``academia_propose_calendar`` tools, which create Review/Action proposals but
+never copy, write, or execute. Direct write tools are never exposed because the
+app-server does not reliably route MCP write approval to the host.
 
 The selected scope is conveyed in the prompt and used to scope the Academia MCP
 server for semester/course reads. Source-level filtering remains limited and
@@ -59,8 +59,8 @@ class CodexAppServerRuntime:
             raise ValueError("mcp_mode must be read_only or proposal_only")
         if self.proposal_tools is not None:
             proposal_tools = tuple(self.proposal_tools)
-            if any(name not in {"propose_import", "propose_task"} for name in proposal_tools):
-                raise ValueError("proposal_tools must contain propose_import or propose_task")
+            if any(name not in {"propose_import", "propose_task", "propose_calendar"} for name in proposal_tools):
+                raise ValueError("proposal_tools must contain propose_import, propose_task, or propose_calendar")
             if self.mcp_mode == "proposal_only" and not proposal_tools:
                 raise ValueError("proposal_only mode requires at least one proposal tool grant")
             object.__setattr__(self, "proposal_tools", proposal_tools)
@@ -273,7 +273,7 @@ class CodexAppServerRuntime:
         send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
 
         proposal_tool_text = ", ".join(
-            "academia_propose_import" if name == "propose_import" else "academia_propose_task"
+            {"propose_import": "academia_propose_import", "propose_task": "academia_propose_task", "propose_calendar": "academia_propose_calendar"}[name]
             for name in (self.proposal_tools or ("propose_import", "propose_task"))
         )
         start_params: dict[str, Any] = {
@@ -443,6 +443,4 @@ def _handle_item_completed(params: dict[str, Any], emit: Any, tool_results: list
     if error_value is None and data is not None and str(item.get("tool") or "").startswith("academia_propose_"):
         event_data["data"] = data
     emit(EventType.TOOL_RESULT, event_data)
-
-
 

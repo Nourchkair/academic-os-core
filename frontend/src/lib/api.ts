@@ -1,5 +1,5 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
-import type { AccountStatus, ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, GoogleAuthorizationStart, GoogleAuthorizationStatus, GoogleConnectorStatus, ImportResult, LibraryItem, MCPAuthorizationStart, MCPAuthorizationStatus, MCPConnection, MCPConnectionInput, MCPRemoteInput, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, TaskInput, TaskListPayload, TaskProposalAmendment, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
+import type { AccountStatus, ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, GoogleAuthorizationStart, GoogleAuthorizationStatus, GoogleCalendarEvent, GoogleCalendarProposalResult, GoogleConnectorStatus, ImportResult, LibraryItem, MCPAuthorizationStart, MCPAuthorizationStatus, MCPConnection, MCPConnectionInput, MCPRemoteInput, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, TaskInput, TaskListPayload, TaskProposalAmendment, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
@@ -305,6 +305,38 @@ export const api = {
   disconnectGoogleConnector: () => isTauriEnvironment() ? command<GoogleConnectorStatus>('connectors', ['google', 'disconnect']) : postJson<GoogleConnectorStatus>('/api/v1/connectors/google/disconnect', {}),
   setupGoogleConnector: (input: { client_id: string; client_secret: string }) => postJson<GoogleConnectorStatus>('/api/v1/connectors/google/setup', input),
   setupGoogleConnectorFromPath: (path: string) => command<GoogleConnectorStatus>('connectors', ['google', 'setup', '--client-json', path]),
+  googleCalendarEvents: (days = 14) => {
+    const timeMin = new Date().toISOString()
+    const timeMax = new Date(Date.now() + Math.min(Math.max(days, 1), 60) * 24 * 60 * 60 * 1000).toISOString()
+    if (isTauriEnvironment()) {
+      return command<{ time_min: string; time_max: string; count: number; events: GoogleCalendarEvent[] }>(
+        'connectors', ['google', 'calendar', 'list', '--time-min', timeMin, '--time-max', timeMax, '--max', '20'],
+      )
+    }
+    const query = new URLSearchParams({ time_min: timeMin, time_max: timeMax, max: '20' })
+    return fetch(`/api/v1/connectors/google/calendar/events?${query.toString()}`).then(readJsonResponse<{ time_min: string; time_max: string; count: number; events: GoogleCalendarEvent[] }>)
+  },
+  proposeGoogleCalendarCreate: (event: { summary: string; start: string; end: string; location?: string; description?: string }) => {
+    if (isTauriEnvironment()) {
+      const args = ['google', 'calendar', 'propose-create', '--summary', event.summary, '--start', event.start, '--end', event.end]
+      if (event.location) args.push('--location', event.location)
+      if (event.description) args.push('--description', event.description)
+      return command<GoogleCalendarProposalResult>('connectors', args)
+    }
+    return postJson<GoogleCalendarProposalResult>('/api/v1/connectors/google/calendar/propose-create', event)
+  },
+  proposeGoogleCalendarUpdate: (eventId: string, patch: Record<string, string>) => {
+    if (isTauriEnvironment()) {
+      const args = ['google', 'calendar', 'propose-update', eventId]
+      for (const [key, value] of Object.entries(patch)) {
+        if (key === 'location' && value === '') args.push('--clear-location')
+        else if (key === 'description' && value === '') args.push('--clear-description')
+        else args.push(`--${key.replaceAll('_', '-')}`, value)
+      }
+      return command<GoogleCalendarProposalResult>('connectors', args)
+    }
+    return postJson<GoogleCalendarProposalResult>('/api/v1/connectors/google/calendar/propose-update', { event_id: eventId, patch })
+  },
   mcpConnections: () => isTauriEnvironment() ? command<MCPConnection[]>('mcp-connections', ['list']) : fetch('/api/v1/mcp/connections').then(readJsonResponse<MCPConnection[]>),
   addMCPConnection: (input: MCPConnectionInput) => {
     if (isTauriEnvironment()) {

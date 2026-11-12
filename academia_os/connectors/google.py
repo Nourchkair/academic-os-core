@@ -16,6 +16,7 @@ import os
 import queue
 import re
 import secrets
+import sys
 import threading
 import time
 import urllib.error
@@ -92,15 +93,24 @@ def _http(
         raise GoogleConnectorError(f"Google could not be reached: {exc}") from exc
 
 
-def _json_request(method: str, url: str, *, body: Mapping[str, Any] | None = None, token: str | None = None) -> dict[str, Any]:
-    headers = {"Accept": "application/json"}
+def _json_request(
+    method: str,
+    url: str,
+    *,
+    body: Mapping[str, Any] | None = None,
+    token: str | None = None,
+    extra_headers: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    headers: dict[str, str] = {"Accept": "application/json"}
     data = None
     if body is not None:
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    status, _headers, payload = _http(method, url, body=data, headers=headers)
+    if extra_headers:
+        headers.update(extra_headers)
+    status, _response_headers, payload = _http(method, url, body=data, headers=headers)
     if status < 200 or status >= 300:
         raise GoogleConnectorError(f"Google returned HTTP {status}")
     try:
@@ -168,8 +178,39 @@ class GoogleCredentialStore:
     def save_client(self, client_id: str, client_secret: str) -> None:
         self._save("client", {"client_id": client_id, "client_secret": client_secret})
 
+    @staticmethod
+    def _bundled_client() -> dict[str, str] | None:
+        bundle_root = getattr(sys, "_MEIPASS", None)
+        if not isinstance(bundle_root, str):
+            return None
+        path = Path(bundle_root) / "google_client" / "client.json"
+        if not path.is_file():
+            return None
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise GoogleConnectorError("bundled Google OAuth client configuration is invalid") from exc
+        client = value.get("installed") if isinstance(value, dict) else None
+        if not isinstance(client, dict) and isinstance(value, dict):
+            client = value.get("web")
+        if not isinstance(client, dict):
+            raise GoogleConnectorError("bundled Google OAuth client configuration is invalid")
+        client_id = client.get("client_id")
+        client_secret = client.get("client_secret")
+        if not isinstance(client_id, str) or not client_id or not isinstance(client_secret, str) or not client_secret:
+            raise GoogleConnectorError("bundled Google OAuth client configuration is incomplete")
+        return {"client_id": client_id, "client_secret": client_secret}
+
     def load_client(self) -> dict[str, str] | None:
         value = self._load("client")
+        bundled = self._bundled_client()
+        if bundled is not None and (value is None or value.get("client_id") == bundled["client_id"]):
+            # Refresh the Keychain copy when an official app build rotates the
+            # secret for the same OAuth client. A separately configured local
+            # client with a different ID remains the user's explicit override.
+            if value != bundled:
+                self.save_client(bundled["client_id"], bundled["client_secret"])
+            return bundled
         if value is None:
             return None
         client_id = value.get("client_id")
@@ -384,6 +425,13 @@ class GoogleConnector:
     def status(self) -> dict[str, Any]:
         with self._lock:
             state = self._read()
+        client = self.store.load_client()
+        if client is not None and state["auth_status"] == "not_configured":
+            state = self._update(
+                client_id=client["client_id"],
+                auth_status="configured",
+                error=None,
+            )
         tokens = self.store.load_tokens()
         if state["auth_status"] == "authorized" and tokens is None:
             state = self._update(auth_status="error", error="Google tokens are missing; connect again.", account_email=None)
@@ -618,9 +666,168 @@ class GoogleConnector:
                 "start": item.get("start"),
                 "end": item.get("end"),
                 "location": item.get("location"),
+                "description": item.get("description"),
                 "html_link": item.get("htmlLink"),
             })
         return {"time_min": start, "time_max": time_max, "count": len(events), "events": events}
+
+    def calendar_get(self, event_id: str, *, missing_ok: bool = False) -> dict[str, Any] | None:
+        if not isinstance(event_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{5,1024}", event_id):
+            raise GoogleConnectorError("Google Calendar event id is invalid")
+        try:
+            return self._api_get(
+                f"{CALENDAR_API}/calendars/primary/events/{urllib.parse.quote(event_id, safe='')}"
+            )
+        except GoogleConnectorError as exc:
+            if missing_ok and "HTTP 404" in str(exc):
+                return None
+            raise
+
+    @staticmethod
+    def validate_calendar_event(event: Mapping[str, Any]) -> dict[str, Any]:
+        if not isinstance(event, Mapping):
+            raise GoogleConnectorError("calendar event must be an object")
+        summary = event.get("summary")
+        if not isinstance(summary, str) or not summary.strip() or len(summary.strip()) > 1024:
+            raise GoogleConnectorError("calendar event summary is required and must be under 1024 characters")
+        normalized: dict[str, Any] = {"summary": summary.strip()}
+        for field in ("start", "end"):
+            value = event.get(field)
+            if isinstance(value, Mapping):
+                value = value.get("dateTime")
+            if not isinstance(value, str) or not value.strip() or len(value) > 80:
+                raise GoogleConnectorError(f"calendar event {field} must be an RFC 3339 date-time with a timezone")
+            try:
+                parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise GoogleConnectorError(f"calendar event {field} must be an RFC 3339 date-time with a timezone") from exc
+            if parsed.tzinfo is None or parsed.utcoffset() is None:
+                raise GoogleConnectorError(f"calendar event {field} must include a timezone offset")
+            normalized[field] = parsed.isoformat().replace("+00:00", "Z")
+        if datetime.fromisoformat(normalized["end"].replace("Z", "+00:00")) <= datetime.fromisoformat(normalized["start"].replace("Z", "+00:00")):
+            raise GoogleConnectorError("calendar event end must be after its start")
+        for field, maximum in (("location", 1024), ("description", 8192)):
+            raw = event.get(field)
+            if raw is not None:
+                if not isinstance(raw, str) or len(raw) > maximum:
+                    raise GoogleConnectorError(f"calendar event {field} must be under {maximum} characters")
+                if raw.strip():
+                    normalized[field] = raw.strip()
+        return normalized
+
+    def calendar_find_duplicates(
+        self,
+        event: Mapping[str, Any],
+        *,
+        exclude_event_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        normalized = self.validate_calendar_event(event)
+        target_start = datetime.fromisoformat(normalized["start"].replace("Z", "+00:00"))
+        target_end = datetime.fromisoformat(normalized["end"].replace("Z", "+00:00"))
+        url = f"{CALENDAR_API}/calendars/primary/events"
+        params: dict[str, Any] = {
+            "timeMin": normalized["start"],
+            "timeMax": normalized["end"],
+            "singleEvents": "true",
+            "orderBy": "startTime",
+            "maxResults": 2500,
+        }
+        matches: list[dict[str, Any]] = []
+        page_token: str | None = None
+        for _page in range(5):
+            if page_token:
+                params["pageToken"] = page_token
+            value = self._api_get(url, params)
+            items = value.get("items") if isinstance(value.get("items"), list) else []
+            for item in items:
+                if not isinstance(item, dict) or item.get("id") == exclude_event_id or item.get("status") == "cancelled":
+                    continue
+                start = item.get("start") if isinstance(item.get("start"), dict) else {}
+                end = item.get("end") if isinstance(item.get("end"), dict) else {}
+                item_start = start.get("dateTime")
+                item_end = end.get("dateTime")
+                if not isinstance(item_start, str) or not isinstance(item_end, str):
+                    continue
+                try:
+                    same_time = (
+                        datetime.fromisoformat(item_start.replace("Z", "+00:00")) == target_start
+                        and datetime.fromisoformat(item_end.replace("Z", "+00:00")) == target_end
+                    )
+                except ValueError:
+                    same_time = False
+                if item.get("summary") == normalized["summary"] and same_time:
+                    matches.append({
+                        "id": item.get("id"),
+                        "summary": item.get("summary"),
+                        "start": start,
+                        "end": end,
+                        "html_link": item.get("htmlLink"),
+                    })
+            next_token = value.get("nextPageToken")
+            if not isinstance(next_token, str) or not next_token:
+                break
+            page_token = next_token
+        else:
+            raise GoogleConnectorError("Calendar duplicate check exceeded its page limit; no change was made")
+        return matches
+
+    def calendar_create(self, event: Mapping[str, Any], *, event_id: str) -> dict[str, Any]:
+        normalized = self.validate_calendar_event(event)
+        if not isinstance(event_id, str) or not re.fullmatch(r"[a-v0-9]{5,1024}", event_id):
+            raise GoogleConnectorError("generated Google Calendar event id is invalid")
+        payload: dict[str, Any] = {
+            "id": event_id,
+            "summary": normalized["summary"],
+            "start": {"dateTime": normalized["start"]},
+            "end": {"dateTime": normalized["end"]},
+        }
+        if normalized.get("location"):
+            payload["location"] = normalized["location"]
+        if normalized.get("description"):
+            payload["description"] = normalized["description"]
+        return _json_request("POST", f"{CALENDAR_API}/calendars/primary/events", body=payload, token=self._access_token())
+
+    def calendar_patch(self, event_id: str, fields: Mapping[str, Any], *, etag: str) -> dict[str, Any]:
+        if not isinstance(event_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{5,1024}", event_id):
+            raise GoogleConnectorError("Google Calendar event id is invalid")
+        if not isinstance(etag, str) or not etag.strip() or len(etag) > 500:
+            raise GoogleConnectorError("calendar update requires the reviewed event version")
+        allowed = {"summary", "start", "end", "location", "description"}
+        if not fields or any(key not in allowed for key in fields):
+            raise GoogleConnectorError("calendar updates may change only summary, start, end, location, or description")
+        patch: dict[str, Any] = {}
+        for key, value in fields.items():
+            if key in {"start", "end"}:
+                if not isinstance(value, str) or not value.strip() or len(value) > 80:
+                    raise GoogleConnectorError(f"calendar event {key} is invalid")
+                try:
+                    parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+                except ValueError as exc:
+                    raise GoogleConnectorError(f"calendar event {key} is invalid") from exc
+                if parsed.tzinfo is None or parsed.utcoffset() is None:
+                    raise GoogleConnectorError(f"calendar event {key} must include a timezone offset")
+                patch[key] = {"dateTime": parsed.isoformat().replace("+00:00", "Z")}
+            elif key == "summary":
+                if not isinstance(value, str) or not value.strip() or len(value.strip()) > 1024:
+                    raise GoogleConnectorError("calendar event summary is invalid")
+                patch[key] = value.strip()
+            elif key in {"location", "description"}:
+                maximum = 1024 if key == "location" else 8192
+                if value is not None and (not isinstance(value, str) or len(value) > maximum):
+                    raise GoogleConnectorError(f"calendar event {key} is invalid")
+                patch[key] = value.strip() if isinstance(value, str) else ""
+        if "start" in patch and "end" in patch:
+            start = datetime.fromisoformat(patch["start"]["dateTime"].replace("Z", "+00:00"))
+            end = datetime.fromisoformat(patch["end"]["dateTime"].replace("Z", "+00:00"))
+            if end <= start:
+                raise GoogleConnectorError("calendar event end must be after its start")
+        return _json_request(
+            "PATCH",
+            f"{CALENDAR_API}/calendars/primary/events/{urllib.parse.quote(event_id, safe='')}",
+            body=patch,
+            token=self._access_token(),
+            extra_headers={"If-Match": etag},
+        )
 
 
 def _headers(value: Mapping[str, Any]) -> dict[str, str]:

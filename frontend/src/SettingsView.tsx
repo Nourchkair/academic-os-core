@@ -6,7 +6,7 @@ import { MCPConnectionsCard } from './MCPConnectionsCard'
 import type { SettingsPreview, StatusPayload, WorkflowPreferenceRecord, AgentSetupPlaybook } from './types'
 import type { Update } from '@tauri-apps/plugin-updater'
 
-type SettingsViewProps = { status: StatusPayload | null; onSaved: () => Promise<void> }
+type SettingsViewProps = { status: StatusPayload | null; onSaved: () => Promise<void>; onOpenReview: (reviewId: string) => void }
 type Draft = {
   name: string
   institution: string
@@ -25,7 +25,7 @@ type WorkflowCardProps = {
   onReset: (workflowId: string) => void
 }
 
-export function SettingsView({ status, onSaved }: SettingsViewProps) {
+export function SettingsView({ status, onSaved, onOpenReview }: SettingsViewProps) {
   const [config, setConfig] = useState<ObjectValue | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [preview, setPreview] = useState<SettingsPreview | null>(null)
@@ -195,7 +195,7 @@ export function SettingsView({ status, onSaved }: SettingsViewProps) {
       <AssistantAccountCard />
     </SettingsSection>
     <SettingsSection title="Google account" description="Connect Gmail and Google Calendar for read-only access. OAuth tokens are stored in the macOS Keychain, not in the academic workspace.">
-      <GoogleConnectorCard />
+      <GoogleConnectorCard onOpenReview={onOpenReview} />
     </SettingsSection>
     <SettingsSection title="External MCP connections" description="Manage local external MCP servers explicitly. Only server-declared read-only tools can be granted, and no connection starts automatically.">
       <MCPConnectionsCard />

@@ -258,7 +258,7 @@ def _attention_review(item: ReviewItem, root: Path, *, course_label: str | None 
     proposal_details = details.get("proposal_details")
     proposal_action_type = proposal_details.get("action_type") if isinstance(proposal_details, dict) else None
     action_type = str(details.get("action_type") or proposal_action_type or "")
-    execution_supported = action_type in {"domain_change", "file_copy", "task_change"}
+    execution_supported = action_type in {"domain_change", "file_copy", "task_change", "calendar_change"}
     choices: list[dict[str, Any]] = []
     recommended: list[dict[str, Any]] = []
     if item.action_proposal_id:

@@ -11,7 +11,7 @@ import pytest
 from academia_os import dashboard_chat
 from academia_os.assistant.contracts import AssistantError, EventType, RunEvent, RunResult, ToolResult
 from academia_os.assistant.providers.base import CancelToken
-from academia_os.dashboard_chat import _validate_payload, respond, stream_chat
+from academia_os.dashboard_chat import _proposal_card, _proposal_instruction, _validate_payload, respond, stream_chat
 from academia_os.study.providers import CLAUDE_UNAVAILABLE_NOTICE
 from tests.test_agent_interface import prepared_workspace
 
@@ -70,6 +70,23 @@ def test_validate_payload_accepts_bounded_google_connector_grants() -> None:
     assert _validate_payload(payload(connector_grants=["gmail", "calendar"]))[-1] == ["gmail", "calendar"]
     with pytest.raises(ValueError, match="connector_grants"):
         _validate_payload(payload(connector_grants=["gmail", "drive"]))
+
+
+def test_calendar_proposal_grant_is_explicit_and_creates_a_review_card() -> None:
+    instruction = _proposal_instruction(["calendar"])
+    assert "academia_propose_calendar" in instruction
+    assert "Never call direct write tools" in instruction
+    assert "requires explicit timezone" in instruction or "timezone" in instruction
+    card = _proposal_card("academia_propose_calendar", {
+        "action": "create",
+        "review_id": "review-calendar",
+        "proposal_id": "proposal-calendar",
+        "after": "Study block\n2027-02-10T14:00:00Z – 2027-02-10T15:00:00Z",
+        "effects": ["Create one Google Calendar event after approval."],
+    })
+    assert card is not None
+    assert card["kind"] == "calendar"
+    assert card["review_id"] == "review-calendar"
 
 
 def test_validate_payload_bounds_messages_and_prompt_size() -> None:
@@ -262,8 +279,9 @@ def test_validate_payload_accepts_and_bounds_proposal_scope() -> None:
     assert grants == ["task"]
     with pytest.raises(ValueError, match="at least one"):
         _validate_payload(payload(proposal_mode=True, granted_proposal_tools=[]))
+    assert _validate_payload(payload(proposal_mode=True, granted_proposal_tools=["calendar"]))[-3] == ["calendar"]
     with pytest.raises(ValueError, match="granted_proposal_tools"):
-        _validate_payload(payload(proposal_mode=True, granted_proposal_tools=["calendar"]))
+        _validate_payload(payload(proposal_mode=True, granted_proposal_tools=["drive"]))
 
     with pytest.raises(ValueError, match="proposal_mode"):
         _validate_payload(payload(proposal_mode="yes"))
@@ -519,7 +537,7 @@ def test_google_context_reads_only_granted_sources(monkeypatch: pytest.MonkeyPat
             return {"messages": [{"date": "Mon, 10 Nov 2026", "from": "advisor@example.edu", "subject": "Essay extension", "snippet": "You may submit on Friday."}]}
 
         def calendar_list(self, *, time_max: str | None = None, max_results: int = 10) -> dict[str, Any]:
-            return {"events": [{"start": {"dateTime": "2026-11-12T10:00:00-05:00"}, "end": {"dateTime": "2026-11-12T11:00:00-05:00"}, "summary": "Office hours", "location": "Room 203"}]}
+            return {"events": [{"id": "event-1", "start": {"dateTime": "2026-11-12T10:00:00-05:00"}, "end": {"dateTime": "2026-11-12T11:00:00-05:00"}, "summary": "Office hours", "location": "Room 203"}]}
 
     from academia_os.connectors import google as google_module
     monkeypatch.setattr(google_module, "GoogleConnector", FakeConnector)
@@ -527,6 +545,7 @@ def test_google_context_reads_only_granted_sources(monkeypatch: pytest.MonkeyPat
     assert "Essay extension" in text
     assert "Office hours" in text
     assert "student@example.edu" in text
+    assert "event id: event-1" in text
 
     class UnauthorizedConnector(FakeConnector):
         def status(self) -> dict[str, Any]:

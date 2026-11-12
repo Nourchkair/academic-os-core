@@ -29,6 +29,7 @@ EXPECTED_TOOLS = {
     "academia_import_targets",
     "academia_library",
     "academia_processing_status",
+    "academia_propose_calendar",
     "academia_propose_import",
     "academia_propose_task",
     "academia_read_library_item",
@@ -171,14 +172,80 @@ def test_read_only_mode_hides_and_rejects_write_tools(tmp_path: Path) -> None:
             "academia_review_decide",
             "academia_review_execute",
             "academia_import_file",
-            "academia_propose_import",
-            "academia_propose_task",
+        "academia_propose_import",
+        "academia_propose_task",
+        "academia_propose_calendar",
         }
         error = call_error(server, "academia_review_decide", {"review_id": "missing", "decision": "use_new"})
         assert "disabled in read-only mode" in error
         assert call_json(server, "academia_status")["workspace"]["semester"] == "Fall 2026"
     finally:
         server.close()
+
+
+def test_calendar_proposal_tool_is_explicitly_granted(tmp_path: Path) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+    server = McpServer(profile, proposal_only=True, proposal_tools=["propose_calendar"])
+    try:
+        tools = server.request("tools/list")["result"]["tools"]
+        names = {tool["name"] for tool in tools}
+        assert "academia_propose_calendar" in names
+        assert "academia_propose_task" not in names
+        assert "academia_propose_import" not in names
+    finally:
+        server.close()
+
+    denied = McpServer(profile, proposal_only=True, proposal_tools=["propose_task"])
+    try:
+        message = call_error(denied, "academia_propose_calendar", {"action": "create"})
+        assert "not granted" in message
+    finally:
+        denied.close()
+
+
+def test_calendar_mcp_proposal_creates_review_without_calling_calendar_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, root, profile = prepared_workspace(tmp_path)
+    from academia_os import mcp_server
+    from academia_os.connectors import google as google_module
+    google_connector_type = google_module.GoogleConnector
+
+    class FakeGoogleConnector:
+        validate_calendar_event = staticmethod(google_connector_type.validate_calendar_event)
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            self.writes = 0
+
+        def status(self) -> dict[str, Any]:
+            return {"auth_status": "authorized", "account_email": "student@example.edu"}
+
+        def calendar_find_duplicates(self, _event: Any, *, exclude_event_id: str | None = None) -> list[dict[str, Any]]:
+            return []
+
+        def calendar_create(self, *_args: Any, **_kwargs: Any) -> None:
+            self.writes += 1
+            raise AssertionError("proposal tool must not write to Google")
+
+    monkeypatch.setattr(google_module, "GoogleConnector", FakeGoogleConnector)
+    result = mcp_server._call_tool(
+        "academia_propose_calendar",
+        {
+            "action": "create",
+            "summary": "Study block",
+            "start": "2027-02-10T14:00:00Z",
+            "end": "2027-02-10T15:00:00Z",
+        },
+        profile,
+        proposal_only=True,
+        proposal_tools={"academia_propose_calendar"},
+    )
+
+    assert result["status"] == "approval_required"
+    assert result["review_id"]
+    review = ReviewQueue(root / ".academia" / "review.json").get(result["review_id"])
+    assert review.kind == "action_approval"
+    assert review.details["action_type"] == "calendar_change"
+    proposal = ActionStore(root / ".academia" / "actions.json").get(review.action_proposal_id)
+    assert proposal.status == "proposed"
 
 
 def test_initialize_and_ping(mcp: tuple[McpServer, Path, Path]) -> None:
@@ -204,7 +271,7 @@ def test_tools_list_is_stable_and_schemas_are_complete(mcp: tuple[McpServer, Pat
         assert isinstance(schema.get("required"), list)
         assert schema.get("additionalProperties") is False
         assert set(schema["required"]) <= set(schema["properties"])
-        if tool["name"] in {"academia_review_decide", "academia_review_execute", "academia_import_file", "academia_propose_import", "academia_propose_task"}:
+        if tool["name"] in {"academia_review_decide", "academia_review_execute", "academia_import_file", "academia_propose_import", "academia_propose_task", "academia_propose_calendar"}:
             assert tool.get("annotations", {}).get("readOnlyHint") is False
         else:
             assert tool.get("annotations", {}).get("readOnlyHint") is True

@@ -86,7 +86,7 @@ function ApprovedActionCard({ item, busy, onExecute }: { item: ReviewItem; busy:
     <div className="approval-card-heading"><div><span className="review-kind">{actionLabels[actionType] || 'Approved action'}</span><h3>{item.title}</h3><p>{item.course || 'Workspace'} · approved and waiting for execution</p></div><span className="approval-ready">Ready</span></div>
     {(source || destination) && <dl className="approval-targets">{source && <div><dt>Source</dt><dd>{source}</dd></div>}{destination && <div><dt>Destination</dt><dd>{destination}</dd></div>}</dl>}
     {effects.length > 0 && <div className="effect-list"><strong>This will:</strong><ul>{effects.map((effect) => <li key={effect}>{effect}</li>)}</ul></div>}
-    <div className="decision-row"><span className="approval-hint">Nothing has been copied or changed yet.</span><button className="primary-button" disabled={busy} onClick={() => void onExecute()}>{busy ? 'Executing…' : 'Execute approved action'}</button></div>
+    <div className="decision-row"><span className="approval-hint">{actionType === 'calendar_change' ? 'Google Calendar is unchanged until you execute this approved action.' : 'Nothing has been copied or changed yet.'}</span><button className="primary-button" disabled={busy} onClick={() => void onExecute()}>{busy ? 'Executing…' : 'Execute approved action'}</button></div>
   </article>
 }
 

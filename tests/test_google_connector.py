@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import threading
+from datetime import datetime
 import time
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from academia_os.connectors import google
 
@@ -38,6 +41,19 @@ class FakeGoogleServer:
         self.access_token = "google-access"
         self.refresh_token = "google-refresh"
         self.requests: list[str] = []
+        self.calendar_events: dict[str, dict[str, Any]] = {
+            "event-1": {
+                "id": "event-1",
+                "etag": '"etag-1"',
+                "summary": "Study session",
+                "status": "confirmed",
+                "start": {"dateTime": "2030-02-10T10:00:00-05:00"},
+                "end": {"dateTime": "2030-02-10T11:00:00-05:00"},
+                "location": "Room 203",
+                "htmlLink": "https://calendar.example.test/event-1",
+            }
+        }
+        self.calendar_counter = 1
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -87,14 +103,31 @@ class FakeGoogleServer:
                         },
                     })
                 elif parts.path == "/calendar/v3/calendars/primary/events":
-                    self._json(200, {"items": [{
-                        "id": "e1",
-                        "summary": "Study session",
-                        "status": "confirmed",
-                        "start": {"dateTime": "2026-11-12T10:00:00-05:00"},
-                        "end": {"dateTime": "2026-11-12T11:00:00-05:00"},
-                        "htmlLink": "https://calendar.example.test/e1",
-                    }]})
+                    query = urllib.parse.parse_qs(parts.query)
+                    time_min = query.get("timeMin", [None])[0]
+                    time_max = query.get("timeMax", [None])[0]
+                    search = query.get("q", [None])[0]
+                    items = list(owner.calendar_events.values())
+                    if search:
+                        items = [item for item in items if search.casefold() in str(item.get("summary", "")).casefold()]
+                    def parsed(value: Any) -> datetime | None:
+                        if not isinstance(value, str):
+                            return None
+                        try:
+                            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+                        except ValueError:
+                            return None
+                    lower = parsed(time_min)
+                    upper = parsed(time_max)
+                    if lower is not None:
+                        items = [item for item in items if (parsed(item.get("end", {}).get("dateTime")) or lower) >= lower]
+                    if upper is not None:
+                        items = [item for item in items if (parsed(item.get("start", {}).get("dateTime")) or upper) <= upper]
+                    self._json(200, {"items": items})
+                elif parts.path.startswith("/calendar/v3/calendars/primary/events/"):
+                    event_id = parts.path.rsplit("/", 1)[-1]
+                    event = owner.calendar_events.get(event_id)
+                    self._json(200 if event else 404, event or {"error": "not found"})
                 else:
                     self._json(404, {"error": "not found"})
 
@@ -110,8 +143,41 @@ class FakeGoogleServer:
                         "token_type": "Bearer",
                         "expires_in": 3600,
                     })
+                elif parts.path == "/calendar/v3/calendars/primary/events":
+                    event = json.loads(body)
+                    if event.get("id") in owner.calendar_events:
+                        self._json(409, {"error": "duplicate id"})
+                        return
+                    owner.calendar_counter += 1
+                    event["etag"] = f'"etag-{owner.calendar_counter}"'
+                    event["status"] = "confirmed"
+                    owner.calendar_events[event["id"]] = event
+                    self._json(200, event)
                 else:
                     self._json(404, {"error": "not found"})
+
+            def do_PATCH(self) -> None:
+                parts = urllib.parse.urlsplit(self.path)
+                event_id = parts.path.rsplit("/", 1)[-1]
+                event = owner.calendar_events.get(event_id)
+                if event is None:
+                    self._json(404, {"error": "not found"})
+                    return
+                if self.headers.get("If-Match") != event.get("etag"):
+                    self._json(412, {"error": "etag mismatch"})
+                    return
+                length = int(self.headers.get("Content-Length", "0"))
+                patch = json.loads(self.rfile.read(length).decode("utf-8"))
+                for key, value in patch.items():
+                    if key in {"start", "end"} and isinstance(value, dict):
+                        event[key] = {**event.get(key, {}), **value}
+                    elif key in {"location", "description"} and value == "":
+                        event.pop(key, None)
+                    else:
+                        event[key] = value
+                owner.calendar_counter += 1
+                event["etag"] = f'"etag-{owner.calendar_counter}"'
+                self._json(200, event)
 
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.httpd.daemon_threads = True
@@ -197,5 +263,45 @@ def test_google_refresh_tokens_and_errors(tmp_path: Path) -> None:
 
         connector.cancel_authorize()
         assert connector.status()["auth_status"] == "configured"
+    finally:
+        server.close()
+
+
+def test_google_calendar_event_create_update_and_duplicate_detection(tmp_path: Path) -> None:
+    server = FakeGoogleServer()
+    store = MemoryGoogleStore()
+    connector = google.GoogleConnector(tmp_path / "google_connector.json", store=store)  # type: ignore[arg-type]
+    try:
+        _configure(connector, server)
+        store.tokens = {
+            "access_token": server.access_token,
+            "refresh_token": server.refresh_token,
+            "expires_at": time.time() + 3600,
+        }
+        event = {
+            "summary": "POL 2103 study block",
+            "start": "2027-02-10T14:00:00Z",
+            "end": "2027-02-10T15:00:00Z",
+            "location": "Library",
+            "description": "Review lecture notes",
+        }
+        assert connector.calendar_find_duplicates(event) == []
+        created = connector.calendar_create(event, event_id="abcdef123456")
+        assert created["id"] == "abcdef123456"
+        assert created["location"] == "Library"
+        assert connector.calendar_get("abcdef123456")["summary"] == "POL 2103 study block"
+        assert len(connector.calendar_find_duplicates(event)) == 1
+
+        current = connector.calendar_get("event-1")
+        updated = connector.calendar_patch(
+            "event-1",
+            {"summary": "Updated study session"},
+            etag=current["etag"],
+        )
+        assert updated["summary"] == "Updated study session"
+        assert connector.calendar_get("event-1")["etag"] != current["etag"]
+
+        with pytest.raises(google.GoogleConnectorError, match="HTTP 412"):
+            connector.calendar_patch("event-1", {"summary": "Stale update"}, etag=current["etag"])
     finally:
         server.close()

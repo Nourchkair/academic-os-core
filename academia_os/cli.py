@@ -411,6 +411,22 @@ def _google_connector(args: argparse.Namespace) -> Any:
     return GoogleConnector(runtime_directory(config) / "google_connector.json")
 
 
+def _google_calendar_workflow(args: argparse.Namespace) -> tuple[Any, ApprovalWorkflow]:
+    from .connectors.google import GoogleConnector
+
+    config = load_config(_profile_path(args))
+    workspace_root = Path(str(config["academic"]["root_directory"])).expanduser().resolve()
+    state_root = workspace_root / ".academia"
+    return (
+        GoogleConnector(runtime_directory(config) / "google_connector.json"),
+        ApprovalWorkflow(
+            actions=ActionStore(state_root / "actions.json"),
+            reviews=ReviewQueue(state_root / "review.json"),
+            activity=ActivityLog(state_root / "activity.jsonl"),
+        ),
+    )
+
+
 def _connectors(args: argparse.Namespace) -> Any:
     if args.connector_command != "google":
         raise ValueError(f"unsupported connector: {args.connector_command}")
@@ -457,6 +473,31 @@ def _connectors(args: argparse.Namespace) -> Any:
     if args.google_command == "calendar":
         if args.calendar_command == "list":
             return connector.calendar_list(time_min=args.time_min or None, time_max=args.time_max or None, max_results=args.max_results)
+        if args.calendar_command in {"propose-create", "propose-update"}:
+            from .connectors.google_actions import propose_calendar_create, propose_calendar_update
+
+            connector, workflow = _google_calendar_workflow(args)
+            if args.calendar_command == "propose-create":
+                event = {
+                    "summary": args.summary,
+                    "start": args.start,
+                    "end": args.end,
+                    "location": args.location,
+                    "description": args.description,
+                }
+                proposal, review = propose_calendar_create(workflow, connector, event)
+            else:
+                patch: dict[str, Any] = {}
+                for field in ("summary", "start", "end", "location", "description"):
+                    value = getattr(args, field)
+                    if value is not None:
+                        patch[field] = value
+                if args.clear_location:
+                    patch["location"] = ""
+                if args.clear_description:
+                    patch["description"] = ""
+                proposal, review = propose_calendar_update(connector=connector, workflow=workflow, event_id=args.event_id, patch=patch)
+            return {"proposal": asdict(proposal), "review": asdict(review), "next_step": f"academia review decide {review.id} approve_action --json"}
     raise ValueError(f"unsupported Google connector command: {args.google_command}")
 
 
@@ -625,7 +666,7 @@ def build_parser() -> argparse.ArgumentParser:
     assistant_run.add_argument("--course", dest="course_id", help="Optional exact course ID, code, or name")
     assistant_run.add_argument("--model", help="Optional Codex model override")
     assistant_run.add_argument("--proposal-mode", action="store_true", help="Let Codex create Review/Action proposals, never direct writes")
-    assistant_run.add_argument("--proposal-tool", action="append", choices=("propose_import", "propose_task"), dest="proposal_tools", help="Grant one exact proposal tool in proposal mode; may be repeated")
+    assistant_run.add_argument("--proposal-tool", action="append", choices=("propose_import", "propose_task", "propose_calendar"), dest="proposal_tools", help="Grant one exact proposal tool in proposal mode; may be repeated")
     assistant_run.add_argument("--json", action="store_true")
     assistant_propose_import = assistant_sub.add_parser("propose-import", help="Create a Review/Action proposal for one local file import")
     assistant_propose_import.add_argument("--source", required=True, help="Exact local source file")
@@ -806,7 +847,7 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_mode = mcp_serve.add_mutually_exclusive_group()
     mcp_mode.add_argument("--read-only", action="store_true", help="Expose read tools only; disable all write and proposal tools")
     mcp_mode.add_argument("--proposal-only", action="store_true", help="Expose read tools and exact approval proposals, but no direct writes")
-    mcp_serve.add_argument("--proposal-tool", action="append", choices=("propose_import", "propose_task"), dest="proposal_tools", help="Grant one exact proposal tool in proposal-only mode; may be repeated")
+    mcp_serve.add_argument("--proposal-tool", action="append", choices=("propose_import", "propose_task", "propose_calendar"), dest="proposal_tools", help="Grant one exact proposal tool in proposal-only mode; may be repeated")
     mcp_serve.add_argument("--semester", help="Limit read tools to one exact semester folder")
     mcp_serve.add_argument("--course", help="Limit read tools to one exact course ID, code, or name")
     connections = sub.add_parser("mcp-connections", help="Manage local external MCP connections and read-only tool grants")
@@ -887,6 +928,23 @@ def build_parser() -> argparse.ArgumentParser:
     calendar_list.add_argument("--time-max", default="")
     calendar_list.add_argument("--max", dest="max_results", type=int, default=20)
     calendar_list.add_argument("--json", action="store_true")
+    calendar_create = calendar_sub.add_parser("propose-create", help="Create a calendar event proposal for Review")
+    calendar_create.add_argument("--summary", required=True)
+    calendar_create.add_argument("--start", required=True, help="RFC 3339 date-time including a timezone offset")
+    calendar_create.add_argument("--end", required=True, help="RFC 3339 date-time including a timezone offset")
+    calendar_create.add_argument("--location")
+    calendar_create.add_argument("--description")
+    calendar_create.add_argument("--json", action="store_true")
+    calendar_update = calendar_sub.add_parser("propose-update", help="Edit a calendar event through a Review proposal")
+    calendar_update.add_argument("event_id")
+    calendar_update.add_argument("--summary")
+    calendar_update.add_argument("--start", help="RFC 3339 date-time including a timezone offset")
+    calendar_update.add_argument("--end", help="RFC 3339 date-time including a timezone offset")
+    calendar_update.add_argument("--location")
+    calendar_update.add_argument("--clear-location", action="store_true")
+    calendar_update.add_argument("--description")
+    calendar_update.add_argument("--clear-description", action="store_true")
+    calendar_update.add_argument("--json", action="store_true")
     from .study.cli import add_parser as add_study_parser
     add_study_parser(sub)
     dashboard_chat = sub.add_parser("chat", help=argparse.SUPPRESS)
@@ -1544,6 +1602,15 @@ def dispatch(args: argparse.Namespace) -> int:
                     value = asdict(workflow.execute_approved(
                         review_item.action_proposal_id,
                         lambda proposal: execute_task_change(proposal, workspace_root=Path(snapshot["academic_root"])),
+                        actor=args.actor if args.actor != "user" else "system",
+                    ))
+                elif action_type == "calendar_change":
+                    from .connectors.google import GoogleConnector
+                    from .connectors.google_actions import execute_calendar_change
+                    connector = GoogleConnector(runtime_directory(config) / "google_connector.json")
+                    value = asdict(workflow.execute_approved(
+                        review_item.action_proposal_id,
+                        lambda proposal: execute_calendar_change(proposal, connector),
                         actor=args.actor if args.actor != "user" else "system",
                     ))
                 else:

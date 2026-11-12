@@ -29,6 +29,32 @@ class ApprovalWorkflow:
         self.activity = activity
         self.courses = [dict(course) for course in courses]
 
+    def _reopen_failed_action(self, review: ReviewItem, *, actor: str) -> ReviewItem:
+        if not review.action_proposal_id:
+            return review
+        proposal = self.actions.get(review.action_proposal_id)
+        if proposal.status != ActionStatus.FAILED.value:
+            return review
+        previous_failure = proposal.failure_reason or proposal.details.get("last_failure_reason")
+        reopened = self.actions.retry_failed(proposal.id)
+        operation = reopened.details.get("operation") if isinstance(reopened.details.get("operation"), dict) else {}
+        details = self._with_details(review, {
+            "action_status": reopened.status,
+            "operation_id": operation.get("id") or review.details.get("operation_id"),
+            "operation_phase": operation.get("phase") or "proposed",
+            "failure_reason": None,
+            "last_failure_reason": previous_failure,
+        })
+        updated = self.reviews.update(review.id, status=ReviewStatus.OPEN, details=details)
+        self.activity.append(
+            event_type="action.retry_requested",
+            title=review.title,
+            course=review.course,
+            details={"proposal_id": proposal.id, "review_id": review.id, "previous_failure_reason": previous_failure},
+            actor=actor,
+        )
+        return updated
+
     def propose(
         self,
         *,
@@ -72,6 +98,7 @@ class ApprovalWorkflow:
     def approve_review(self, review_id: str, *, actor: str = "user") -> ReviewItem:
         review = self.reviews.get(review_id)
         if review.action_proposal_id:
+            review = self._reopen_failed_action(review, actor=actor)
             proposal = self.actions.approve(review.action_proposal_id)
             operation = proposal.details.get("operation") if isinstance(proposal.details.get("operation"), dict) else {}
             try:
@@ -100,6 +127,7 @@ class ApprovalWorkflow:
     def reject_review(self, review_id: str, *, actor: str = "user") -> ReviewItem:
         review = self.reviews.get(review_id)
         if review.action_proposal_id:
+            review = self._reopen_failed_action(review, actor=actor)
             proposal = self.actions.reject(review.action_proposal_id)
             operation = proposal.details.get("operation") if isinstance(proposal.details.get("operation"), dict) else {}
             updated = self.reviews.update(
@@ -129,10 +157,15 @@ class ApprovalWorkflow:
         action_status: str | None = None
         operation: dict[str, Any] = {}
         if review.action_proposal_id:
+            review = self._reopen_failed_action(review, actor=actor)
             proposal = self.actions.reject(review.action_proposal_id) if rejection else self.actions.approve(review.action_proposal_id)
             action_status = proposal.status
             operation = proposal.details.get("operation") if isinstance(proposal.details.get("operation"), dict) else {}
-        details = self._with_details(review, {"decision": decision, "decision_at": datetime.now(timezone.utc).isoformat()})
+        details = self._with_details(review, {
+            "decision": decision,
+            "decision_at": datetime.now(timezone.utc).isoformat(),
+            "failure_reason": None,
+        })
         if action_status is not None:
             details["action_status"] = action_status
             details["operation_id"] = operation.get("id") or review.details.get("operation_id")

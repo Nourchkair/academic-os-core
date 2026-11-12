@@ -89,5 +89,11 @@
       "evidence_source",
       "evidence_path"
     ]
+  },
+  {
+    "name": "academia_propose_calendar",
+    "required": [
+      "action"
+    ]
   }
 ]

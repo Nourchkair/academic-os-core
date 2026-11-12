@@ -116,6 +116,27 @@ def test_failed_execution_reopens_review_and_cannot_be_replayed_automatically(tm
         workflow.execute_approved(proposal.id, lambda item: {"verified": True})
 
 
+def test_retry_after_failure_requires_a_fresh_review_decision(tmp_path: Path) -> None:
+    workflow, actions, reviews, activity = workflow_for(tmp_path)
+    proposal, review = workflow.propose(action_type=ActionType.CALENDAR_CHANGE, title="Create calendar event")
+    workflow.approve_review(review.id)
+
+    with pytest.raises(RuntimeError, match="temporary network failure"):
+        workflow.execute_approved(proposal.id, lambda item: (_ for _ in ()).throw(RuntimeError("temporary network failure")))
+    assert actions.get(proposal.id).status == ActionStatus.FAILED.value
+    assert reviews.get(review.id).status is ReviewStatus.OPEN
+
+    decided = workflow.decide_review(review.id, "approve_action", actor="user")
+    assert decided.status is ReviewStatus.APPROVED
+    assert actions.get(proposal.id).status == ActionStatus.APPROVED.value
+    assert actions.get(proposal.id).details["last_failure_reason"] == "temporary network failure"
+    assert any(event.event_type == "action.retry_requested" for event in activity.list(limit=10))
+
+    verified = workflow.execute_approved(proposal.id, lambda item: {"verified": True})
+    assert verified.status == ActionStatus.VERIFIED.value
+    assert actions.get(proposal.id).details["operation"]["attempts"] == 2
+
+
 def test_domain_change_retry_after_commit_is_idempotent(tmp_path: Path) -> None:
     workflow, actions, reviews, _ = workflow_for(tmp_path)
     domain = DomainProjection(tmp_path / "domain.json")

@@ -216,18 +216,16 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
         let action = args.get(1).map(String::as_str).unwrap_or("");
         let json_ok = args.last().map(String::as_str) == Some("--json");
         let core_len = if json_ok { args.len() - 1 } else { args.len() };
-        let valid = provider == "google"
-            && match action {
-                "status" | "authorize" | "oauth-status" | "oauth-cancel" | "disconnect" => {
-                    core_len == 2
-                }
-                "setup" => {
-                    core_len == 4
-                        && args.get(2).map(String::as_str) == Some("--client-json")
-                        && args.get(3).map(|value| !value.is_empty()).unwrap_or(false)
-                }
-                _ => false,
-            };
+        let valid = provider == "google" && match action {
+            "status" | "authorize" | "oauth-status" | "oauth-cancel" | "disconnect" => core_len == 2,
+            "setup" => {
+                core_len == 4
+                    && args.get(2).map(String::as_str) == Some("--client-json")
+                    && args.get(3).map(|value| !value.is_empty()).unwrap_or(false)
+            }
+            "calendar" => matches!(args.get(2).map(String::as_str), Some("list" | "propose-create" | "propose-update")),
+            _ => false,
+        };
         if !valid {
             return Err("Unsupported Academia connector action".to_string());
         }

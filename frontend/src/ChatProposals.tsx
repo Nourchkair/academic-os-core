@@ -24,6 +24,7 @@ export function ChatProposals({ proposals, onOpenReview }: { proposals: ChatProp
 function proposalKind(kind: string) {
   if (kind === 'task') return 'Personal task'
   if (kind === 'import') return 'File import'
+  if (kind === 'calendar') return 'Google Calendar'
   return 'Action'
 }
 

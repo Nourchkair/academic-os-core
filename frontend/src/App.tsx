@@ -514,7 +514,7 @@ function App() {
       <div className={`chat-route-shell ${view === 'chat' ? 'active' : ''}`} aria-hidden={view !== 'chat'}><DashboardChat courses={courses} items={libraryItems} semester={selectedSemester || status?.workspace.semester || ''} onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} onProposalCreated={() => void refreshReviews()} reviewRevision={reviewRevision} onResumeStudySession={resumeStudySession} studyChatRequest={studyChatRequest} onStudyChatRequestConsumed={clearStudyChatRequest} /></div>
       {view === 'tasks' && <Tasks tasks={tasks} courses={courses} semester={selectedSemester || status?.workspace.semester || ''} timezone={status?.workspace.timezone} stateError={taskStateError} onNavigate={navigate} onChanged={() => refresh()} />}
       {view === 'activity' && <ActivityView activity={activity} processing={inbox} onNavigate={navigate} />}
-      {view === 'settings' && status && <SettingsView status={status} onSaved={() => refresh()} />}
+      {view === 'settings' && status && <SettingsView status={status} onSaved={() => refresh()} onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} />}
     </main>
     {actionMode && status && <ActionPanel key={`${actionMode}:${actionCourseId || 'general'}`} mode={actionMode} status={status} courses={courses} semester={selectedSemester || status.workspace.semester} initialCourseId={actionCourseId} onModeChange={setActionMode} onClose={closeActionPanel} onImported={async () => { await refresh(true) }} onMigrated={async () => { await refresh(true) }} onBusyChange={setMigrationBusy} />}
     <AppTooltipLayer />

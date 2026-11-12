@@ -40,7 +40,7 @@ The setup/settings screen loads the existing profile when present. It does not s
    ```
 
 2. Review the generated Agent Setup Playbooks and local workflow-preference record. Academia OS does not configure external accounts or start recurring schedules.
-3. If desired, ask an authorized external agent to implement a selected playbook. The agent must request Gmail/email, Calendar, Drive, course-platform/browser, or scheduler permissions through its own authorization flow and report what was actually configured and verified.
+3. If desired, connect Google in Settings for bounded Gmail and Calendar reads. Study chat requires a separate per-message context grant; Calendar create/edit requires a separate proposal grant, Review approval, execution, and verification. Drive, course-platform/browser, and scheduler playbooks still require an authorized external agent to obtain permissions through its own flow and report what was configured.
 4. Add authoritative course material only after confirming the course identity.
 5. Keep original syllabi, instructions, rubrics, and other academic sources preserved.
 
@@ -75,7 +75,7 @@ Academia OS exposes local capabilities, Agent Setup Playbooks, and saved student
 ## Important boundaries
 
 - This installation starts with no invented courses or deadlines.
-- Google/email, Calendar, Drive, course-platform, browser, and scheduler access belong to the student's authorized external agent, if they choose one.
+- Google Gmail/Calendar access is available through the explicit local Google connector; Drive, course-platform, browser, and scheduler access belong to the student's authorized external agent, if they choose one.
 - Any school-platform workflow is read-only and does not submit work, answer quizzes, post messages, or modify settings.
 - Do not place passwords, OAuth tokens, cookies, MFA codes, or API keys in the University directory or Git repository.
 - Template upgrades must be reviewed as migrations; do not overwrite personal academic files.

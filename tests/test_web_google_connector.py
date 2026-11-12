@@ -7,6 +7,7 @@ from pathlib import Path
 
 from academia_os.connectors.google import GoogleConnector
 from tests.test_google_connector import FakeGoogleServer, MemoryGoogleStore, _configure
+from tests.test_agent_interface import prepared_workspace
 from tests.test_web import request, running_server
 
 
@@ -19,6 +20,8 @@ def test_google_connector_web_routes(tmp_path: Path) -> None:
     store = MemoryGoogleStore()
     try:
         with running_server(tmp_path) as web:
+            _, _, profile = prepared_workspace(tmp_path / "workspace")
+            web.profile = profile
             web.google_connector = GoogleConnector(tmp_path / "runtime" / "google_connector.json", store=store)  # type: ignore[arg-type]
             _configure(web.google_connector, remote)
 
@@ -43,6 +46,31 @@ def test_google_connector_web_routes(tmp_path: Path) -> None:
                 time.sleep(0.05)
             assert current["auth_status"] == "authorized"
             assert current["connection"]["account_email"] == "student@example.edu"
+
+            status, _, payload = request(web, "GET", "/api/v1/connectors/google/calendar/events?max=10")
+            assert status == 200
+            assert json.loads(payload)["events"][0]["summary"] == "Study session"
+
+            status, _, payload = post(web, "/api/v1/connectors/google/calendar/propose-create", {
+                "summary": "POL 2103 study block",
+                "start": "2027-02-10T14:00:00Z",
+                "end": "2027-02-10T15:00:00Z",
+                "location": "Library",
+            })
+            assert status == 200
+            proposal = json.loads(payload)
+            assert proposal["review"]["kind"] == "action_approval"
+            assert proposal["review"]["details"]["action_type"] == "calendar_change"
+            assert len(remote.calendar_events) == 1
+
+            status, _, payload = post(web, "/api/v1/connectors/google/calendar/propose-update", {
+                "event_id": "event-1",
+                "patch": {"summary": "Revised study session"},
+            })
+            assert status == 200
+            edit = json.loads(payload)
+            assert edit["review"]["details"]["calendar_action"] == "update"
+            assert remote.calendar_events["event-1"]["summary"] == "Study session"
 
             status, _, payload = post(web, "/api/v1/connectors/google/disconnect", {})
             assert status == 200

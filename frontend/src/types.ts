@@ -386,6 +386,23 @@ export type GoogleAuthorizationStatus = {
   connection: GoogleConnectorStatus
 }
 
+export type GoogleCalendarEvent = {
+  id: string
+  summary: string | null
+  status: string | null
+  start: { dateTime?: string; date?: string; timeZone?: string }
+  end: { dateTime?: string; date?: string; timeZone?: string }
+  location?: string | null
+  description?: string | null
+  html_link?: string | null
+}
+
+export type GoogleCalendarProposalResult = {
+  proposal: Record<string, unknown>
+  review: ReviewItem
+  next_step: string
+}
+
 export type MCPTool = {
   name: string
   description: string

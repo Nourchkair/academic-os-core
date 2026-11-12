@@ -110,6 +110,14 @@ def test_read_only_mcp_command_is_the_default(tmp_path: Path, monkeypatch: pytes
     assert command[-2:] == ["--proposal-tool", "propose_task"]
     assert "--proposal-tool" in command and "propose_import" not in command
 
+    calendar = CodexAppServerRuntime(
+        academic_root=root,
+        profile_path=profile,
+        mcp_mode="proposal_only",
+        proposal_tools=("propose_calendar",),
+    )
+    assert calendar._resolved_mcp_command()[-2:] == ["--proposal-tool", "propose_calendar"]
+
 
 def test_turn_carries_context_images_effort_and_fast_tier(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     capture = tmp_path / "turn.json"
