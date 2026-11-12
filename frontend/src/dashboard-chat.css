@@ -362,3 +362,25 @@
   .chat-picker-trigger { max-width: 130px; }
   .chat-composer-foot { align-items: flex-start; flex-direction: column; gap: 3px; }
 }
+
+.chat-proposal-list { display: grid; gap: 8px; margin-top: 12px; }
+.chat-proposal-card { background: #fbfbfb; border: 1px solid #e6e6e6; border-left: 3px solid #b9b9b9; border-radius: 11px; padding: 12px 14px; }
+.chat-proposal-heading { align-items: center; display: flex; flex-wrap: wrap; gap: 7px; }
+.chat-proposal-kind { background: #f0f0f0; border-radius: 999px; color: #777777; font-size: 8px; font-weight: 750; letter-spacing: .06em; padding: 4px 7px; text-transform: uppercase; }
+.chat-proposal-heading strong { color: #4b4b4b; font-size: 11px; }
+.chat-proposal-card > p { color: #6f6f6f; font-size: 10px; line-height: 1.5; margin: 7px 0 0; }
+.chat-proposal-card ul { color: #858585; display: grid; font-size: 9px; gap: 3px; line-height: 1.45; margin: 8px 0 0; padding-left: 16px; }
+.chat-proposal-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; margin-top: 11px; }
+.chat-proposal-actions > span { color: #939393; font-size: 8px; }
+.chat-proposal-actions .secondary-button { font-size: 9px; padding: 7px 9px; }
+.chat-proposal-toggle { align-items: center; background: #f9f9f9; border: 1px solid #ebebeb; border-radius: 8px; color: #808080; cursor: pointer; display: grid; flex: 0 0 36px; height: 36px; padding: 5px; place-items: center; transition: background .15s, border-color .15s, color .15s; width: 36px; }
+.chat-proposal-toggle:hover { background: #f5f5f5; border-color: #dddddd; color: #6e6e6e; }
+.chat-proposal-toggle:focus-visible { outline: 2px solid #adadad; outline-offset: 2px; }
+.chat-proposal-toggle.active { background: #eef1ee; border-color: #cdd6cd; color: #5d735d; }
+.chat-proposal-toggle svg { fill: none; height: 17px; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; width: 17px; }
+.chat-proposal-toggle.active svg { stroke: #4f6a4f; }
+.chat-proposal-mode-note { color: #7a847a; font-size: 9px; line-height: 1.5; margin: 0 0 8px; }
+@media (max-width: 520px) {
+  .chat-proposal-actions { align-items: flex-start; flex-direction: column; }
+}
+.chat-proposal-toggle:disabled { cursor: default; opacity: .5; }

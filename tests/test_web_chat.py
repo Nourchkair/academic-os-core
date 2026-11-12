@@ -42,7 +42,7 @@ def test_chat_providers_endpoint_falls_back_when_detection_fails(tmp_path: Path,
 def test_chat_route_passes_exact_payload_and_returns_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
-    def respond(payload: dict[str, Any]) -> dict[str, Any]:
+    def respond(payload: dict[str, Any], *, profile: Path | None = None) -> dict[str, Any]:
         captured.update(payload)
         return {"message": "answer", "provider": "codex", "model": "test", "effort": "medium", "speed": "standard", "notice": None}
 
@@ -58,7 +58,7 @@ def test_chat_route_passes_exact_payload_and_returns_json(tmp_path: Path, monkey
 
 
 def test_chat_route_maps_value_error_to_structured_422(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    def respond(payload: dict[str, Any]) -> dict[str, Any]:
+    def respond(payload: dict[str, Any], *, profile: Path | None = None) -> dict[str, Any]:
         raise ValueError("Codex is not signed in")
 
     monkeypatch.setattr(dashboard_chat, "respond", respond)
@@ -71,7 +71,7 @@ def test_chat_route_maps_value_error_to_structured_422(tmp_path: Path, monkeypat
 
 
 def test_chat_route_maps_provider_failure_to_structured_502(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    def respond(payload: dict[str, Any]) -> dict[str, Any]:
+    def respond(payload: dict[str, Any], *, profile: Path | None = None) -> dict[str, Any]:
         raise OSError("provider unavailable")
 
     monkeypatch.setattr(dashboard_chat, "respond", respond)
@@ -94,7 +94,7 @@ def test_chat_route_requires_json_content_type(tmp_path: Path) -> None:
 def test_chat_route_rejects_malformed_json_without_calling_provider(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     called = False
 
-    def respond(payload: dict[str, Any]) -> dict[str, Any]:
+    def respond(payload: dict[str, Any], *, profile: Path | None = None) -> dict[str, Any]:
         nonlocal called
         called = True
         return {}

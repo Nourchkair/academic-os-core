@@ -1019,7 +1019,7 @@ def dispatch(args: argparse.Namespace) -> int:
         try:
             payload = json.loads(Path(args.input_file).read_text(encoding="utf-8"))
             from .dashboard_chat import respond
-            _emit(respond(payload), as_json=True)
+            _emit(respond(payload, profile=_profile_path(args)), as_json=True)
             return 0
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             _emit({"error": str(exc)}, as_json=True)

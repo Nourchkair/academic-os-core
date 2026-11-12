@@ -109,6 +109,12 @@ Direct write tools are therefore **not** exposed to Codex.
 files, write tasks, approve, or execute. The proposal appears in Review; only a
 human can approve and run it.
 
+Dashboard Study chat uses the same proposal-only path when the student enables
+**Proposal mode**. The chat can create task/import proposals, renders the exact
+before/after, effects, and Review id, and links to the matching Review card.
+Ordinary chat remains tool-disabled. The chat cannot approve or execute, and no
+academic file is written until the student acts in Review.
+
 ## Boundaries
 
 - Direct Codex write-tool execution remains disabled.

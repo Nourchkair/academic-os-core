@@ -9,8 +9,10 @@ from typing import Any
 import pytest
 
 from academia_os import dashboard_chat
+from academia_os.assistant.contracts import AssistantError, RunResult, ToolResult
 from academia_os.dashboard_chat import _validate_payload, respond
 from academia_os.study.providers import CLAUDE_UNAVAILABLE_NOTICE
+from tests.test_agent_interface import prepared_workspace
 
 
 def message(content: str = "hello", role: str = "user") -> dict[str, str]:
@@ -39,15 +41,19 @@ def available_catalog() -> dict[str, Any]:
 
 
 def test_validate_payload_accepts_minimal_codex_chat() -> None:
-    prompt, provider, model, effort, fast, attachments, context = _validate_payload(payload())
+    prompt, messages, provider, model, effort, fast, attachments, context, proposal_mode, course_id, semester = _validate_payload(payload())
 
     assert prompt == "USER: hello"
+    assert messages == [{"role": "user", "content": "hello"}]
     assert provider == "codex"
     assert model is None
     assert effort == "medium"
     assert fast is False
     assert attachments == []
     assert context == ""
+    assert proposal_mode is False
+    assert course_id is None
+    assert semester is None
 
 
 def test_validate_payload_bounds_messages_and_prompt_size() -> None:
@@ -84,7 +90,7 @@ def test_validate_payload_bounds_course_context_and_model_name() -> None:
 def test_validate_payload_accepts_supported_attachment_metadata() -> None:
     raw = b"# notes\n"
     encoded = base64.b64encode(raw).decode("ascii")
-    _, _, _, _, _, attachments, _ = _validate_payload(
+    _, _, _, _, _, _, attachments, *_ = _validate_payload(
         payload(attachments=[{"name": "../notes.md", "type": "text/markdown", "data": encoded}])
     )
 
@@ -206,3 +212,168 @@ def test_respond_reports_timeout_and_empty_answer(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(dashboard_chat.subprocess, "run", empty)
     with pytest.raises(ValueError, match="empty response"):
         respond(payload())
+
+
+def test_validate_payload_accepts_and_bounds_proposal_scope() -> None:
+    *_, proposal_mode, course_id, semester = _validate_payload(
+        payload(proposal_mode=True, course_id="POL 2103", semester="Fall 2026")
+    )
+    assert proposal_mode is True
+    assert course_id == "POL 2103"
+    assert semester == "Fall 2026"
+
+    with pytest.raises(ValueError, match="proposal_mode"):
+        _validate_payload(payload(proposal_mode="yes"))
+    with pytest.raises(ValueError, match="action proposals require Codex"):
+        _validate_payload(payload(proposal_mode=True, provider="claude"))
+    with pytest.raises(ValueError, match="course_id"):
+        _validate_payload(payload(proposal_mode=True, course_id=5))
+    with pytest.raises(ValueError, match="term and four-digit year"):
+        _validate_payload(payload(proposal_mode=True, semester="Current Semester"))
+
+
+def test_respond_proposal_mode_uses_app_server_and_returns_cards(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+    captured: dict[str, Any] = {}
+
+    class FakeRuntime:
+        def __init__(self, **kwargs: Any) -> None:
+            captured["init"] = kwargs
+
+        def run(self, request: Any) -> RunResult:
+            captured["request"] = request
+            return RunResult(
+                run_id="run-1",
+                status="completed",
+                message="I prepared a task proposal for your review. Nothing has been approved or changed.",
+                tool_results=(ToolResult(
+                    tool="academia_propose_task",
+                    data={
+                        "status": "approval_required",
+                        "action": "create",
+                        "proposal_id": "proposal-1",
+                        "review_id": "review-1",
+                        "before": "No personal task",
+                        "after": "Read Week 5 · POL 2103 - Politics · due 2026-10-01",
+                        "effects": ["add 'Read Week 5' to Fall 2026/SEMESTER_TASKS.md", "preserve unrelated Markdown"],
+                    },
+                ),),
+            )
+
+    monkeypatch.setattr(dashboard_chat, "provider_catalog", available_catalog)
+    monkeypatch.setattr(dashboard_chat, "codex_runtime", lambda: {"executable": "/fake/codex", "models": [], "recommended_model": None})
+    monkeypatch.setattr(dashboard_chat, "codex_model", lambda runtime, requested: ("test-model", None))
+    monkeypatch.setattr(dashboard_chat, "CodexAppServerRuntime", FakeRuntime)
+    attachment = base64.b64encode(b"# Reading list\nRead Week 5\n").decode("ascii")
+
+    result = respond(
+        payload(
+            proposal_mode=True,
+            course_id="POL 2103",
+            semester="Fall 2026",
+            effort="high",
+            speed="fast",
+            course_context="COURSE CONTEXT",
+            attachments=[{"name": "notes.md", "type": "text/markdown", "data": attachment}],
+        ),
+        profile=profile,
+    )
+
+    assert result["proposal_mode"] is True
+    assert result["proposals"] == [{
+        "kind": "task",
+        "title": "Personal task proposal",
+        "summary": "Read Week 5 · POL 2103 - Politics · due 2026-10-01",
+        "effects": ["add 'Read Week 5' to Fall 2026/SEMESTER_TASKS.md", "preserve unrelated Markdown"],
+        "review_id": "review-1",
+        "proposal_id": "proposal-1",
+    }]
+    assert captured["init"]["mcp_mode"] == "proposal_only"
+    assert captured["init"]["model"] == "test-model"
+    assert captured["init"]["effort"] == "high"
+    assert captured["init"]["fast"] is True
+    assert captured["request"].scope.as_dict() == {
+        "kind": "course",
+        "semester": "Fall 2026",
+        "course_id": "POL 2103 - Politics",
+    }
+    assert captured["request"].messages == ({"role": "user", "content": "hello"},)
+    assert "COURSE CONTEXT" in captured["request"].context
+    assert "PROPOSAL-ONLY MODE" in captured["request"].context
+    assert "REFERENCE MD notes.md" in captured["request"].context
+    assert captured["request"].image_paths == ()
+
+
+def test_respond_proposal_mode_rejects_unknown_course_and_runtime_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+    monkeypatch.setattr(dashboard_chat, "provider_catalog", available_catalog)
+    monkeypatch.setattr(dashboard_chat, "codex_runtime", lambda: {"executable": "/fake/codex", "models": [], "recommended_model": None})
+    monkeypatch.setattr(dashboard_chat, "codex_model", lambda runtime, requested: (None, None))
+
+    with pytest.raises(ValueError, match="recognized course"):
+        respond(payload(proposal_mode=True, course_id="NOPE 101", semester="Fall 2026"), profile=profile)
+
+    class FailedRuntime:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def run(self, request: Any) -> RunResult:
+            return RunResult(
+                run_id="run-1",
+                status="error",
+                error=AssistantError(
+                    '{"type":"error","error":{"message":"Unsupported value: minimal is not supported","type":"invalid_request_error"}}',
+                    code="provider_error",
+                ),
+            )
+
+    monkeypatch.setattr(dashboard_chat, "CodexAppServerRuntime", FailedRuntime)
+    with pytest.raises(ValueError, match="Unsupported value: minimal is not supported"):
+        respond(payload(proposal_mode=True, semester="Fall 2026"), profile=profile)
+
+
+def test_respond_proposal_mode_maps_minimal_effort_to_low(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+    captured: dict[str, Any] = {}
+
+    class FakeRuntime:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+        def run(self, request: Any) -> RunResult:
+            return RunResult(run_id="run-1", status="completed", message="ready")
+
+    monkeypatch.setattr(dashboard_chat, "provider_catalog", available_catalog)
+    monkeypatch.setattr(dashboard_chat, "codex_runtime", lambda: {"executable": "/fake/codex", "models": [], "recommended_model": None})
+    monkeypatch.setattr(dashboard_chat, "codex_model", lambda runtime, requested: (None, None))
+    monkeypatch.setattr(dashboard_chat, "CodexAppServerRuntime", FakeRuntime)
+
+    result = respond(payload(proposal_mode=True, semester="Fall 2026", effort="minimal"), profile=profile)
+
+    assert captured["effort"] == "low"
+    assert result["effort"] == "low"
+
+
+def test_respond_proposal_mode_bounds_oversized_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+    captured: dict[str, Any] = {}
+
+    class FakeRuntime:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def run(self, request: Any) -> RunResult:
+            captured["request"] = request
+            return RunResult(run_id="run-1", status="completed", message="ready")
+
+    monkeypatch.setattr(dashboard_chat, "provider_catalog", available_catalog)
+    monkeypatch.setattr(dashboard_chat, "codex_runtime", lambda: {"executable": "/fake/codex", "models": [], "recommended_model": None})
+    monkeypatch.setattr(dashboard_chat, "codex_model", lambda runtime, requested: (None, None))
+    monkeypatch.setattr(dashboard_chat, "CodexAppServerRuntime", FakeRuntime)
+
+    respond(payload(proposal_mode=True, semester="Fall 2026", course_context="x" * dashboard_chat.MAX_CHAT_CONTEXT_CHARS), profile=profile)
+
+    request = captured["request"]
+    assert len(request.context) <= 240_000
+    assert "Additional selected context was truncated" in request.context
+    assert "PROPOSAL-ONLY MODE" in request.context

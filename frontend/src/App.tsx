@@ -155,6 +155,7 @@ function App() {
   const [reviews, setReviews] = useState<ReviewItem[]>([])
   const [reviewBusy, setReviewBusy] = useState(false)
   const [reviewError, setReviewError] = useState('')
+  const [reviewFocusId, setReviewFocusId] = useState<string | null>(null)
   const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([])
   const [inbox, setInbox] = useState<ProcessingRecord[]>([])
   const [selectedSemester, setSelectedSemester] = useState(cachedStartup?.workspace.semester || '')
@@ -171,6 +172,7 @@ function App() {
   const [courseOpenRequest, setCourseOpenRequest] = useState<{ id: string; courseId: string } | null>(null)
   const chatNavRef = useRef<HTMLDetailsElement>(null)
   const refreshSequence = useRef(0)
+  const reviewRefreshSequence = useRef(0)
   const loadingBackgroundData = useRef(false)
   const chatMenuItems: { view: View; label: string; icon: string }[] = [
     { view: 'home', label: 'Home', icon: '⌂' },
@@ -189,6 +191,16 @@ function App() {
       setError(reason instanceof BridgeUnavailableError ? reason.message : `Academia could not start its local service: ${reason instanceof Error ? reason.message : String(reason)}`)
     }
   }
+
+  const refreshReviews = useCallback(async () => {
+    const sequence = ++reviewRefreshSequence.current
+    try {
+      const reviewData = await api.reviewPendingExecution()
+      if (sequence === reviewRefreshSequence.current) setReviews(reviewData)
+    } catch (reason) {
+      if (sequence === reviewRefreshSequence.current) setReviewError(`Review decisions could not be loaded: ${String(reason)}`)
+    }
+  }, [])
 
   const refresh = async (allowDuringMigration = false, fastFirstPaint = false) => {
     if (migrationBusy && !allowDuringMigration) return
@@ -266,9 +278,7 @@ function App() {
             }
           }
           try {
-            const reviewData = await api.reviewPendingExecution()
-            if (sequence !== refreshSequence.current) return
-            setReviews(reviewData)
+            await refreshReviews()
           } catch (reason) {
             if (sequence === refreshSequence.current) setReviewError(`Review decisions could not be loaded: ${String(reason)}`)
           }
@@ -341,6 +351,7 @@ function App() {
     setReviewError('')
     try {
       const updated = await api.reviewDecision(itemId, decision)
+      reviewRefreshSequence.current += 1
       setReviews((current) => updated.status === 'approved' && updated.action_proposal_id
         ? current.map((item) => item.id === itemId ? updated : item)
         : current.filter((item) => item.id !== itemId))
@@ -357,7 +368,7 @@ function App() {
     setReviewError('')
     try {
       await api.reviewExecute(itemId)
-      setReviews(await api.reviewPendingExecution())
+      await refreshReviews()
       try { setActivity(await api.activity()) } catch { /* Activity is a secondary audit refresh. */ }
     } catch (reason) {
       setReviewError(`The approved action could not be executed: ${String(reason)}`)
@@ -366,8 +377,19 @@ function App() {
     }
   }
 
+  const openReviewFromChat = async (reviewId: string) => {
+    setReviewFocusId(reviewId)
+    setView('review')
+    setReviewError('')
+    await refreshReviews()
+  }
+
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => { void refresh(false, true) }, [])
+
+  useEffect(() => {
+    if (view === 'review') void refreshReviews()
+  }, [view, refreshReviews])
 
   useEffect(() => {
     let mounted = true
@@ -428,7 +450,10 @@ function App() {
   if (onboarding) return <Onboarding candidates={setupCandidates} onComplete={refresh} onMigration={async () => { await refresh(); setOnboarding(false); setView('home'); setActionMode('migration') }} />
   if (error && !status) return <ConnectionNotice message={error} onRetry={() => void refresh()} />
 
-  const navigate = (next: View) => setView(next)
+  const navigate = (next: View) => {
+    setView(next)
+    if (next !== 'review') setReviewFocusId(null)
+  }
   const semesters = status ? Array.from(new Set([status.workspace.semester, ...status.workspace.available_semesters])) : []
   const openActionPanel = (mode: ActionMode, courseId?: string) => { setActionMode(mode); setActionCourseId(courseId); setError(null) }
   const closeActionPanel = () => { if (!migrationBusy) setActionMode(null) }
@@ -465,9 +490,9 @@ function App() {
       {view === 'chat' && <header className="topbar topbar-study-chat"><details className="chat-nav-dropdown" ref={chatNavRef}><summary aria-label="Open navigation menu"><span aria-hidden="true">☰</span><strong>Menu</strong><span className="chat-menu-caret" aria-hidden="true">⌄</span></summary><div className="chat-nav-menu" role="menu" aria-label="Main navigation">{chatMenuItems.map((item) => <button key={item.view} role="menuitem" data-tooltip={item.label} data-tooltip-side="right" onClick={() => setView(item.view)}><span aria-hidden="true">{item.icon}</span>{item.label}</button>)}</div></details></header>}
       {error && <p className="dashboard-inline-error" role="alert">{error}</p>}
       {view === 'home' && <HomeView status={status} courses={courses} tasks={tasks} activity={activity} inbox={inbox} semester={selectedSemester || status?.workspace.semester || ''} semesters={semesters} loading={semesterLoading} onSemesterChange={changeSemester} onOpenCourse={openCourse} onOpenIntake={() => openActionPanel('import')} onNavigate={navigate} />}
-      {view === 'review' && <ReviewView items={reviews} courses={courses} activity={activity} busy={reviewBusy} error={reviewError} onDecision={decideReview} onExecute={executeReview} />}
+      {view === 'review' && <ReviewView items={reviews} courses={courses} activity={activity} busy={reviewBusy} error={reviewError} focusId={reviewFocusId} onFocusConsumed={() => setReviewFocusId(null)} onDecision={decideReview} onExecute={executeReview} />}
       {view === 'courses' && <CoursesView semesters={semesters} semester={selectedSemester || status?.workspace.semester || ''} courses={courses} items={libraryItems} inbox={inbox} loading={semesterLoading} onSemesterChange={changeSemester} onOpenActions={openActionPanel} onHistoryChanged={() => refresh()} studyResumeRequest={studyResumeRequest} onStudyResumeConsumed={clearStudyResumeRequest} onOpenStudyConversation={openStudyConversation} onStartStudyChat={startStudyChat} courseOpenRequest={courseOpenRequest} onCourseOpenConsumed={clearCourseOpenRequest} onBackHome={() => setView('home')} />}
-      <div className={`chat-route-shell ${view === 'chat' ? 'active' : ''}`} aria-hidden={view !== 'chat'}><DashboardChat courses={courses} items={libraryItems} semester={selectedSemester || status?.workspace.semester || ''} onResumeStudySession={resumeStudySession} studyChatRequest={studyChatRequest} onStudyChatRequestConsumed={clearStudyChatRequest} /></div>
+      <div className={`chat-route-shell ${view === 'chat' ? 'active' : ''}`} aria-hidden={view !== 'chat'}><DashboardChat courses={courses} items={libraryItems} semester={selectedSemester || status?.workspace.semester || ''} onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} onProposalCreated={() => void refreshReviews()} onResumeStudySession={resumeStudySession} studyChatRequest={studyChatRequest} onStudyChatRequestConsumed={clearStudyChatRequest} /></div>
       {view === 'tasks' && <Tasks tasks={tasks} courses={courses} semester={selectedSemester || status?.workspace.semester || ''} timezone={status?.workspace.timezone} stateError={taskStateError} onNavigate={navigate} onChanged={() => refresh()} />}
       {view === 'activity' && <ActivityView activity={activity} processing={inbox} onNavigate={navigate} />}
       {view === 'settings' && status && <SettingsView status={status} onSaved={() => refresh()} />}

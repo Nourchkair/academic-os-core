@@ -577,7 +577,7 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
         try:
             payload = self._chat_payload()
             from .dashboard_chat import respond
-            result = respond(payload)
+            result = respond(payload, profile=self.dashboard.profile)
             self._send_json(200, result, cors_origin=origin)
         except DashboardRequestError as exc:
             self._send_api_error(exc, cors_origin=origin)

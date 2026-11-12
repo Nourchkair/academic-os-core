@@ -150,7 +150,7 @@ This is the next product phase agreed with the student. The app remains local-fi
 
 ### Stage B — In-app assistant host
 
-**Partially implemented.** Dashboard Study chat now invokes the installed Codex CLI with bounded context and browser-local chat persistence. Claude subscription routing is disabled because Anthropic does not permit a third-party app to route subscription OAuth for users; Claude Code remains usable as an external agent. Continue with the documented ChatGPT sign-in/app-server path for a downloadable first-party connection, provider-neutral MCP tool orchestration, explicit tool grants and confirmations, progress streaming, and shared write routing. Study chat cannot yet invoke arbitrary tools.
+**Partially implemented.** Dashboard Study chat invokes the installed Codex CLI with bounded context and browser-local chat persistence. When the student enables Proposal mode, it uses the Codex app-server with Academia's MCP server in proposal-only mode, allowing exact task/import proposals without approval, execution, or direct writes. Claude subscription routing is disabled because Anthropic does not permit a third-party app to route subscription OAuth for users; Claude Code remains usable as an external agent. Continue with the documented ChatGPT sign-in/app-server path for a downloadable first-party connection, provider-neutral MCP tool orchestration, additional explicit tool grants and confirmations, progress streaming, and broader shared write routing. Study chat cannot yet invoke arbitrary external tools.
 
 ### Stage C — Local provider and MCP connection management
 

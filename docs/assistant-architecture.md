@@ -4,7 +4,7 @@
 
 Academia OS remains a local-first academic system. It supports two ways to use an assistant:
 
-1. **In-app Study chat:** The dashboard invokes the user's installed Codex CLI session. The student selects a model and only explicitly submitted context is sent to that provider. Claude subscription OAuth is not offered in Academia because Anthropic reserves it for Claude Code and other native Anthropic apps; Claude Code can connect as a separate external agent. External MCP connections are not wired into Study chat yet.
+1. **In-app Study chat:** The dashboard invokes the user's installed Codex CLI session for ordinary study chat. When the student enables Proposal mode, it uses the Codex app-server with Academia's MCP server in proposal-only mode, so it can create exact Review/Action proposals for a local import or personal-task create/update but cannot approve, execute, or write. The student selects a model and only explicitly submitted context is sent to that provider. Claude subscription OAuth is not offered in Academia because Anthropic reserves it for Claude Code and other native Anthropic apps; Claude Code can connect as a separate external agent. External MCP connections are not wired into Study chat yet.
 2. **External agent:** Codex, Claude, or another compatible host connects to Academia OS through its local CLI/MCP interface and uses its own provider and tools.
 
 Both paths must use the same academic context, import, Study, Review, provenance, and Activity contracts. There must not be separate academic logic or a second academic database for the assistant.
@@ -13,7 +13,7 @@ Both paths must use the same academic context, import, Study, Review, provenance
 
 ```text
 Dashboard assistant UI
-  ├─ Study chat → signed-in Codex CLI
+  ├─ Study chat → Codex CLI ordinary / app-server proposal-only
   ├─ bounded context retrieval and Study generation
   └─ future MCP client/connection manager (user-enabled services only)
           │
@@ -75,7 +75,7 @@ Remaining within this stage: ensure import/artefact actions have clear student c
 
 ### Stage 2 — In-app assistant host
 
-**Partially implemented.** Study chat invokes the installed Codex CLI with bounded context and browser-local chat persistence. Claude subscription routing is disabled pending an Anthropic-approved path. The Codex request disables model tools and runs in a temporary directory; requests are not stored by the Academia API. The chat can create source-linked Study material through the shared Study contracts. Still needed: the documented ChatGPT sign-in/app-server path for a downloadable first-party connection, provider-neutral MCP tool orchestration, explicit per-tool confirmation, progress streaming, and write routing through shared Academia contracts. Do not imply current Study chat can call external tools.
+**Partially implemented.** Study chat invokes the installed Codex CLI with bounded context and browser-local chat persistence. Proposal mode additionally uses the Codex app-server with `academia mcp serve --proposal-only`; the assistant may read Academia context and create exact task/import proposals, but it cannot approve, execute, copy, or write. Proposal summaries and Review ids are saved with browser-local chat history. Claude subscription routing is disabled pending an Anthropic-approved path. Still needed: the documented ChatGPT sign-in/app-server path for a downloadable first-party connection, provider-neutral MCP tool orchestration, additional explicit per-tool confirmations, progress streaming, and broader shared write routing. Do not imply current Study chat can call external tools.
 
 ### Stage 3 — Provider and connection management
 

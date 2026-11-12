@@ -82,4 +82,10 @@ describe('ReviewView', () => {
     expect(screen.getByRole('button', { name: 'Executing…' })).toBeDisabled()
     expect(screen.getByRole('alert')).toHaveTextContent('Execution failed safely.')
   })
+
+  it('highlights the exact Review item linked from chat', () => {
+    render(<ReviewView items={[approvedItem]} courses={[]} activity={[]} busy={false} error="" focusId="review-2" onFocusConsumed={vi.fn()} onDecision={vi.fn()} onExecute={vi.fn()} />)
+
+    expect(document.getElementById('review-review-2')).toHaveClass('review-card-focus')
+  })
 })

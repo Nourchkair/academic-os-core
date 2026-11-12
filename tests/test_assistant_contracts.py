@@ -141,3 +141,21 @@ def test_run_request_and_events_validate_bounded_lifecycle() -> None:
 
 def test_contract_version_is_explicit() -> None:
     assert ASSISTANT_CONTRACT_VERSION == 1
+
+
+def test_run_request_accepts_bounded_context_and_local_images() -> None:
+    request = RunRequest(
+        messages=({"role": "user", "content": "hello"},),
+        scope=Scope(),
+        context="COURSE CONTEXT",
+        image_paths=["/tmp/one.png"],
+    )
+    assert request.context == "COURSE CONTEXT"
+    assert request.image_paths == ("/tmp/one.png",)
+
+    with pytest.raises(AssistantError, match="240,000"):
+        RunRequest(messages=({"role": "user", "content": "hello"},), scope=Scope(), context="x" * 240_001)
+    with pytest.raises(AssistantError, match="five images"):
+        RunRequest(messages=({"role": "user", "content": "hello"},), scope=Scope(), image_paths=[f"/tmp/{index}.png" for index in range(6)])
+    with pytest.raises(AssistantError, match="image path"):
+        RunRequest(messages=({"role": "user", "content": "hello"},), scope=Scope(), image_paths=[""])

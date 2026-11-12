@@ -821,3 +821,6 @@ button { -webkit-tap-highlight-color: transparent; }
 @media (max-width: 1000px) { .review-workspace-layout { grid-template-columns: 1fr; } .approval-timeline-panel { position: static; } }
 @media (max-width: 760px) { .approval-card { padding: 17px; } .approval-card-heading { flex-direction: column; } .approval-targets div { grid-template-columns: 1fr; gap: 3px; } .approval-hint { display: none; } }
 
+
+.review-card-anchor { border-radius: 12px; scroll-margin-top: 22px; }
+.review-card-anchor.review-card-focus { outline: 3px solid #b9c9b9; outline-offset: 3px; }

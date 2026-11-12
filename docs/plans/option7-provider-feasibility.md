@@ -105,6 +105,8 @@ The safe integration is **proposal-only MCP**:
 
 - `academia mcp serve --proposal-only` exposes read tools plus
   `academia_propose_import` and `academia_propose_task`.
+- Dashboard Study chat uses this mode when the student enables Proposal mode;
+  ordinary chat remains tool-disabled.
 - The proposal records the exact source, destination, hash, and effects but
   copies nothing.
 - The Review UI shows the exact action; only a human can approve and execute it.

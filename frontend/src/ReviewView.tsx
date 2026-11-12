@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { ReviewCard } from './ReviewCard'
 import type { ActivityEvent, Course, ReviewItem } from './types'
 
@@ -7,6 +8,8 @@ type ReviewViewProps = {
   activity: ActivityEvent[]
   busy: boolean
   error: string
+  focusId?: string | null
+  onFocusConsumed?: () => void
   onDecision: (itemId: string, decision: string) => Promise<void>
   onExecute: (itemId: string) => Promise<void>
 }
@@ -19,10 +22,24 @@ const actionLabels: Record<string, string> = {
   configuration_change: 'Settings change',
 }
 
-export function ReviewView({ items, courses, activity, busy, error, onDecision, onExecute }: ReviewViewProps) {
+export function ReviewView({ items, courses, activity, busy, error, focusId, onFocusConsumed, onDecision, onExecute }: ReviewViewProps) {
   const open = items.filter((item) => item.status === 'open')
   const approved = items.filter((item) => item.status === 'approved' && item.action_proposal_id)
   const timeline = activity.filter((event) => event.event_type.startsWith('action.') || event.event_type.startsWith('review.')).slice(0, 16)
+  const focusConsumed = useRef(onFocusConsumed)
+  useEffect(() => { focusConsumed.current = onFocusConsumed }, [onFocusConsumed])
+  useEffect(() => {
+    if (!focusId) return
+    const element = document.getElementById(`review-${focusId}`)
+    if (!element) return
+    element.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+    element.classList.add('review-card-focus')
+    const timer = window.setTimeout(() => {
+      element.classList.remove('review-card-focus')
+      focusConsumed.current?.()
+    }, 2400)
+    return () => window.clearTimeout(timer)
+  }, [focusId, items])
 
   return <div className="page-stack review-workspace">
     <section className="page-intro">
@@ -39,12 +56,12 @@ export function ReviewView({ items, courses, activity, busy, error, onDecision, 
           <div><p className="eyebrow">Waiting for you</p><h3>{open.length} open decision{open.length === 1 ? '' : 's'}</h3></div>
           <span className="review-count-badge">{open.length}</span>
         </div>
-        {open.map((item) => <ReviewCard key={item.id} item={item} courses={courses} busy={busy} onDecision={(decision) => onDecision(item.id, decision)} />)}
+        {open.map((item) => <div id={`review-${item.id}`} className="review-card-anchor" key={item.id}><ReviewCard item={item} courses={courses} busy={busy} onDecision={(decision) => onDecision(item.id, decision)} /></div>)}
         {!open.length && <ReviewEmpty title="No decisions waiting" body="When Academia finds conflicting evidence or an action needs approval, it appears here. Reading, studying, and local organization do not require a decision." />}
 
         {approved.length > 0 && <div className="approved-action-section">
           <div className="review-section-heading"><div><p className="eyebrow">Separate execution step</p><h3>{approved.length} approved action{approved.length === 1 ? '' : 's'} ready to execute</h3></div></div>
-          {approved.map((item) => <ApprovedActionCard key={item.id} item={item} busy={busy} onExecute={() => onExecute(item.id)} />)}
+          {approved.map((item) => <div id={`review-${item.id}`} className="review-card-anchor" key={item.id}><ApprovedActionCard item={item} busy={busy} onExecute={() => onExecute(item.id)} /></div>)}
         </div>}
       </section>
 

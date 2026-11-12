@@ -3,13 +3,14 @@
 The app-server owns the model/tool loop and talks to Academia through a
 temporary, isolated ``CODEX_HOME``. The default mode exposes only
 ``mcp serve --read-only``. ``mcp_mode="proposal_only"`` additionally exposes the
-exact ``academia_propose_import`` tool, which creates a Review/Action proposal
-but never copies or executes. Direct write tools are never exposed because the
-app-server does not reliably route MCP write approval to the host.
+exact ``academia_propose_import`` and ``academia_propose_task`` tools, which
+create Review/Action proposals but never copy, write, or execute. Direct write
+tools are never exposed because the app-server does not reliably route MCP write
+approval to the host.
 
-The selected scope is conveyed in the prompt; the MCP server itself is
-workspace-scoped. Hard course/source filtering in the MCP process is a later
-phase and must not be assumed by callers.
+The selected scope is conveyed in the prompt and used to scope the Academia MCP
+server for semester/course reads. Source-level filtering remains limited and
+must not be assumed by callers.
 """
 from __future__ import annotations
 
@@ -45,6 +46,8 @@ class CodexAppServerRuntime:
     auth_path: Path | None = None
     timeout_seconds: float = 180.0
     mcp_mode: str = "read_only"
+    effort: str | None = None
+    fast: bool = False
 
     def __post_init__(self) -> None:
         self.academic_root = Path(self.academic_root).expanduser().resolve()
@@ -52,6 +55,10 @@ class CodexAppServerRuntime:
         self.auth_path = (Path(self.auth_path).expanduser().resolve() if self.auth_path else None)
         if self.mcp_mode not in {"read_only", "proposal_only"}:
             raise ValueError("mcp_mode must be read_only or proposal_only")
+        if self.effort is not None and (not isinstance(self.effort, str) or not self.effort.strip() or len(self.effort) > 40):
+            raise ValueError("effort must be a non-empty reasoning level")
+        if not isinstance(self.fast, bool):
+            raise ValueError("fast must be true or false")
 
     def _resolved_auth_path(self) -> Path:
         if self.auth_path is not None:
@@ -101,6 +108,7 @@ class CodexAppServerRuntime:
         return [
             *[str(value) for value in self.codex_command],
             "-c", "features.shell_tool=false",
+            "-c", "features.unified_exec=false",
             "-c", "features.multi_agent=false",
             "-c", "features.apps=false",
             "-c", "features.plugins=false",
@@ -278,8 +286,15 @@ class CodexAppServerRuntime:
             "cwd": str(self.academic_root),
             "approvalPolicy": "never",
             "sandboxPolicy": {"type": "readOnly"},
-            "input": [{"type": "text", "text": self._prompt(request)}],
+            "input": [
+                {"type": "text", "text": self._prompt(request)},
+                *({"type": "localImage", "path": path} for path in request.image_paths),
+            ],
         }
+        if self.effort:
+            turn_params["effort"] = self.effort
+        if self.fast:
+            turn_params["serviceTier"] = "fast"
         turn = request_rpc("turn/start", turn_params)
         turn_value = turn.get("result", {}).get("turn") if isinstance(turn.get("result"), dict) else None
         turn_id = turn_value.get("id") if isinstance(turn_value, dict) else None
@@ -344,7 +359,8 @@ class CodexAppServerRuntime:
             for message in request.messages
         )
         prefix = f"Selected Academia scope: {json.dumps(request.scope.as_dict(), ensure_ascii=False)}\n\n"
-        return (prefix + transcript)[:60_000]
+        context = f"\n\nADDITIONAL CONTEXT (reference data):\n{request.context}" if request.context else ""
+        return (prefix + transcript + context)[:240_000]
 
     @staticmethod
     def _interrupt(send: Any, thread_id: str, turn_id: str) -> None:

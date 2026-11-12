@@ -223,6 +223,8 @@ class RunRequest:
     scope: Scope
     max_iterations: int = 8
     timeout_seconds: float = 180.0
+    context: str = ""
+    image_paths: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.messages:
@@ -231,6 +233,17 @@ class RunRequest:
             raise AssistantError("max_iterations must be between 1 and 32", code="invalid_run")
         if not 1 <= self.timeout_seconds <= 900:
             raise AssistantError("timeout_seconds must be between 1 and 900", code="invalid_run")
+        if not isinstance(self.context, str) or len(self.context) > 240_000:
+            raise AssistantError("run context must be text under 240,000 characters", code="invalid_run")
+        if not isinstance(self.image_paths, (tuple, list)):
+            raise AssistantError("image_paths must be a sequence of paths", code="invalid_run")
+        image_paths = tuple(self.image_paths)
+        if len(image_paths) > 5:
+            raise AssistantError("a run may include at most five images", code="invalid_run")
+        for path in image_paths:
+            if not isinstance(path, str) or not path.strip() or "\x00" in path:
+                raise AssistantError("each image path must be a non-empty path string", code="invalid_run")
+        object.__setattr__(self, "image_paths", image_paths)
         for message in self.messages:
             if not isinstance(message, dict) or message.get("role") not in {"user", "assistant"}:
                 raise AssistantError("messages must contain user or assistant roles", code="invalid_run")

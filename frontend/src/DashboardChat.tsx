@@ -4,7 +4,8 @@ import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { api } from './lib/api'
-import { deleteChatConversation, listChatConversations, saveChatConversation, stripChatAttachmentPreviews, type ChatConversation, type ChatMessage, type StudyChatRequest } from './lib/chat-history'
+import { ChatProposals } from './ChatProposals'
+import { deleteChatConversation, listChatConversations, saveChatConversation, stripChatAttachmentPreviews, type ChatConversation, type ChatMessage, type ChatProposal, type StudyChatRequest } from './lib/chat-history'
 import { ChatStudyStudio, type ChatStudyRequest, type ModeId } from './ChatStudyStudio'
 import type { Course, CourseworkHistoryRecord, LibraryItem, Task } from './types'
 import 'katex/dist/katex.min.css'
@@ -35,7 +36,7 @@ type ChatProviders = {
   codex?: { installed: boolean; effective_model?: string | null; models?: { id: string; name: string }[]; notice?: string | null }
 }
 type Attachment = { name: string; type: string; data: string; preview: string; size: number }
-type ChatResult = { message: string; model: string | null; effort: string; speed: string; notice: string | null }
+type ChatResult = { message: string; model: string | null; effort: string; speed: string; notice: string | null; proposal_mode?: boolean; proposals?: ChatProposal[] }
 type StudySourceContext = {
   sources?: Array<{ id: string; name: string; complete?: boolean; pages_scanned?: number | null; page_count?: number | null }>
   chunks: { source_name: string; locator: string; text: string }[]
@@ -193,7 +194,7 @@ function makeClassSuggestions(course: Course | undefined, context: CourseAcademi
   return [assessmentSuggestion, reviewSuggestion, explainSuggestion]
 }
 
-export function DashboardChat({ courses, items, semester, onResumeStudySession, studyChatRequest, onStudyChatRequestConsumed }: { courses: Course[]; items: LibraryItem[]; semester: string; onResumeStudySession: (courseId: string, sessionId: string) => void; studyChatRequest: StudyChatRequest | null; onStudyChatRequestConsumed: () => void }) {
+export function DashboardChat({ courses, items, semester, onOpenReview, onProposalCreated, onResumeStudySession, studyChatRequest, onStudyChatRequestConsumed }: { courses: Course[]; items: LibraryItem[]; semester: string; onOpenReview: (reviewId: string) => void; onProposalCreated: () => void; onResumeStudySession: (courseId: string, sessionId: string) => void; studyChatRequest: StudyChatRequest | null; onStudyChatRequestConsumed: () => void }) {
   const [providers, setProviders] = useState<ChatProviders | null>(null)
   const [provider] = useState<'codex'>('codex')
   const [messages, setMessages] = useState<Message[]>([])
@@ -215,6 +216,7 @@ export function DashboardChat({ courses, items, semester, onResumeStudySession, 
   const [model, setModel] = useState('')
   const [effort, setEffort] = useState('medium')
   const [speed, setSpeed] = useState(localStorage.getItem('academia.chat.speed') || 'standard')
+  const [proposalMode, setProposalMode] = useState(() => localStorage.getItem('academia.chat.proposals') === 'true')
   const [showAttachMenu, setShowAttachMenu] = useState(false)
   const [showSourcePicker, setShowSourcePicker] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -592,10 +594,12 @@ export function DashboardChat({ courses, items, semester, onResumeStudySession, 
         boundedMessages.unshift(message)
         historyLength += message.content.length
       }
-      const result = await api.chat<ChatResult>({ provider, messages: boundedMessages.map(({ role, content }) => ({ role, content })), model: model || defaultModel || null, effort, speed, attachments: uploaded.map((attachment) => ({ name: attachment.name, type: attachment.type, data: attachment.data })), course_context: courseContext })
-      const completedMessages = [...nextMessages, { role: 'assistant' as const, content: result.message }]
+      const result = await api.chat<ChatResult>({ provider, messages: boundedMessages.map(({ role, content }) => ({ role, content })), model: model || defaultModel || null, effort, speed, attachments: uploaded.map((attachment) => ({ name: attachment.name, type: attachment.type, data: attachment.data })), course_context: courseContext, proposal_mode: proposalMode, course_id: courseId || null, semester: semester || null })
+      const assistantMessage: Message = { role: 'assistant' as const, content: result.message, ...(result.proposals?.length ? { proposals: result.proposals } : {}) }
+      const completedMessages = [...nextMessages, assistantMessage]
       setMessages(completedMessages)
       await persistConversation(completedMessages)
+      if (result.proposals?.length) onProposalCreated()
       setChatAttachments(uploaded)
       setLastRetrievedSourceIds([...new Set(retrievedSourceIds)])
       if (result.notice) setError(result.notice)
@@ -806,11 +810,12 @@ export function DashboardChat({ courses, items, semester, onResumeStudySession, 
       <section className="chat-main" aria-label="Conversation">
         <header className="chat-conversation-heading"><div className="chat-heading-start"><div className="chat-heading-title"><p className="eyebrow">Conversation</p></div></div><div className="chat-heading-end"><strong>{course ? `${course.code} · ${course.name}` : 'General study chat'}</strong><button className="chat-history-button" onClick={() => void openHistory()} disabled={busy || studyGenerationInProgress} aria-label="Open study history"><svg className="chat-action-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3.4 7.2A7 7 0 1 1 3 11"/><path d="M3 3.8v3.8h3.8M10 6.5V10l2.5 1.5"/></svg><span>History</span></button><button className="chat-new-session" onClick={startNewChat} disabled={busy || studyGenerationInProgress} aria-label="Start a new study chat"><svg className="chat-action-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M11.8 3.2H5.5A1.5 1.5 0 0 0 4 4.7v10.8A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5V9.2"/><path d="m9 12.8.5-2.6L15.7 4a1.6 1.6 0 0 1 2.3 2.3l-6.2 6.2-2.8.3Z"/></svg><span>New chat</span></button></div></header>
         <div className="chat-messages" ref={listRef} aria-live="polite">
-          {messages.length === 0 ? <div className="chat-welcome"><p className="eyebrow">{course ? `Your ${course.code} study space` : 'Ready when you are'}</p><h3>{course ? `What’s next in ${course.code}?` : 'What are you studying?'}</h3><p>{course ? 'Pick a goal based on this class, or ask about an idea that still feels unclear.' : 'Choose a class to get study suggestions based on its course context, or start a general study chat.'}</p><div className="chat-suggestions">{course ? suggestions.map((suggestion) => <button key={suggestion.label} onClick={() => setDraft(suggestion.prompt)}>{suggestion.label} <span>↗</span></button>) : <span className="chat-suggestions-empty">Select a class in the composer for tailored study prompts.</span>}</div></div> : messages.map((message, index) => <article className={`chat-message ${message.role}`} key={index}><span className="chat-avatar">{message.role === 'user' ? 'You' : 'A'}</span><div className="chat-message-content"><small>{message.role === 'user' ? 'You' : 'Academia study assistant'}</small>{message.attachments?.length ? <div className="chat-message-attachments">{message.attachments.map((attachment, attachmentIndex) => attachment.preview ? <figure className="chat-message-image" key={`${attachment.name}-${attachmentIndex}`}><img src={attachment.preview} alt={`Attached image: ${attachment.name}`} /><figcaption>{attachment.name}</figcaption></figure> : <div className="chat-message-file" key={`${attachment.name}-${attachmentIndex}`}><span aria-hidden="true">▤</span><span><strong>{attachment.name}</strong><small>{attachment.type.startsWith('image/') ? 'Image attachment · reattach to view' : attachment.type === 'application/pdf' ? 'PDF document' : 'Attached document'}</small></span></div>)}</div> : null}<div className="chat-rich-text"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={chatMarkdownComponents}>{message.content}</ReactMarkdown></div></div></article>)}
+          {messages.length === 0 ? <div className="chat-welcome"><p className="eyebrow">{course ? `Your ${course.code} study space` : 'Ready when you are'}</p><h3>{course ? `What’s next in ${course.code}?` : 'What are you studying?'}</h3><p>{course ? 'Pick a goal based on this class, or ask about an idea that still feels unclear.' : 'Choose a class to get study suggestions based on its course context, or start a general study chat.'}</p><div className="chat-suggestions">{course ? suggestions.map((suggestion) => <button key={suggestion.label} onClick={() => setDraft(suggestion.prompt)}>{suggestion.label} <span>↗</span></button>) : <span className="chat-suggestions-empty">Select a class in the composer for tailored study prompts.</span>}</div></div> : messages.map((message, index) => <article className={`chat-message ${message.role}`} key={index}><span className="chat-avatar">{message.role === 'user' ? 'You' : 'A'}</span><div className="chat-message-content"><small>{message.role === 'user' ? 'You' : 'Academia study assistant'}</small>{message.attachments?.length ? <div className="chat-message-attachments">{message.attachments.map((attachment, attachmentIndex) => attachment.preview ? <figure className="chat-message-image" key={`${attachment.name}-${attachmentIndex}`}><img src={attachment.preview} alt={`Attached image: ${attachment.name}`} /><figcaption>{attachment.name}</figcaption></figure> : <div className="chat-message-file" key={`${attachment.name}-${attachmentIndex}`}><span aria-hidden="true">▤</span><span><strong>{attachment.name}</strong><small>{attachment.type.startsWith('image/') ? 'Image attachment · reattach to view' : attachment.type === 'application/pdf' ? 'PDF document' : 'Attached document'}</small></span></div>)}</div> : null}<div className="chat-rich-text"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={chatMarkdownComponents}>{message.content}</ReactMarkdown></div>{message.proposals?.length ? <ChatProposals proposals={message.proposals} onOpenReview={onOpenReview} /> : null}</div></article>)}
           {(busy || studyGenerationInProgress) && <div className="chat-thinking" role="status" aria-live="polite"><span className="chat-avatar">A</span><span className="chat-thinking-copy">{studyGenerationInProgress ? 'Creating source-grounded study material in Studio' : selectedItems.length ? 'Reading selected sources and thinking through your question' : 'Thinking through your question'}<span className="chat-loading-dots" aria-hidden="true"><span /><span /><span /></span></span></div>}
         </div>
         <div className="chat-composer-wrap">
           {error && <p className="chat-error" role="alert">{error}</p>}
+          {proposalMode && <p className="chat-proposal-mode-note" role="note">Proposal mode is on: the assistant can prepare exact task or import proposals for Review. It cannot approve, execute, or write.</p>}
           {showAttachMenu && <div className="chat-attach-menu" role="menu" aria-label="Add to this chat">
             <button role="menuitem" onClick={() => { setShowAttachMenu(false); fileInputRef.current?.click() }}><span>↑</span><span><strong>Add a file to this chat</strong><small>Images, PDF, DOCX, PPTX, and text · 12 MB each</small></span></button>
             <button role="menuitem" onClick={() => { setShowAttachMenu(false); setShowSourcePicker(true) }}><span>▤</span><span><strong>Add Academia sources</strong><small>Choose materials from any class</small></span></button>
@@ -829,6 +834,13 @@ export function DashboardChat({ courses, items, semester, onResumeStudySession, 
                 <ChatPicker id="provider" label="AI" value={provider} ariaLabel="AI provider" options={providerOptions.map((entry) => ({ value: entry.id, label: entry.name, disabled: !entry.available, reason: entry.reason }))} disabled={!providerOptions.length} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { if (value === 'codex') localStorage.setItem('academia.chat.provider', value) }} />
                 <ChatPicker id="model" label="Model" value={model || defaultModel} placeholder="Provider default" ariaLabel="Model" options={modelOptions.map((entry) => ({ value: entry.id, label: entry.name }))} disabled={!modelOptions.length} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { setModel(value); localStorage.setItem(`academia.chat.model.${provider}`, value); if (provider === 'codex') localStorage.setItem('academia.chat.model', value) }} />
                 <ChatPicker id="effort" label="Thinking" value={effort} ariaLabel="Thinking effort" options={thinkingOptions.map(([value, label]) => ({ value, label }))} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { setEffort(value); localStorage.setItem(`academia.chat.effort.${provider}`, value); localStorage.setItem('academia.chat.effort', value) }} />
+                <button className={`chat-proposal-toggle ${proposalMode ? 'active' : ''}`} type="button" aria-label={proposalMode ? 'Action proposals enabled' : 'Enable action proposals'} aria-pressed={proposalMode} disabled={busy || studyGenerationInProgress} data-tooltip={proposalMode ? 'Proposal mode is on · the assistant can create Review items but cannot approve or execute them' : 'Enable action proposals · the assistant can prepare exact task or import changes for Review'} data-tooltip-side="top" onClick={() => { const next = !proposalMode; setProposalMode(next); localStorage.setItem('academia.chat.proposals', String(next)) }}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M7 3.5h7l3 3v14H7z" />
+                    <path d="M14 3.5v3h3" />
+                    <path d="M9.5 12.5h5M9.5 15.5h5" />
+                  </svg>
+                </button>
                 {provider === 'codex' && <button className={`chat-speed-toggle ${speed === 'fast' ? 'active' : ''}`} type="button" aria-label={`${speed === 'fast' ? 'Fast' : 'Standard'} response speed`} aria-pressed={speed === 'fast'} data-tooltip={speed === 'fast' ? 'Fast response mode · shorter waits, but it may use your ChatGPT subscription allowance faster' : 'Standard response mode · normal processing speed'} data-tooltip-side="top" onClick={() => { const nextSpeed = speed === 'fast' ? 'standard' : 'fast'; setSpeed(nextSpeed); localStorage.setItem('academia.chat.speed', nextSpeed) }}>
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                     <path className="chat-speed-gauge" d="M5.05 18.95a9.8 9.8 0 1 1 13.9 0l-2.12-2.12a6.8 6.8 0 1 0-9.66 0l-2.12 2.12Z" />

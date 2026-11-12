@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 
 
 MODE = os.environ.get("FAKE_CODEX_MODE", "completed")
+CAPTURE = os.environ.get("FAKE_CODEX_CAPTURE")
 thread_id = "thread-test"
 turn_id = "turn-test"
 
@@ -91,6 +93,8 @@ for line in sys.stdin:
     elif method == "thread/start":
         respond(request_id, {"thread": {"id": thread_id}, "model": "gpt-6-luna"})
     elif method == "turn/start":
+        if CAPTURE:
+            Path(CAPTURE).write_text(json.dumps(message.get("params"), ensure_ascii=False), encoding="utf-8")
         respond(request_id, {"turn": {"id": turn_id}})
         if MODE == "completed":
             completed_turn()

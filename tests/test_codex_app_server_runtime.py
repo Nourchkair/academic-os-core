@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import threading
 from pathlib import Path
@@ -98,3 +99,39 @@ def test_read_only_mcp_command_is_the_default(tmp_path: Path, monkeypatch: pytes
 
     proposal = CodexAppServerRuntime(academic_root=root, profile_path=profile, mcp_mode="proposal_only")
     assert "--proposal-only" in proposal._resolved_mcp_command()
+
+
+def test_turn_carries_context_images_effort_and_fast_tier(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    capture = tmp_path / "turn.json"
+    monkeypatch.setenv("FAKE_CODEX_CAPTURE", str(capture))
+    runtime = make_runtime(tmp_path, monkeypatch)
+    runtime.effort = "high"
+    runtime.fast = True
+    image = tmp_path / "attachment.png"
+    image.write_bytes(b"not-a-real-image")
+    request_with_context = RunRequest(
+        messages=({"role": "user", "content": "Propose a task."},),
+        scope=Scope(),
+        context="COURSE CONTEXT AND ATTACHMENT TEXT",
+        image_paths=(str(image),),
+        timeout_seconds=10,
+    )
+
+    result = runtime.run(request_with_context)
+
+    assert result.status == "completed"
+    params = json.loads(capture.read_text(encoding="utf-8"))
+    assert params["effort"] == "high"
+    assert params["serviceTier"] == "fast"
+    assert params["input"][0]["type"] == "text"
+    assert "COURSE CONTEXT AND ATTACHMENT TEXT" in params["input"][0]["text"]
+    assert params["input"][1] == {"type": "localImage", "path": str(image)}
+
+
+def test_runtime_disables_shell_and_unified_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime = make_runtime(tmp_path, monkeypatch)
+    command = runtime._command()
+    assert "features.shell_tool=false" in command
+    assert "features.unified_exec=false" in command
+    assert "features.multi_agent=false" in command
+    assert 'web_search="disabled"' in command

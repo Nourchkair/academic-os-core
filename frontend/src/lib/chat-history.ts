@@ -1,5 +1,13 @@
 export type ChatMessageAttachment = { name: string; type: string; preview?: string }
-export type ChatMessage = { role: 'user' | 'assistant'; content: string; attachments?: ChatMessageAttachment[] }
+export type ChatProposal = {
+  kind: string
+  title: string
+  summary: string
+  effects: string[]
+  review_id: string
+  proposal_id?: string | null
+}
+export type ChatMessage = { role: 'user' | 'assistant'; content: string; attachments?: ChatMessageAttachment[]; proposals?: ChatProposal[] }
 
 export type ChatConversation = {
   id: string
