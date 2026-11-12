@@ -435,6 +435,8 @@ class GoogleConnector:
     def _authorize_worker(self, session: _OAuthSession) -> None:
         try:
             code, redirect_uri = session.wait_for_code()
+            if session._cancelled:
+                return
             client = session.client
             value = _form_request(TOKEN_ENDPOINT, {
                 "grant_type": "authorization_code",
@@ -444,6 +446,8 @@ class GoogleConnector:
                 "client_secret": client["client_secret"],
                 "code_verifier": session.verifier,
             })
+            if session._cancelled:
+                return
             bundle = _token_bundle(value)
             self.store.save_tokens(bundle)
             account = _json_request("GET", USERINFO_ENDPOINT, token=bundle["access_token"])
