@@ -1,6 +1,6 @@
 [package]
 name = "academia-os-desktop"
-version = "0.4.10"
+version = "0.4.11"
 description = "Local Academia OS desktop shell"
 authors = ["Academia OS contributors"]
 edition = "2021"
