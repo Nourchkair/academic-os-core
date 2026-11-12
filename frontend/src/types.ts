@@ -10,6 +10,7 @@ export type Course = {
 
 export type Task = {
   id: string
+  task_id?: string
   title: string
   completed: boolean
   course?: string
@@ -17,11 +18,27 @@ export type Task = {
   source_location?: string | null
   confidence: string
   kind?: string
+  user_task?: boolean
+  provenance?: string
   due_date?: string | null
   due_time?: string | null
   weight?: string | null
   status?: string | null
   grade?: string | null
+}
+
+export type TaskInput = {
+  title: string
+  course_id?: string | null
+  due_date?: string | null
+  due_time?: string | null
+}
+
+export type TaskListPayload = {
+  semester: string
+  path: string
+  tasks: Task[]
+  task_state_error: string | null
 }
 
 export type ProcessingRecord = {
@@ -81,6 +98,7 @@ export type WorkspaceSnapshot = {
   review_count: number
   workspace_exists: boolean
   workspace_recognized?: boolean
+  task_state_error?: string | null
 }
 
 export type ReviewItem = {

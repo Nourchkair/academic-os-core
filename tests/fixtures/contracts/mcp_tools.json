@@ -81,5 +81,13 @@
       "source_path",
       "target_id"
     ]
+  },
+  {
+    "name": "academia_propose_task",
+    "required": [
+      "action",
+      "evidence_source",
+      "evidence_path"
+    ]
   }
 ]

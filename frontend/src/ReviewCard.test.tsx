@@ -48,4 +48,31 @@ describe('ReviewCard', () => {
     fireEvent.click(screen.getByText('Advanced details'))
     expect(screen.getByText(/"current": "2026-10-19"/)).toBeInTheDocument()
   })
+
+  it('shows an exact personal-task proposal with task-specific decisions', () => {
+    const onDecision = vi.fn().mockResolvedValue(undefined)
+    const taskItem: ReviewItem = {
+      ...item,
+      kind: 'action_approval',
+      title: 'Add task: Read Week 5',
+      action_proposal_id: 'action-1',
+      details: {
+        action_type: 'task_change',
+        proposal_details: {
+          action_type: 'task_change',
+          action: 'create',
+          before: 'No personal task',
+          after: 'Read Week 5 · POL 2103 - Politics · due 2026-10-01 09:00',
+          effects: ["add 'Read Week 5' to Fall 2026/SEMESTER_TASKS.md", 'preserve unrelated Markdown and every existing task'],
+        },
+      },
+    }
+    render(<ReviewCard item={taskItem} courses={[]} busy={false} onDecision={onDecision} />)
+    expect(screen.getByText('No personal task')).toBeInTheDocument()
+    expect(screen.getByText('Read Week 5 · POL 2103 - Politics · due 2026-10-01 09:00')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Add this task' }))
+    expect(onDecision).toHaveBeenCalledWith('approve_action')
+    fireEvent.click(screen.getByRole('button', { name: 'Keep task unchanged' }))
+    expect(onDecision).toHaveBeenCalledWith('reject_action')
+  })
 })

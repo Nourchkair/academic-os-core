@@ -163,6 +163,15 @@ def _entity_evidence(entity: dict[str, Any], root: Path) -> dict[str, Any] | Non
     }
 
 
+def _task_in_scope(task: dict[str, Any], scope: str, course_ids: set[str]) -> bool:
+    task_course = str(task.get("course") or "")
+    if scope == "course":
+        return task_course in course_ids
+    # Semester-wide personal tasks belong to workspace, semester, and today
+    # scopes; course scope remains limited to that course's own evidence.
+    return not task_course or task_course in course_ids
+
+
 def _compact_task(task: dict[str, Any], root: Path) -> dict[str, Any]:
     result = {key: task.get(key) for key in ("title", "completed", "course", "confidence", "kind", "due_date", "due_time", "weight", "status") if key in task}
     raw_id = str(task.get("id", ""))
@@ -208,6 +217,11 @@ def _review_choice_candidates(details: dict[str, Any], item: ReviewItem, root: P
                 })
     if candidates:
         return [candidate for candidate in candidates if candidate["id"] in allowed_ids]
+    if item.action_proposal_id and item.kind not in {"deadline_conflict", "domain_conflict"}:
+        return [
+            {"id": "approve", "label": "Approve the linked action", "effect": "Approve the proposal; execute it separately, then verify the result."},
+            {"id": "reject", "label": "Reject the linked action", "effect": "Reject the proposal without executing it."},
+        ]
     current_value = details.get("current_value", details.get("current"))
     proposed_value = details.get("proposed_value", details.get("new"))
     if current_value is not None:
@@ -244,7 +258,7 @@ def _attention_review(item: ReviewItem, root: Path, *, course_label: str | None 
     proposal_details = details.get("proposal_details")
     proposal_action_type = proposal_details.get("action_type") if isinstance(proposal_details, dict) else None
     action_type = str(details.get("action_type") or proposal_action_type or "")
-    execution_supported = action_type == "domain_change"
+    execution_supported = action_type in {"domain_change", "file_copy", "task_change"}
     choices: list[dict[str, Any]] = []
     recommended: list[dict[str, Any]] = []
     if item.action_proposal_id:
@@ -536,7 +550,11 @@ def build_agent_context(config: dict[str, Any], snapshot: dict[str, Any], *, sco
     ids = _course_ids(scoped_courses)
     projection = DomainProjection(root / ".academia" / "domain.json")
     entities = [entity for entity in projection.list() if str(entity.get("course_id", "")) in ids]
-    tasks = [_compact_task(task, root) for task in snapshot.get("tasks", []) if str(task.get("course", "")) in ids]
+    tasks = [
+        _compact_task(task, root)
+        for task in snapshot.get("tasks", [])
+        if _task_in_scope(task, scope, ids)
+    ]
     coursework_history: list[dict[str, Any]] = []
     for course_record in scoped_courses:
         course_id_value = str(course_record.get("id", ""))
@@ -603,6 +621,7 @@ def build_agent_context(config: dict[str, Any], snapshot: dict[str, Any], *, sco
             "workspace_reference": "configured_workspace",
             "timezone": config["academic"]["timezone"],
             "available_semesters": snapshot.get("available_semesters", []),
+            "task_state_error": snapshot.get("task_state_error"),
             **scoped_snapshot,
         },
         "semester": {"id": current_semester, "name": current_semester, "selected": True},

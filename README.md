@@ -131,6 +131,11 @@ academia courses --json
 academia course "POL 2103 - Politics" --json
 academia today --json
 academia tasks --json
+academia task list --json
+academia task create --title "Draft the essay outline" --course "POL 2103 - Politics" --due-date 2026-10-20 --json
+academia task update TASK_ID --due-date 2026-10-22 --json
+academia task complete TASK_ID --json
+academia task reopen TASK_ID --json
 academia history list --course "POL 2103 - Politics" --semester "Fall 2026" --json
 academia history add --course "POL 2103 - Politics" --kind essay --title "Essay 1" --status submitted --submitted-on 2026-10-08 --json
 academia history update --course "POL 2103 - Politics" --id RECORD_ID --status graded --grade A --json

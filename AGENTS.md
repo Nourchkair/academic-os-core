@@ -135,6 +135,12 @@ academia courses --semester "Fall 2026" --json
 academia course "COURSE ID" --json
 academia today --json
 academia tasks --json
+academia task list --json
+academia task create --title "Draft the essay outline" --course "COURSE ID" --due-date 2026-10-20 --json
+academia task update TASK_ID --due-date 2026-10-22 --json
+academia task complete TASK_ID --json
+academia task reopen TASK_ID --json
+academia assistant propose-task --action create --title "Read Week 5" --course "COURSE ID" --evidence-source "Course reading list" --evidence-path "SEMESTER/COURSE/05_REFERENCE/reading.md" --json
 academia history list --course "COURSE ID" --semester "Fall 2026" --json
 academia history add --course "COURSE ID" --kind essay --title "Essay 1" --status submitted --submitted-on 2026-10-08 --artifact "03_ASSIGNMENTS/A01/Submission/final.docx" --json
 academia history update --course "COURSE ID" --id RECORD_ID --status graded --grade A --json
@@ -175,7 +181,7 @@ academia verify-source --requested requested.json --retrieved retrieved.json --j
 
 JSON output is the preferred agent context format. Human-readable output is for users. Any agent command that accepts `--course` resolves the exact canonical course ID, course code, or exact course name/display name to the same canonical course object. Unknown and ambiguous identifiers fail with a structured error; they never fall back to workspace-wide results.
 
-`academia mcp serve` exposes a local MCP interface over stdio for compatible hosts. Read tools use bounded structured interfaces; Library previews require an exact workspace-relative Library ID and are revalidated by `academia file-preview`. Narrow write tools support host-gated local-file import, an exact executable Review decision, and a separate supported execution for an already-approved Review item. The server cannot verify that a human confirmation was displayed; compatible hosts must obtain confirmation for the exact decision or file and destination before calling write tools. The Review decision tool rejects choices that do not exactly match an executable choice from current `academia agent attention` output. Review execution is limited to an already-approved linked `domain_change` action. Activity records identify MCP-initiated decisions and execution as `agent:mcp`. Imports preserve the original and start supported local extraction. Study sets and practice are managed through the Study interface. The server opens no network listener and has no external-service connectors.
+`academia mcp serve` exposes a local MCP interface over stdio for compatible hosts. Read tools use bounded structured interfaces; Library previews require an exact workspace-relative Library ID and are revalidated by `academia file-preview`. Narrow write tools support host-gated local-file import, an exact executable Review decision, and a separate supported execution for an already-approved Review item. `--proposal-only` additionally exposes exact `academia_propose_import` and `academia_propose_task` tools that create Review/Action proposals without writing. The server cannot verify that a human confirmation was displayed; compatible hosts must obtain confirmation for the exact decision or file and destination before calling write tools. The Review decision tool rejects choices that do not exactly match an executable choice from current `academia agent attention` output. Review execution is limited to an already-approved linked `domain_change`, `file_copy`, or `task_change` action. Activity records identify MCP-initiated decisions and execution as `agent:mcp`. Imports preserve the original and start supported local extraction. Study sets and practice are managed through the Study interface. The server opens no network listener and has no external-service connectors.
 
 ## Allowed behavior
 
@@ -185,12 +191,15 @@ An agent may, when operating through the user-approved local interface:
 - stage user-selected files through manual import or configured watched folders; manual imports of locally supported formats launch deterministic background text extraction into rebuildable `.academia/extracted_sources.json`, including visible PPTX slide text (without embedded-image OCR or speaker notes), while preserving originals and never interpreting embedded instructions;
 - import a specific local file through MCP only after the assistant host has asked the student to confirm the exact file and recognized inbox destination;
 - create a plan or action proposal;
+- create or update a user-owned personal task in `SEMESTER_TASKS.md` only through the direct user interface or an approved `task_change` Review action; only the student marks a task complete or reopens it;
 - create structured source-linked study sets and record student practice through `academia study`;
 - update rebuildable indexes and append activity records;
 - perform non-destructive, verified file copies when the user has approved the proposal;
 - prepare a settings diff for the user to review.
 
 AI-created study aids belong in the structured Study workspace as source-linked sets and practice records. Academia does not expose a separate course-document generation or artifact-writing interface. Study data remains AI-generated and non-authoritative, with citations and student practice preserved in the course Study store.
+
+`SEMESTER_TASKS.md` is the canonical user-task queue; there is no separate task database. One delimited structured block stores personal tasks, and unrelated Markdown is preserved byte-for-byte. Course-derived tasks and domain deadlines are separate read-only evidence. Agents may propose creating or updating a personal task only through `task.propose`, with an existing workspace file as evidence. They may never mark a task complete or reopen one on the student's behalf, and an approved task change never submits coursework, changes a grade, or alters a syllabus deadline. A malformed or duplicate task block fails closed.
 
 ## Approval boundaries
 
@@ -199,7 +208,7 @@ AI-created study aids belong in the structured Study workspace as source-linked 
 - A failed action remains failed/retryable; it is never acknowledged as successful.
 - Review items remain open until a human decision is recorded.
 
-`academia agent attention --json` is the conversation-facing Review contract. Each unresolved item includes `id`, `kind`, `course`, `question`, `why_this_needs_human_input`, `current_value`, `proposed_value`, `evidence`, `choices`, `recommended_next_actions`, `action_proposal_id`, and `status`. `choices[]` means a stable decision that Academia can accept through the existing Review contract; each executable choice includes `id`, `label`, `effect`, `executable: true`, and a structured `action` descriptor. For a supported action, the descriptor identifies the Review decision and, when needed, the separate `review_execute` step. `recommended_next_actions[]` is different: every entry has `executable: false` and is guidance only. It may say `verify_source` or `retry_processing`, but those labels are not claims that a corresponding command exists. Today, linked domain-change Reviews can expose an approve/use-new decision followed by `review execute`; processing retry and source verification remain advisory. The agent asks the student, submits only an executable Review choice, performs the separate execution step only when advertised, and verifies the result. Review remains a backend protocol; it is not a chat transcript or an instruction to guess.
+`academia agent attention --json` is the conversation-facing Review contract. Each unresolved item includes `id`, `kind`, `course`, `question`, `why_this_needs_human_input`, `current_value`, `proposed_value`, `evidence`, `choices`, `recommended_next_actions`, `action_proposal_id`, and `status`. `choices[]` means a stable decision that Academia can accept through the existing Review contract; each executable choice includes `id`, `label`, `effect`, `executable: true`, and a structured `action` descriptor. For a supported action, the descriptor identifies the Review decision and, when needed, the separate `review_execute` step. `recommended_next_actions[]` is different: every entry has `executable: false` and is guidance only. It may say `verify_source` or `retry_processing`, but those labels are not claims that a corresponding command exists. Today, linked domain-change, file-copy, and personal-task Reviews can expose an approve decision followed by `review execute`; processing retry and source verification remain advisory. The agent asks the student, submits only an executable Review choice, performs the separate execution step only when advertised, and verifies the result. Review remains a backend protocol; it is not a chat transcript or an instruction to guess.
 
 `academia process forget RECORD_ID --json` removes a processing record only when it is `FAILED`, its source is missing, and its recorded path is a direct semester or course `00_INBOX` entry in the configured workspace. It preserves the source file (if present, the command refuses) and appends a `processing.forgotten` Activity event.
 

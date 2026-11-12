@@ -63,6 +63,7 @@ def capability_report() -> dict[str, Any]:
             {"id": "study", "label": "Create cited study sets, run practice, record student answers and review progress through academia study", "mode": "shared_cli_api"},
             {"id": "read_activity_changes", "label": "Read append-only Activity changes with a cursor", "mode": "direct"},
             {"id": "record_user_confirmed_coursework", "label": "Record and update user-confirmed assignment and project history", "mode": "user_confirmed_workspace_record"},
+            {"id": "manage_user_tasks", "label": "Create, update, complete, or reopen personal tasks in SEMESTER_TASKS.md", "mode": "user_confirmed_workspace_record"},
         ],
         "study": {"status": "available", "interface": "academia study", "dashboard_required": False,
                   "generation": ["external_agent", "codex_chatgpt_plan", "local_model"],
@@ -73,6 +74,7 @@ def capability_report() -> dict[str, Any]:
             {"id": "destructive_structural_change", "label": "Delete or structurally reorganize academic material", "mode": "explicit_approval_and_verification"},
             {"id": "calendar_update", "label": "Change a calendar event", "mode": "explicit_approval_duplicate_check_and_verification"},
             {"id": "confirmed_academic_state_change", "label": "Change confirmed academic state after conflicting evidence", "mode": "Review_then_approved_action_then_verification"},
+            {"id": "agent_task_change", "label": "Create or update a personal task proposed by an agent", "mode": "Review_then_approved_action_then_verification"},
         ],
         "prohibited": [
             {"id": "school_submission", "label": "Submit coursework, quizzes, exams, forms, or discussions"},
@@ -92,7 +94,7 @@ def capability_report() -> dict[str, Any]:
             "transport": "local_stdio",
             "read_tools": ["status", "capabilities", "courses", "today", "tasks", "agent_context", "attention", "review_item", "activity_changes", "library", "read_library_item", "processing_status", "import_targets"],
             "write_tools": ["review_decide", "review_execute", "import_file"],
-            "proposal_tools": ["propose_import"],
+            "proposal_tools": ["propose_import", "propose_task"],
             "external_connectors": "not_provided_by_core_mcp",
         },
         "watched_folders": {

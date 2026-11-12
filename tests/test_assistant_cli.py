@@ -25,10 +25,11 @@ def test_assistant_tools_cli_exposes_only_read_tools() -> None:
     assert result.returncode == 0, result.stderr
     value = json.loads(result.stdout)
     assert value["contract_version"] == 1
-    assert [tool["name"] for tool in value["write_tools"]] == ["import.propose", "study.create", "domain.propose"]
+    assert [tool["name"] for tool in value["write_tools"]] == ["import.propose", "study.create", "domain.propose", "task.propose"]
     assert value["write_tools"][0]["requires_approval"] is True
     assert value["write_tools"][1]["requires_approval"] is False
     assert value["write_tools"][2]["requires_approval"] is True
+    assert value["write_tools"][3]["requires_approval"] is True
     assert len(value["tools"]) == 12
     assert all(tool["permission"] == "read_local" for tool in value["tools"])
     assert all(tool["side_effect"] == "none" for tool in value["tools"])
@@ -38,10 +39,11 @@ def test_assistant_capabilities_cli_reports_the_provider_gate_as_pending() -> No
     result = run_cli("assistant", "capabilities", "--json")
     assert result.returncode == 0, result.stderr
     value = json.loads(result.stdout)
-    assert value["runtime"]["status"] == "read_only"
-    assert value["runtime"]["write_tools"] is False
+    assert value["runtime"]["status"] == "read_only_default_proposal_only_available"
+    assert value["runtime"]["write_tools"] == "proposal_only"
     assert value["provider_gate"]["status"] in {"pending", "read_only_passed"}
     assert value["providers"][0]["id"] == "codex-app-server"
     assert value["providers"][0]["read_only"] is True
     assert value["providers"][0]["writes"] is False
+    assert value["providers"][0]["proposal_mode"] is True
     assert len(value["tools"]) == 12

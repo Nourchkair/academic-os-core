@@ -15,6 +15,7 @@ SAFE_COMMANDS = frozenset(
         "course",
         "today",
         "tasks",
+        "task",
         "review",
         "activity",
         "workspace",
@@ -69,4 +70,6 @@ def validate_command(
             raise ValueError(f"browser may not supply {option}")
     if command == "process" and values != ["status"]:
         raise ValueError("the dashboard may only read processing status")
+    if command == "task" and (not values or values[0] not in {"list", "create", "update", "complete", "reopen"}):
+        raise ValueError("the dashboard may only list, create, update, complete, or reopen user tasks")
     return command, values

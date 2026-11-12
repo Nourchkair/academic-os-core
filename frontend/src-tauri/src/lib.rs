@@ -74,6 +74,7 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
         "course",
         "today",
         "tasks",
+        "task",
         "review",
         "activity",
         "workspace",
@@ -106,6 +107,12 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
             || args.iter().skip(1).any(|argument| argument != "--json"))
     {
         return Err("Only read-only processing status is available through the app".to_string());
+    }
+    if command == "task" {
+        let action = args.first().map(String::as_str).unwrap_or("");
+        if !["list", "create", "update", "complete", "reopen"].contains(&action) {
+            return Err("Unsupported Academia task action".to_string());
+        }
     }
     let mut cli_args = vec![command];
     cli_args.extend(args);

@@ -26,6 +26,7 @@ from .recommendations import get_playbook, get_recipe, list_playbooks, list_reco
 from .review import ReviewQueue
 from .semester import resolve_current_semester
 from .settings import preview_config, update_config
+from .tasks import TaskStateError, TaskStore, project_task
 from .workspace import build_workspace_snapshot, load_startup_snapshot
 from .workflow import ApprovalWorkflow
 from .workflow_preferences import WorkflowPreferencesStore
@@ -416,6 +417,35 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--fast", action="store_true", help="Use the local workspace index for a quick desktop first paint")
         if name in {"courses", "tasks"}:
             command.add_argument("--semester", help="Read courses from a specific semester folder")
+    task = sub.add_parser("task", help="Create and maintain user tasks in SEMESTER_TASKS.md")
+    task_sub = task.add_subparsers(dest="task_command", required=True)
+    task_list = task_sub.add_parser("list", help="Read canonical user tasks and any task-file error")
+    task_list.add_argument("--semester", help="Read tasks from a specific semester folder")
+    task_list.add_argument("--json", action="store_true")
+    task_create = task_sub.add_parser("create", help="Create one user task")
+    task_create.add_argument("--title", required=True)
+    task_create.add_argument("--course", dest="course_id")
+    task_create.add_argument("--due-date", help="Calendar date in YYYY-MM-DD")
+    task_create.add_argument("--due-time", help="Local 24-hour time in HH:MM")
+    task_create.add_argument("--semester", help="Semester containing SEMESTER_TASKS.md")
+    task_create.add_argument("--json", action="store_true")
+    task_update = task_sub.add_parser("update", help="Update one user task")
+    task_update.add_argument("task_id")
+    task_update.add_argument("--title")
+    task_update.add_argument("--course", dest="course_id", default=argparse.SUPPRESS)
+    task_update.add_argument("--clear-course", action="store_true")
+    task_update.add_argument("--due-date", default=argparse.SUPPRESS)
+    task_update.add_argument("--clear-due-date", action="store_true")
+    task_update.add_argument("--due-time", default=argparse.SUPPRESS)
+    task_update.add_argument("--clear-due-time", action="store_true")
+    task_update.add_argument("--status", choices=("open", "done", "cancelled"))
+    task_update.add_argument("--semester", help="Semester containing SEMESTER_TASKS.md")
+    task_update.add_argument("--json", action="store_true")
+    for action, summary in (("complete", "Mark one user task done"), ("reopen", "Reopen one completed user task")):
+        task_action = task_sub.add_parser(action, help=summary)
+        task_action.add_argument("task_id")
+        task_action.add_argument("--semester", help="Semester containing SEMESTER_TASKS.md")
+        task_action.add_argument("--json", action="store_true")
     process = sub.add_parser("process", help="Manage local background text extraction")
     process_sub = process.add_subparsers(dest="process_command", required=True)
     process_status = process_sub.add_parser("status", help="Show processing records without refreshing source signatures")
@@ -478,6 +508,20 @@ def build_parser() -> argparse.ArgumentParser:
     assistant_propose_import.add_argument("--target", required=True, help="Exact semester or course 00_INBOX id")
     assistant_propose_import.add_argument("--source-label", help="Optional provenance label")
     assistant_propose_import.add_argument("--json", action="store_true")
+    assistant_propose_task = assistant_sub.add_parser("propose-task", help="Create a Review/Action proposal for one personal task change")
+    assistant_propose_task.add_argument("--action", choices=("create", "update"), required=True)
+    assistant_propose_task.add_argument("--task-id")
+    assistant_propose_task.add_argument("--title")
+    assistant_propose_task.add_argument("--course", dest="course_id")
+    assistant_propose_task.add_argument("--due-date")
+    assistant_propose_task.add_argument("--due-time")
+    assistant_propose_task.add_argument("--evidence-source", required=True)
+    assistant_propose_task.add_argument("--evidence-path", required=True)
+    assistant_propose_task.add_argument("--source-location")
+    assistant_propose_task.add_argument("--confidence", choices=("current-confirmed", "likely", "unverified", "historical"), default="unverified")
+    assistant_propose_task.add_argument("--authority", default="unknown")
+    assistant_propose_task.add_argument("--semester", help="Semester containing SEMESTER_TASKS.md")
+    assistant_propose_task.add_argument("--json", action="store_true")
     workflow = sub.add_parser("workflow", help="Read or save local student workflow preferences")
     workflow_sub = workflow.add_subparsers(dest="workflow_command", required=True)
     workflow_preferences = workflow_sub.add_parser("preferences", help="List saved workflow preferences")
@@ -664,7 +708,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"process", "study", "chat", "courses", "today", "tasks", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
+        if args.command in {"process", "study", "chat", "courses", "today", "tasks", "task", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -690,10 +734,10 @@ def dispatch(args: argparse.Namespace) -> int:
             available = bool(codex_path and auth_path.is_file())
             value = {
                 "contract_version": ASSISTANT_CONTRACT_VERSION,
-                "runtime": {"status": "read_only", "write_tools": False, "provider_required": True},
+                "runtime": {"status": "read_only_default_proposal_only_available", "write_tools": "proposal_only", "provider_required": True},
                 "provider_gate": {
                     "status": "read_only_passed" if available else "pending",
-                    "requirement": "write tools remain disabled until the Phase 3 approval flow is implemented",
+                    "requirement": "Direct write tools remain disabled; proposal-only mode creates Review/Action items for human approval.",
                 },
                 "providers": [{
                     "id": "codex-app-server",
@@ -701,6 +745,7 @@ def dispatch(args: argparse.Namespace) -> int:
                     "available": available,
                     "read_only": True,
                     "writes": False,
+                    "proposal_mode": True,
                     "authentication": "Codex-managed ChatGPT sign-in",
                 }],
                 "write_policy": {
@@ -718,6 +763,28 @@ def dispatch(args: argparse.Namespace) -> int:
                 source_path=args.source,
                 target_id=args.target,
                 source_label=args.source_label,
+            )
+        elif args.assistant_command == "propose-task":
+            from .assistant.tools.write import propose_task_change
+            config = load_config(_profile_path(args))
+            context = ReadContext.create(config, semester=args.semester, hosted_model_allowed=False)
+            optional: dict[str, Any] = {}
+            if args.due_date is not None:
+                optional["due_date"] = args.due_date
+            if args.due_time is not None:
+                optional["due_time"] = args.due_time
+            value = propose_task_change(
+                context,
+                action=args.action,
+                task_id=args.task_id,
+                title=args.title,
+                course=args.course_id,
+                evidence_source=args.evidence_source,
+                evidence_path=args.evidence_path,
+                source_location=args.source_location,
+                confidence=args.confidence,
+                authority=args.authority,
+                **optional,
             )
         else:
             config = load_config(_profile_path(args))
@@ -888,6 +955,60 @@ def dispatch(args: argparse.Namespace) -> int:
             value = {"record_id": record.id, "status": "forgotten", "previous_status": record.status.value, "source_path": record.source_path}
         else:
             raise ValueError("unsupported process command")
+        _emit(value, as_json=args.json)
+        return 0
+    if args.command == "task":
+        config = load_config(_profile_path(args))
+        root = Path(config["academic"]["root_directory"]).expanduser().resolve()
+        semester = args.semester or config["academic"]["semester"]
+        if not (root / semester).is_dir():
+            raise ValueError(f"semester folder does not exist: {semester}")
+        store = TaskStore(root, semester)
+        if args.task_command == "list":
+            try:
+                value = {
+                    "semester": semester,
+                    "path": str(store.path),
+                    "tasks": [project_task(task, semester) for task in store.list() if task["status"] != "cancelled"],
+                    "task_state_error": None,
+                }
+            except TaskStateError as exc:
+                value = {"semester": semester, "path": str(store.path), "tasks": [], "task_state_error": str(exc)}
+        elif args.task_command == "create":
+            value = store.create(
+                title=args.title,
+                course_id=args.course_id,
+                due_date=args.due_date,
+                due_time=args.due_time,
+                actor="user",
+            )
+        elif args.task_command == "update":
+            fields: dict[str, Any] = {}
+            if args.title is not None:
+                fields["title"] = args.title
+            if args.clear_course:
+                fields["course_id"] = None
+            elif hasattr(args, "course_id"):
+                fields["course_id"] = args.course_id
+            if args.clear_due_date:
+                fields["due_date"] = None
+            elif hasattr(args, "due_date"):
+                fields["due_date"] = args.due_date
+            if args.clear_due_time:
+                fields["due_time"] = None
+            elif hasattr(args, "due_time"):
+                fields["due_time"] = args.due_time
+            if args.status is not None:
+                fields["status"] = args.status
+            if not fields:
+                raise ValueError("provide at least one task field to update")
+            value = store.update(args.task_id, actor="user", **fields)
+        elif args.task_command == "complete":
+            value = store.complete(args.task_id, actor="user")
+        elif args.task_command == "reopen":
+            value = store.reopen(args.task_id, actor="user")
+        else:
+            raise ValueError(f"unsupported task command: {args.task_command}")
         _emit(value, as_json=args.json)
         return 0
     if args.command == "study":
@@ -1123,6 +1244,13 @@ def dispatch(args: argparse.Namespace) -> int:
                     value = asdict(workflow.execute_approved(
                         review_item.action_proposal_id,
                         lambda proposal: execute_import_proposal(proposal, workspace_root=Path(snapshot["academic_root"]), processing=processing),
+                        actor=args.actor if args.actor != "user" else "system",
+                    ))
+                elif action_type == "task_change":
+                    from .assistant.tools.write import execute_task_change
+                    value = asdict(workflow.execute_approved(
+                        review_item.action_proposal_id,
+                        lambda proposal: execute_task_change(proposal, workspace_root=Path(snapshot["academic_root"])),
                         actor=args.actor if args.actor != "user" else "system",
                     ))
                 else:

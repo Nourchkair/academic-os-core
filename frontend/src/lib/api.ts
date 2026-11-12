@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
+import type { ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, ImportResult, LibraryItem, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, TaskInput, TaskListPayload, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
@@ -127,7 +127,11 @@ export const api = {
   status: () => command<StatusPayload>('status'),
   startupStatus: () => command<StatusPayload>('status', ['--fast']),
   courses: (semester?: string) => command<Course[]>('courses', semester ? ['--semester', semester] : []),
-  tasks: (semester?: string) => command<Task[]>('tasks', semester ? ['--semester', semester] : []),
+  tasks: (semester?: string) => command<TaskListPayload>('task', ['list', ...(semester ? ['--semester', semester] : [])]),
+  createTask: (semester: string, input: TaskInput) => command<Task>('task', ['create', '--semester', semester, ...taskInputArgs(input)]),
+  updateTask: (semester: string, taskId: string, input: Partial<TaskInput>) => command<Task>('task', ['update', taskId, '--semester', semester, ...taskUpdateArgs(input)]),
+  completeTask: (semester: string, taskId: string) => command<Task>('task', ['complete', taskId, '--semester', semester]),
+  reopenTask: (semester: string, taskId: string) => command<Task>('task', ['reopen', taskId, '--semester', semester]),
   agentCourseContext: (courseId: string, semester: string) => command<{ current_state?: { open_tasks?: Task[] } }>('agent', ['context', '--scope', 'course', '--course', courseId, '--semester', semester, '--detail', 'deep']),
   review: () => command<ReviewItem[]>('review'),
   reviewPendingExecution: () => command<ReviewItem[]>('review', ['list', '--pending-execution']),
@@ -218,8 +222,33 @@ export const api = {
   semester: (timezone: string) => command<{ semester: string; timezone: string }>('semester', ['--timezone', timezone]),
 }
 
-function courseworkHistoryArgs(action: 'add' | 'update', courseId: string, semester: string, input: Partial<CourseworkHistoryInput>): string[] {
-  const args = [action, '--course', courseId, '--semester', semester]
+function taskInputArgs(input: TaskInput): string[] {
+  const args = ['--title', input.title]
+  if (input.course_id) args.push('--course', input.course_id)
+  if (input.due_date) args.push('--due-date', input.due_date)
+  if (input.due_time) args.push('--due-time', input.due_time)
+  return args
+}
+
+function taskUpdateArgs(input: Partial<TaskInput>): string[] {
+  const args: string[] = []
+  if (input.title !== undefined) args.push('--title', input.title)
+  if (input.course_id !== undefined) {
+    if (input.course_id) args.push('--course', input.course_id)
+    else args.push('--clear-course')
+  }
+  if (input.due_date !== undefined) {
+    if (input.due_date) args.push('--due-date', input.due_date)
+    else args.push('--clear-due-date')
+  }
+  if (input.due_time !== undefined) {
+    if (input.due_time) args.push('--due-time', input.due_time)
+    else args.push('--clear-due-time')
+  }
+  return args
+}
+
+function courseworkHistoryArgs(action: 'add' | 'update', courseId: string, semester: string, input: Partial<CourseworkHistoryInput>): string[] {  const args = [action, '--course', courseId, '--semester', semester]
   const pairs: Array<[keyof CourseworkHistoryInput, string]> = [
     ['kind', '--kind'], ['title', '--title'], ['status', '--status'], ['due_date', '--due-date'],
     ['submitted_on', '--submitted-on'], ['grade', '--grade'], ['task_title', '--task-title'], ['notes', '--notes'],

@@ -236,8 +236,11 @@ def apply_history_to_tasks(tasks: list[dict[str, Any]], records: list[dict[str, 
     closed_titles.discard("")
     result = []
     target_course = _match_text(course_name)
-    for task in tasks:
-        item = dict(task)
+    for task_item in tasks:
+        if task_item.get("user_task"):
+            result.append(dict(task_item))
+            continue
+        item = dict(task_item)
         same_course = not target_course or _match_text(item.get("course")) == target_course
         if same_course and _match_text(item.get("title")) in closed_titles:
             matching = next(record for record in records if task_is_closed(record) and _match_text(record.get("task_title") or record.get("title")) == _match_text(item.get("title")))

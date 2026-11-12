@@ -11,7 +11,7 @@ import { ReviewView } from './ReviewView'
 import { SettingsView } from './SettingsView'
 import { api, BridgeUnavailableError, isTauriEnvironment } from './lib/api'
 import type { StudyChatRequest } from './lib/chat-history'
-import type { ActivityEvent, Course, CourseworkHistoryRecord, CourseworkKind, LibraryItem, ProcessingRecord, ReviewItem, StatusPayload, Task } from './types'
+import type { ActivityEvent, Course, CourseworkHistoryRecord, CourseworkKind, LibraryItem, ProcessingRecord, ReviewItem, StatusPayload, Task, TaskInput } from './types'
 
 const nav = [
   { id: 'home', label: 'Home', icon: '⌂' },
@@ -150,6 +150,7 @@ function App() {
   const [status, setStatus] = useState<StatusPayload | null>(cachedStartup)
   const [courses, setCourses] = useState<Course[]>(cachedStartup?.workspace.courses || [])
   const [tasks, setTasks] = useState<Task[]>(cachedStartup?.workspace.tasks || [])
+  const [taskStateError, setTaskStateError] = useState<string | null>(cachedStartup?.workspace.task_state_error ?? null)
   const [activity, setActivity] = useState<ActivityEvent[]>([])
   const [reviews, setReviews] = useState<ReviewItem[]>([])
   const [reviewBusy, setReviewBusy] = useState(false)
@@ -233,12 +234,14 @@ function App() {
       if (targetSemester === next.workspace.semester) {
         setCourses(next.workspace.courses)
         setTasks(next.workspace.tasks)
+        setTaskStateError(next.workspace.task_state_error ?? null)
       } else {
         const courseData = await api.courses(targetSemester)
         const taskData = await api.tasks(targetSemester)
         if (sequence !== refreshSequence.current) return
         setCourses(courseData)
-        setTasks(taskData)
+        setTasks(taskData.tasks)
+        setTaskStateError(taskData.task_state_error)
       }
       setOnboarding(false)
       setBooting(false)
@@ -258,6 +261,7 @@ function App() {
               if (targetSemester === fresh.workspace.semester) {
                 setCourses(fresh.workspace.courses)
                 setTasks(fresh.workspace.tasks)
+                setTaskStateError(fresh.workspace.task_state_error ?? null)
               }
             }
           }
@@ -319,7 +323,8 @@ function App() {
       if (sequence !== refreshSequence.current) return
       setSelectedSemester(semester)
       setCourses(courseData)
-      setTasks(taskData)
+      setTasks(taskData.tasks)
+      setTaskStateError(taskData.task_state_error)
       setLibraryItems(libraryData)
     } catch (reason) {
       if (sequence === refreshSequence.current) setError(`The ${semester} workspace could not be loaded: ${String(reason)}`)
@@ -463,7 +468,7 @@ function App() {
       {view === 'review' && <ReviewView items={reviews} courses={courses} activity={activity} busy={reviewBusy} error={reviewError} onDecision={decideReview} onExecute={executeReview} />}
       {view === 'courses' && <CoursesView semesters={semesters} semester={selectedSemester || status?.workspace.semester || ''} courses={courses} items={libraryItems} inbox={inbox} loading={semesterLoading} onSemesterChange={changeSemester} onOpenActions={openActionPanel} onHistoryChanged={() => refresh()} studyResumeRequest={studyResumeRequest} onStudyResumeConsumed={clearStudyResumeRequest} onOpenStudyConversation={openStudyConversation} onStartStudyChat={startStudyChat} courseOpenRequest={courseOpenRequest} onCourseOpenConsumed={clearCourseOpenRequest} onBackHome={() => setView('home')} />}
       <div className={`chat-route-shell ${view === 'chat' ? 'active' : ''}`} aria-hidden={view !== 'chat'}><DashboardChat courses={courses} items={libraryItems} semester={selectedSemester || status?.workspace.semester || ''} onResumeStudySession={resumeStudySession} studyChatRequest={studyChatRequest} onStudyChatRequestConsumed={clearStudyChatRequest} /></div>
-      {view === 'tasks' && <Tasks tasks={tasks} courses={courses} semester={selectedSemester || status?.workspace.semester || ''} timezone={status?.workspace.timezone} onNavigate={navigate} onChanged={() => refresh()} />}
+      {view === 'tasks' && <Tasks tasks={tasks} courses={courses} semester={selectedSemester || status?.workspace.semester || ''} timezone={status?.workspace.timezone} stateError={taskStateError} onNavigate={navigate} onChanged={() => refresh()} />}
       {view === 'activity' && <ActivityView activity={activity} processing={inbox} onNavigate={navigate} />}
       {view === 'settings' && status && <SettingsView status={status} onSaved={() => refresh()} />}
     </main>
@@ -488,7 +493,7 @@ function sortTasks(tasks: Task[]) {
 }
 
 function formatDue(task: Task) {
-  if (!task.due_date) return 'Date to confirm'
+  if (!task.due_date) return task.user_task ? 'No due date' : 'Date to confirm'
   // A syllabus date is a local calendar date, never midnight UTC.
   const date = new Date(`${task.due_date.slice(0, 10)}T12:00:00Z`)
   const label = new Intl.DateTimeFormat(undefined, { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).format(date)
@@ -497,22 +502,104 @@ function formatDue(task: Task) {
   return `Due ${label}${time ? ` at ${hour % 12 || 12}:${time[2]} ${hour >= 12 ? 'p.m.' : 'a.m.'}` : ''}`
 }
 
-function Tasks({ tasks, courses, semester, timezone = 'America/Toronto', onNavigate, onChanged }: { tasks: Task[]; courses: Course[]; semester: string; timezone?: string; onNavigate: (view: View) => void; onChanged: () => Promise<void> }) {
+export function Tasks({ tasks, courses, semester, timezone = 'America/Toronto', stateError, onNavigate, onChanged }: { tasks: Task[]; courses: Course[]; semester: string; timezone?: string; stateError?: string | null; onNavigate: (view: View) => void; onChanged: () => Promise<void> }) {
   const [filter, setFilter] = useState<'all' | 'week' | 'open' | 'completed'>('all')
+  const [creating, setCreating] = useState(false)
   const today = localDate(timezone)
   const end = new Date(`${today}T12:00:00Z`)
   end.setUTCDate(end.getUTCDate() + 7)
   const weekEnd = end.toISOString().slice(0, 10)
   const visible = sortTasks(tasks.filter((task) => filter === 'all' || (filter === 'week' ? !task.completed && Boolean(task.due_date && task.due_date >= today && task.due_date <= weekEnd) : filter === 'completed' ? task.completed : !task.completed)))
+  const create = async (input: TaskInput) => {
+    await api.createTask(semester, input)
+    setCreating(false)
+    await onChanged()
+  }
+  const editorOpen = creating && !stateError
   return <div className="page-stack">
-    <PageIntro eyebrow="Plan" title="Tasks & deadlines" subtitle={`Your course assessments and deadlines. Times use ${timezone}. Mark a task done here and add or update its grade whenever you have it.`} />
+    <PageIntro eyebrow="Plan" title="Tasks & deadlines" subtitle={`Your course assessments, deadlines, and personal tasks. Times use ${timezone}. Personal tasks are stored in this semester's SEMESTER_TASKS.md; course evidence remains read-only.`} />
+    <section className="task-toolbar">
+      <div><p className="eyebrow">Personal task queue</p><p>Add work you want to track yourself. Marking one done changes only that task; it never submits coursework or changes a syllabus deadline.</p></div>
+      <button type="button" className="primary-button" onClick={() => setCreating((value) => !value)} disabled={!semester || Boolean(stateError)}>{editorOpen ? 'Close editor' : 'Add task'}</button>
+    </section>
+    {stateError && <p className="setup-error" role="alert">SEMESTER_TASKS.md could not be read, so personal tasks are hidden and cannot be changed: {stateError}</p>}
+    {editorOpen && semester && <TaskEditor courses={courses} submitLabel="Add task" onSave={create} onCancel={() => setCreating(false)} />}
     <div className="filter-row">{(['all', 'week', 'open', 'completed'] as const).map((value) => <button key={value} className={`filter-pill ${filter === value ? 'active' : ''}`} onClick={() => setFilter(value)}>{value === 'all' ? 'All tasks' : value === 'week' ? 'Next 7 days' : value === 'open' ? 'Open' : 'Completed'}</button>)}</div>
     <div className="task-list">{visible.map((task) => { const urgency = getTaskUrgency(task, timezone); return <article className={`task-row ${task.completed ? 'done' : ''}`} data-tone={urgency} key={task.id}>
       <span className="task-check">{task.completed ? '✓' : ''}</span>
-      <div className="task-body"><h3>{task.title}{task.weight ? ` · ${task.weight} of grade` : ''}</h3><p>{task.course || 'Semester'} · {task.completed ? 'Completed' : task.due_date && task.due_date < today ? 'Past due date · completion unrecorded' : task.due_date === today ? 'Due today' : task.status || 'Completion unrecorded'}</p><details><summary>Source · {task.source.split('/').pop()}{task.source_location ? ` · ${task.source_location}` : ''}</summary><p>{task.confidence === 'likely' ? 'From local syllabus; later course updates have not been checked.' : task.confidence} · {task.source}</p></details></div>
+      <div className="task-body"><h3>{task.title}{task.weight ? ` · ${task.weight} of grade` : ''}</h3><p>{task.user_task ? `Your task${task.course ? ` · ${task.course}` : ''} · ${task.completed ? 'Completed' : task.due_date && task.due_date < today ? 'Past due date' : task.due_date === today ? 'Due today' : 'Open'}` : `${task.course || 'Semester'} · ${task.completed ? 'Completed' : task.due_date && task.due_date < today ? 'Past due date · completion unrecorded' : task.due_date === today ? 'Due today' : task.status || 'Completion unrecorded'}`}</p><details><summary>Source · {task.source.split('/').pop()}{task.source_location ? ` · ${task.source_location}` : ''}</summary><p>{task.confidence === 'likely' ? 'From local syllabus; later course updates have not been checked.' : task.confidence} · {task.source}</p></details></div>
       <span className="task-source"><span className={`status-pill tone-${urgency}`}>{urgencyLabel(urgency)}</span>{formatDue(task)}</span>
-      <TaskCompletionControl task={task} courses={courses} semester={semester} onChanged={onChanged} />
-    </article> })}{!visible.length && <EmptyCard title={filter === 'completed' ? 'No completed tasks recorded' : filter === 'week' ? 'No recorded deadlines in the next 7 days' : 'No tasks recorded'} body="Course deadlines appear after the syllabus has been indexed. An empty list does not confirm that no work is due." action="Go to Home" onClick={() => onNavigate('home')} />}</div>
+      {task.user_task
+        ? <UserTaskControl task={task} courses={courses} semester={semester} onChanged={onChanged} />
+        : <TaskCompletionControl task={task} courses={courses} semester={semester} onChanged={onChanged} />}
+    </article> })}{!visible.length && <EmptyCard title={filter === 'completed' ? 'No completed tasks recorded' : filter === 'week' ? 'No recorded deadlines in the next 7 days' : 'No tasks recorded'} body="Personal tasks appear here when you add them. Course deadlines appear after the syllabus has been indexed; an empty list does not confirm that no work is due." action="Go to Home" onClick={() => onNavigate('home')} />}</div>
+  </div>
+}
+
+function TaskEditor({ initial, courses, submitLabel, onSave, onCancel }: { initial?: Task; courses: Course[]; submitLabel: string; onSave: (input: TaskInput) => Promise<void>; onCancel: () => void }) {
+  const [title, setTitle] = useState(initial?.title || '')
+  const [courseId, setCourseId] = useState(initial?.course || '')
+  const [dueDate, setDueDate] = useState(initial?.due_date?.slice(0, 10) || '')
+  const [dueTime, setDueTime] = useState(initial?.due_time || '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const save = async () => {
+    if (!title.trim() || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await onSave({ title: title.trim(), course_id: courseId || null, due_date: dueDate || null, due_time: dueDate && dueTime ? dueTime : null })
+    } catch (reason) {
+      setError(`Could not save this task. ${String(reason)}`)
+      setBusy(false)
+    }
+  }
+  return <div className="coursework-editor task-editor">
+    <div className="coursework-editor-grid">
+      <label className="history-title-field"><span>Task</span><input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={300} placeholder="e.g. Draft the research essay outline" autoFocus /></label>
+      <label><span>Course <small>Optional</small></span><select value={courseId} onChange={(event) => setCourseId(event.target.value)}><option value="">Semester-wide</option>{courses.map((course) => <option value={course.id} key={course.id}>{course.code} · {course.name}</option>)}</select></label>
+      <label><span>Due date <small>Optional</small></span><input type="date" value={dueDate} onChange={(event) => { setDueDate(event.target.value); if (!event.target.value) setDueTime('') }} /></label>
+      <label><span>Due time <small>Optional</small></span><input type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)} disabled={!dueDate} /></label>
+    </div>
+    {error && <p className="task-grade-error" role="alert">{error}</p>}
+    <div className="coursework-editor-actions">
+      <button type="button" className="secondary-button" onClick={onCancel} disabled={busy}>Cancel</button>
+      <button type="button" className="primary-button" onClick={() => void save()} disabled={busy || !title.trim() || !(dueDate || !dueTime)}>{busy ? 'Saving…' : submitLabel}</button>
+    </div>
+  </div>
+}
+
+function UserTaskControl({ task, courses, semester, onChanged }: { task: Task; courses: Course[]; semester: string; onChanged: () => Promise<void> }) {
+  const [editing, setEditing] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const taskId = task.task_id || task.id
+  const toggle = async () => {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      if (task.completed) await api.reopenTask(semester, taskId)
+      else await api.completeTask(semester, taskId)
+      await onChanged()
+    } catch (reason) {
+      setError(`Could not update this task. ${String(reason)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const save = async (input: TaskInput) => {
+    await api.updateTask(semester, taskId, input)
+    setEditing(false)
+    await onChanged()
+  }
+  return <div className="task-completion-control">
+    <div className="task-user-actions">
+      <button type="button" className="task-done-trigger" onClick={() => void toggle()} disabled={busy}>{busy ? 'Saving…' : task.completed ? 'Reopen' : 'Mark done'}</button>
+      <button type="button" className="task-grade-trigger" onClick={() => setEditing((value) => !value)} disabled={busy}>{editing ? 'Close' : 'Edit'}</button>
+    </div>
+    {error && <p className="task-grade-error task-user-error" role="alert">{error}</p>}
+    {editing && <div className="task-user-editor"><TaskEditor initial={task} courses={courses} submitLabel="Save task" onSave={save} onCancel={() => setEditing(false)} /></div>}
   </div>
 }
 

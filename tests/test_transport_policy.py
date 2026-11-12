@@ -51,3 +51,11 @@ def test_argument_count_and_length_are_bounded() -> None:
         validate_command("status", "not-a-list")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="array of strings"):
         validate_command("status", [1])  # type: ignore[list-item]
+
+
+def test_task_transport_allows_only_supported_user_actions() -> None:
+    assert validate_command("task", ["list", "--semester", "Fall 2026"])[1] == ["list", "--semester", "Fall 2026"]
+    assert validate_command("task", ["create", "--title", "Read"])[1] == ["create", "--title", "Read"]
+    for args in (["delete", "one"], ["propose", "--title", "Read"], ["import", "x"], []):
+        with pytest.raises(ValueError, match="user tasks"):
+            validate_command("task", args)

@@ -20,7 +20,7 @@ from .workspace import build_workspace_snapshot
 _MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 _PROTOCOL_VERSION = "2024-11-05"
 _WRITE_TOOL_NAMES = frozenset({"academia_review_decide", "academia_review_execute", "academia_import_file"})
-_PROPOSAL_TOOL_NAMES = frozenset({"academia_propose_import"})
+_PROPOSAL_TOOL_NAMES = frozenset({"academia_propose_import", "academia_propose_task"})
 
 
 def _tools_for_mode(read_only: bool, proposal_only: bool = False) -> list[dict[str, Any]]:
@@ -109,7 +109,7 @@ _TOOLS = [
     ),
     _tool(
         "academia_review_execute",
-        "Execute a previously approved, supported Review action only after the student authorized that exact action and the Review item is approved. The host must not infer approval from a recommendation. Academia currently executes only verified domain-change actions through this path.",
+        "Execute a previously approved, supported Review action only after the student authorized that exact action and the Review item is approved. The host must not infer approval from a recommendation. Academia executes verified domain-change, file-copy, and personal-task actions through this path.",
         {
             "review_id": {"type": "string", "description": "Exact approved Review id whose executable choice advertised a separate review_execute step."},
             "semester": {"type": "string", "description": "Optional exact semester containing the linked course."},
@@ -177,6 +177,25 @@ _TOOLS = [
             "source_label": {"type": "string", "description": "Optional provenance label."},
         },
         ["source_path", "target_id"],
+        annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
+    ),
+    _tool(
+        "academia_propose_task",
+        "Create or update one personal task through Review/Action. Evidence must come from an existing workspace file. This never writes SEMESTER_TASKS.md, never marks work complete, and cannot submit coursework.",
+        {
+            "action": {"type": "string", "enum": ["create", "update"]},
+            "task_id": {"type": "string", "description": "Exact task id for an update."},
+            "title": {"type": "string"},
+            "course": {"type": "string", "description": "Exact course ID, code, or name."},
+            "due_date": {"type": ["string", "null"], "description": "YYYY-MM-DD, or null to clear."},
+            "due_time": {"type": ["string", "null"], "description": "HH:MM, or null to clear."},
+            "evidence_source": {"type": "string", "description": "Human-readable source label."},
+            "evidence_path": {"type": "string", "description": "Existing workspace-relative evidence file."},
+            "source_location": {"type": "string"},
+            "confidence": {"type": "string", "enum": ["current-confirmed", "likely", "unverified", "historical"]},
+            "authority": {"type": "string"},
+        },
+        ["action", "evidence_source", "evidence_path"],
         annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
     ),
 ]
@@ -493,8 +512,8 @@ def _call_tool(
             raise McpError("Only a Review item with a linked action that is already approved can be executed.")
         details = review.get("details") if isinstance(review.get("details"), dict) else {}
         proposal_details = details.get("proposal_details") if isinstance(details.get("proposal_details"), dict) else {}
-        action_type = details.get("action_type") or proposal_details.get("action_type")
-        if action_type != "domain_change":
+        action_type = review.get("action_type") or details.get("action_type") or proposal_details.get("action_type")
+        if action_type not in {"domain_change", "file_copy", "task_change"}:
             raise McpError("No supported Academia executor exists for this approved action type.")
         execute_args = ["review", "execute", review_id, "--actor", "agent:mcp"]
         _optional(execute_args, "--semester", scope.semester if scope else values.get("semester"))
@@ -652,6 +671,63 @@ def _call_tool(
         context = ReadContext.create(config, semester=scope.semester if scope else None, hosted_model_allowed=False)
         source_label = values.get("source_label") if isinstance(values.get("source_label"), str) else None
         return propose_import(context, source_path=source_value, target_id=target_id, source_label=source_label)
+    if name == "academia_propose_task":
+        from .assistant.tools.write import propose_task_change
+        action = values.get("action")
+        evidence_source = values.get("evidence_source")
+        evidence_path = values.get("evidence_path")
+        if action not in {"create", "update"}:
+            raise McpError("action must be create or update.")
+        if not isinstance(evidence_source, str) or not evidence_source.strip():
+            raise McpError("Provide a non-empty evidence_source label.")
+        if not isinstance(evidence_path, str) or not evidence_path.strip():
+            raise McpError("Provide an existing workspace-relative evidence_path.")
+        config = load_config(_profile_path(profile))
+        context = ReadContext.create(config, semester=scope.semester if scope else None, hosted_model_allowed=False)
+        task_id = values.get("task_id") if isinstance(values.get("task_id"), str) else None
+        course = values.get("course") if isinstance(values.get("course"), str) and values.get("course").strip() else None
+        if scope and scope.course_id:
+            from .course_identity import resolve_course_identifier
+            from .tasks import TaskStateError, TaskStore
+            if course is not None:
+                try:
+                    resolved = resolve_course_identifier(context.policy.courses, course)
+                except (KeyError, ValueError) as exc:
+                    raise McpError(str(exc)) from exc
+                if str(resolved["id"]) != scope.course_id:
+                    raise McpError("course is outside the selected course scope.")
+            if action == "create" and course is None:
+                course = scope.course_id
+            if action == "update":
+                if not task_id:
+                    raise McpError("Updating a task requires an exact task_id.")
+                try:
+                    target_task = TaskStore(context.root, context.semester).get(task_id)
+                except (KeyError, TaskStateError) as exc:
+                    raise McpError(str(exc)) from exc
+                if target_task.get("course_id") != scope.course_id:
+                    raise McpError("task_id is outside the selected course scope.")
+        optional: dict[str, Any] = {}
+        if "due_date" in values:
+            optional["due_date"] = values["due_date"]
+        if "due_time" in values:
+            optional["due_time"] = values["due_time"]
+        try:
+            return propose_task_change(
+                context,
+                action=action,
+                task_id=task_id,
+                title=values.get("title") if isinstance(values.get("title"), str) else None,
+                course=course,
+                evidence_source=evidence_source,
+                evidence_path=evidence_path,
+                source_location=values.get("source_location") if isinstance(values.get("source_location"), str) else None,
+                confidence=values.get("confidence") if isinstance(values.get("confidence"), str) else "unverified",
+                authority=values.get("authority") if isinstance(values.get("authority"), str) else "unknown",
+                **optional,
+            )
+        except (ValueError, KeyError, OSError) as exc:
+            raise McpError(str(exc)) from exc
     raise McpError(f"Unknown Academia MCP tool: {name}")
 
 

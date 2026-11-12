@@ -19,6 +19,7 @@ from ...processing import ProcessingStore
 from ...review import ReviewQueue
 from ...source_identity import SourceIdentityError, fingerprint, safe_workspace_path
 from ...study import StudyService
+from ...tasks import TaskStateError, TaskStore
 from ...workflow import ApprovalWorkflow
 from ..contracts import AssistantError, Disclosure, PermissionClass, SideEffect, ToolDescriptor, ToolResult
 from .read import ReadContext
@@ -104,7 +105,38 @@ DOMAIN_CHANGE_DESCRIPTOR = ToolDescriptor(
     verifiable=True,
 )
 
-WRITE_TOOL_DESCRIPTORS = [IMPORT_PROPOSAL_DESCRIPTOR, STUDY_CREATE_DESCRIPTOR, DOMAIN_CHANGE_DESCRIPTOR]
+TASK_PROPOSAL_DESCRIPTOR = ToolDescriptor(
+    name="task.propose",
+    version=1,
+    description="Propose creating or updating one personal task in SEMESTER_TASKS.md. Creates a Review/Action proposal; it never writes the task file and cannot mark work complete.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["create", "update"]},
+            "task_id": {"type": "string", "description": "Exact task id for an update"},
+            "title": {"type": "string"},
+            "course": {"type": "string", "description": "Exact course ID, code, or name"},
+            "due_date": {"type": ["string", "null"], "description": "YYYY-MM-DD, or null to clear"},
+            "due_time": {"type": ["string", "null"], "description": "HH:MM, or null to clear"},
+            "evidence_source": {"type": "string", "description": "Human-readable source label"},
+            "evidence_path": {"type": "string", "description": "Existing workspace-relative evidence file"},
+            "source_location": {"type": "string"},
+            "confidence": {"type": "string", "enum": ["current-confirmed", "likely", "unverified", "historical"]},
+            "authority": {"type": "string"},
+        },
+        "required": ["action", "evidence_source", "evidence_path"],
+        "additionalProperties": False,
+    },
+    permission=PermissionClass.WRITE_LOCAL,
+    side_effect=SideEffect.UPDATE,
+    disclosure=Disclosure.LOCAL_ONLY,
+    requires_approval=True,
+    idempotent=False,
+    previewable=True,
+    verifiable=True,
+)
+
+WRITE_TOOL_DESCRIPTORS = [IMPORT_PROPOSAL_DESCRIPTOR, STUDY_CREATE_DESCRIPTOR, DOMAIN_CHANGE_DESCRIPTOR, TASK_PROPOSAL_DESCRIPTOR]
 
 
 def _state_stores(root: Path) -> tuple[ApprovalWorkflow, ReviewQueue]:
@@ -371,3 +403,231 @@ def propose_domain_change(
         "after": after,
         "effects": effects,
     }
+
+
+_UNSET = object()
+
+
+def _task_snapshot(task: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "title": task.get("title"),
+        "course_id": task.get("course_id"),
+        "due_date": task.get("due_date"),
+        "due_time": task.get("due_time"),
+        "status": task.get("status"),
+        "updated_at": task.get("updated_at"),
+    }
+
+
+def _task_summary(task: dict[str, Any]) -> str:
+    parts = [str(task.get("title", "Untitled task"))]
+    if task.get("course_id"):
+        parts.append(str(task["course_id"]))
+    if task.get("due_date"):
+        due = str(task["due_date"])
+        if task.get("due_time"):
+            due += f" {task['due_time']}"
+        parts.append(f"due {due}")
+    return " · ".join(parts)
+
+
+def propose_task_change(
+    context: ReadContext,
+    *,
+    action: str,
+    evidence_source: str,
+    evidence_path: str,
+    task_id: str | None = None,
+    title: str | None = None,
+    course: str | None = None,
+    due_date: Any = _UNSET,
+    due_time: Any = _UNSET,
+    source_location: str | None = None,
+    confidence: str = "unverified",
+    authority: str = "unknown",
+) -> dict[str, Any]:
+    """Create an evidence-backed Review/Action proposal for one personal task."""
+    if action not in {"create", "update"}:
+        raise AssistantError("task proposals may only create or update a personal task", code="invalid_task_action")
+    if not isinstance(evidence_source, str) or not evidence_source.strip() or len(evidence_source) > 120:
+        raise AssistantError("evidence_source must be a non-empty label of at most 120 characters", code="invalid_evidence")
+    if confidence not in {"current-confirmed", "likely", "unverified", "historical"}:
+        raise AssistantError("confidence is invalid", code="invalid_evidence")
+    try:
+        evidence_file = safe_workspace_path(context.root, evidence_path)
+    except SourceIdentityError as exc:
+        raise AssistantError(str(exc), code="invalid_evidence") from exc
+    if not evidence_file.is_file():
+        raise AssistantError("evidence_path must identify an existing workspace file", code="invalid_evidence")
+    evidence = asdict(Evidence(
+        source=evidence_source,
+        source_path=evidence_file.relative_to(context.root).as_posix(),
+        source_location=source_location,
+        provenance="ORIGINAL",
+        confidence=confidence,
+        authority=authority,
+    ))
+    store = TaskStore(context.root, context.semester)
+    try:
+        if action == "create":
+            if not isinstance(title, str) or not title.strip():
+                raise AssistantError("creating a task proposal requires a title", code="invalid_task")
+            future = store.new_task(
+                title=title,
+                course_id=course,
+                due_date=None if due_date is _UNSET else due_date,
+                due_time=None if due_time is _UNSET else due_time,
+                provenance="AI-GENERATED",
+                source=evidence_source,
+            )
+            before_task = None
+            before_label = "No personal task"
+            effects = [
+                f"add '{future['title']}' to {context.semester}/SEMESTER_TASKS.md",
+                "preserve unrelated Markdown and every existing task",
+                "record the new task in Activity",
+            ]
+        else:
+            if not isinstance(task_id, str) or not task_id.strip():
+                raise AssistantError("updating a task proposal requires an exact task_id", code="invalid_task")
+            before_task = store.get(task_id)
+            fields: dict[str, Any] = {}
+            if title is not None:
+                fields["title"] = title
+            if course is not None:
+                fields["course_id"] = course
+            if due_date is not _UNSET:
+                fields["due_date"] = due_date
+            if due_time is not _UNSET:
+                fields["due_time"] = due_time
+            if not fields:
+                raise AssistantError("no task fields were provided", code="no_change")
+            future = store.preview_update(task_id, **fields)
+            if all(future[key] == before_task[key] for key in ("title", "course_id", "due_date", "due_time")):
+                raise AssistantError("the proposed task change already matches the recorded task", code="no_change")
+            changes = [
+                f"{key.replace('_', ' ')}: {before_task.get(key)!s} → {future.get(key)!s}"
+                for key in ("title", "course_id", "due_date", "due_time")
+                if future.get(key) != before_task.get(key)
+            ]
+            before_label = _task_summary(before_task)
+            effects = [
+                *changes,
+                "preserve other tasks and unrelated Markdown",
+                "record the update in Activity",
+            ]
+    except TaskStateError as exc:
+        raise AssistantError(str(exc), code="invalid_task") from exc
+    except KeyError as exc:
+        raise AssistantError(f"task not found: {task_id}", code="unknown_task") from exc
+
+    after_label = _task_summary(future)
+    workflow, _ = _state_stores(context.root)
+    proposal, review = workflow.propose(
+        action_type=ActionType.TASK_CHANGE,
+        title=f"Add task: {future['title']}" if action == "create" else f"Update task: {future['title']}",
+        details={
+            "action": action,
+            "semester": context.semester,
+            "task_file": f"{context.semester}/SEMESTER_TASKS.md",
+            "task_id": before_task["id"] if before_task else None,
+            "before": before_label,
+            "after": after_label,
+            "task_before": _task_snapshot(before_task) if before_task else None,
+            "task_after": _task_snapshot(future),
+            "evidence": evidence,
+            "effects": effects,
+            "semester_scope": context.semester,
+        },
+        course=future.get("course_id"),
+        priority="normal",
+        review_kind="action_approval",
+        review_details={
+            "question": (
+                f"Add this personal task to {context.semester}/SEMESTER_TASKS.md?"
+                if action == "create" else "Apply this personal-task update?"
+            ),
+            "why_this_needs_human_input": "The assistant may propose personal-task changes, but only the student can approve writing to SEMESTER_TASKS.md.",
+            "current": before_label,
+            "proposed": after_label,
+            "source": evidence_source,
+            "confidence": confidence,
+            "evidence": [evidence_source, evidence["source_path"]],
+            "effects": effects,
+        },
+    )
+    return {
+        "status": "approval_required",
+        "action": action,
+        "proposal_id": proposal.id,
+        "review_id": review.id,
+        "before": before_label,
+        "after": after_label,
+        "effects": effects,
+    }
+
+
+def execute_task_change(proposal: ActionProposal, *, workspace_root: Path) -> dict[str, Any]:
+    """Execute one approved create/update against the canonical task file."""
+    if proposal.action_type != ActionType.TASK_CHANGE.value:
+        raise ValueError(f"not a task-change proposal: {proposal.action_type}")
+    details = proposal.details if isinstance(proposal.details, dict) else {}
+    semester = details.get("semester")
+    action = details.get("action")
+    after = details.get("task_after")
+    if not isinstance(semester, str) or action not in {"create", "update"} or not isinstance(after, dict):
+        raise ValueError("task proposal is missing its semester, action, or proposed task")
+    store = TaskStore(Path(workspace_root), semester)
+    evidence = details.get("evidence") if isinstance(details.get("evidence"), dict) else {}
+    try:
+        if action == "create":
+            if not isinstance(after.get("title"), str):
+                raise ValueError("task proposal is missing its title")
+            created = store.create(
+                title=after["title"],
+                course_id=after.get("course_id") if isinstance(after.get("course_id"), str) else None,
+                due_date=after.get("due_date") if isinstance(after.get("due_date"), str) else None,
+                due_time=after.get("due_time") if isinstance(after.get("due_time"), str) else None,
+                provenance="AI-GENERATED",
+                source=str(evidence.get("source") or "assistant"),
+                actor="agent:review",
+            )
+            for key in ("title", "course_id", "due_date", "due_time"):
+                if created.get(key) != after.get(key):
+                    raise ValueError("task verification failed after creation")
+            return {
+                "verified": True,
+                "action": "create",
+                "task": created,
+                "task_file": str(store.path),
+                "effects": details.get("effects", []),
+            }
+        task_id = details.get("task_id")
+        before = details.get("task_before")
+        if not isinstance(task_id, str) or not isinstance(before, dict):
+            raise ValueError("task update proposal is missing its exact task")
+        current = store.get(task_id)
+        if current.get("updated_at") != before.get("updated_at"):
+            raise ValueError("the personal task changed after approval; create a new proposal")
+        updated = store.update(
+            task_id,
+            title=after.get("title"),
+            course_id=after.get("course_id") if isinstance(after.get("course_id"), str) else None,
+            due_date=after.get("due_date") if isinstance(after.get("due_date"), str) else None,
+            due_time=after.get("due_time") if isinstance(after.get("due_time"), str) else None,
+            actor="agent:review",
+        )
+        for key in ("title", "course_id", "due_date", "due_time"):
+            if updated.get(key) != after.get(key):
+                raise ValueError("task verification failed after update")
+        return {
+            "verified": True,
+            "action": "update",
+            "task": updated,
+            "task_file": str(store.path),
+            "effects": details.get("effects", []),
+        }
+    except TaskStateError as exc:
+        raise ValueError(str(exc)) from exc
+    except KeyError as exc:
+        raise ValueError("the personal task no longer exists") from exc

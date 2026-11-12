@@ -186,7 +186,7 @@ For Calendar: search for an equivalent before any create/update; compare course,
 
 `SEMESTER_STATUS.md` should aggregate confirmed deadlines, exams, assignments in progress, readings/tasks, grades, courses falling behind, schedule changes, and recommended focus. Rank work using deadline proximity, workload, assessment weight, difficulty, dependencies, lateness, weak areas, exam proximity, progress, and future importance. A nearer small task is not automatically more important than a larger high-weight assessment.
 
-State confidence and assumptions for estimates. Keep `SEMESTER_TASKS.md` actionable and update it during weekly reviews. Recommendations should name concrete next actions rather than giving generic productivity advice.
+State confidence and assumptions for estimates. Keep `SEMESTER_TASKS.md` actionable and update it during weekly reviews. Recommendations should name concrete next actions rather than giving generic productivity advice. Use `academia task create/update/complete/reopen` for personal tasks; do not hand-edit the delimited task block or create a separate task database. Completing a task changes only that task and never submits coursework or alters a syllabus deadline.
 
 ## Common Pitfalls
 
