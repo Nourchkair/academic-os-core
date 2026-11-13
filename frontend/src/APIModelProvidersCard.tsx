@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from './lib/api'
 import { AssistantAccountCard } from './AssistantAccountCard'
 import type { AccountStatus, ModelConnectionsPayload, ModelProviderCatalogEntry, ModelRole } from './types'
@@ -147,22 +147,24 @@ export function APIModelProvidersCard() {
         </article>
         {showChatGPT && <div className="provider-expand"><AssistantAccountCard /></div>}
 
-        {providers.map((provider) => <article className={`provider-row ${provider.status === 'error' ? 'error' : ''}`} key={provider.id}>
-          <span className="provider-mark">{(provider.name || provider.id).slice(0, 1).toUpperCase()}</span>
-          <div className="provider-copy"><strong>{provider.name}</strong><small>{provider.kind === 'local' ? 'Local' : 'API'} · {provider.models.length} models</small></div>
-          <span className={`provider-state ${provider.enabled && provider.status === 'connected' ? 'connected' : ''}`}>{provider.status === 'error' ? 'Error' : provider.enabled ? 'Connected' : 'Disabled'}</span>
-          <button type="button" className="quiet-button" aria-label={`Manage ${provider.name}`} onClick={() => setExpanded((value) => value === provider.id ? null : provider.id)}>{expanded === provider.id ? 'Close' : 'Manage'}</button>
-        </article>)}
-        {providers.map((provider) => expanded === provider.id ? <div className="provider-expand" key={`${provider.id}-manage`}>
-          <div className="provider-expand-actions">
-            <span className="provider-url">{provider.base_url}</span>
-            <button type="button" className="secondary-button" disabled={Boolean(busy)} onClick={() => void act(provider.id, 'test')}>{busy === `test:${provider.id}` ? 'Testing…' : 'Test'}</button>
-            <button type="button" className="secondary-button" disabled={Boolean(busy)} onClick={() => void act(provider.id, provider.enabled ? 'disable' : 'enable')}>{provider.enabled ? 'Disable' : 'Enable'}</button>
-            <button type="button" className="quiet-button" disabled={Boolean(busy)} onClick={() => void act(provider.id, 'remove')}>Remove</button>
-          </div>
-          {provider.error && <p className="setup-error" role="alert">{provider.error}</p>}
-          <div className="provider-model-chips">{provider.models.slice(0, 10).map((model) => <span key={model.id}>{model.name}</span>)}{provider.models.length > 10 && <span>+{provider.models.length - 10}</span>}</div>
-        </div> : null)}
+        {providers.map((provider) => <Fragment key={provider.id}>
+          <article className={`provider-row ${provider.status === 'error' ? 'error' : ''}`}>
+            <span className="provider-mark">{(provider.name || provider.id).slice(0, 1).toUpperCase()}</span>
+            <div className="provider-copy"><strong>{provider.name}</strong><small>{provider.kind === 'local' ? 'Local' : 'API'} · {provider.models.length} models</small></div>
+            <span className={`provider-state ${provider.enabled && provider.status === 'connected' ? 'connected' : ''}`}>{provider.status === 'error' ? 'Error' : provider.enabled ? 'Connected' : 'Disabled'}</span>
+            <button type="button" className="quiet-button" aria-label={`Manage ${provider.name}`} onClick={() => setExpanded((value) => value === provider.id ? null : provider.id)}>{expanded === provider.id ? 'Close' : 'Manage'}</button>
+          </article>
+          {expanded === provider.id && <div className="provider-expand">
+            <div className="provider-expand-actions">
+              <span className="provider-url">{provider.base_url}</span>
+              <button type="button" className="secondary-button" disabled={Boolean(busy)} onClick={() => void act(provider.id, 'test')}>{busy === `test:${provider.id}` ? 'Testing…' : 'Test'}</button>
+              <button type="button" className="secondary-button" disabled={Boolean(busy)} onClick={() => void act(provider.id, provider.enabled ? 'disable' : 'enable')}>{provider.enabled ? 'Disable' : 'Enable'}</button>
+              <button type="button" className="quiet-button" disabled={Boolean(busy)} onClick={() => void act(provider.id, 'remove')}>Remove</button>
+            </div>
+            {provider.error && <p className="setup-error" role="alert">{provider.error}</p>}
+            <div className="provider-model-chips">{provider.models.slice(0, 10).map((model) => <span key={model.id}>{model.name}</span>)}{provider.models.length > 10 && <span>+{provider.models.length - 10}</span>}</div>
+          </div>}
+        </Fragment>)}
 
         <button type="button" className="provider-connect-row" aria-label="Connect a provider" onClick={() => { setPickerOpen(true); setError('') }}><span className="provider-plus">＋</span><span>Connect</span></button>
       </div>
