@@ -36,6 +36,7 @@ export function ConnectionsHub({ onOpenReview }: { onOpenReview: (reviewId: stri
           <span className="connection-type">No API key</span>
         </header>
         <AssistantAccountCard />
+        <p className="account-note">ChatGPT/Codex is the supported subscription sign-in. Claude subscription sign-in is not offered inside Academia because Anthropic restricts it to Claude Code and native Anthropic apps; use Claude Code as an external agent or add an Anthropic API key in the API section. Academia will never silently switch a subscription request to API billing.</p>
       </section>
       <section className="connection-group">
         <header>

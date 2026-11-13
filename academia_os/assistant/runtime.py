@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from .contracts import AssistantError, EventType, RunEvent, RunRequest, RunResult, Scope, ScopeKind, ToolDescriptor, ToolGrant, ToolResult
 from .policy import PolicyDenied, validate_scope
-from .providers import CancelToken, ProviderAdapter, ProviderRequest, ProviderResponse
+from .providers import CancelToken, ProviderAdapter, ProviderRequest, ProviderResponse, ProviderToolCall
 from .registry import WRITE_TOOLS, descriptors, invoke_granted
 from .tools.read import ReadContext
 
@@ -112,7 +112,7 @@ class RunController:
 
             try:
                 response: ProviderResponse = self.provider.complete(
-                    ProviderRequest(messages=tuple(messages), tools=tuple(tools)),
+                    ProviderRequest(messages=tuple(messages), tools=tuple(tools), context=request.context),
                     cancel=cancel,
                 )
             except Exception as exc:
@@ -121,7 +121,19 @@ class RunController:
                 return RunResult(run_id=run_id, status="error", events=tuple(events), tool_results=tuple(tool_results), error=error)
 
             if response.tool_calls:
-                for call in response.tool_calls:
+                calls = tuple(
+                    call if call.call_id else ProviderToolCall(call.name, call.arguments, f"call-{_iteration}-{index}")
+                    for index, call in enumerate(response.tool_calls)
+                )
+                messages.append({
+                    "role": "assistant",
+                    "content": response.text or "",
+                    "tool_calls": [
+                        {"id": call.call_id, "name": call.name, "arguments": dict(call.arguments)}
+                        for call in calls
+                    ],
+                })
+                for call in calls:
                     emit(EventType.TOOL_STARTED, {"name": call.name, "call_id": call.call_id})
                     try:
                         result = invoke_granted(
@@ -156,6 +168,7 @@ class RunController:
                     messages.append({
                         "role": "tool",
                         "name": call.name,
+                        "tool_call_id": call.call_id,
                         "content": _tool_content(payload),
                     })
                 continue

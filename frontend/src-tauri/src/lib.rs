@@ -171,6 +171,7 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
         "artifact",
         "account",
         "models",
+        "chat-providers",
         "connectors",
     ];
     if !allowed.contains(&command.as_str()) {
@@ -211,6 +212,9 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
         if !valid {
             return Err("Unsupported Academia account action".to_string());
         }
+    }
+    if command == "chat-providers" && !args.is_empty() {
+        return Err("chat-providers does not accept arguments".to_string());
     }
     if command == "models" {
         let action = args.first().map(String::as_str).unwrap_or("");

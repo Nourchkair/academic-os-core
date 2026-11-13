@@ -13,12 +13,12 @@ import './dashboard-chat.css'
 
 type Message = ChatMessage
 type ChatProviderInfo = {
-  id: 'codex' | 'claude'
+  id: string
   name: string
   installed: boolean | null
   authenticated: boolean | null
   available: boolean
-  models: { id: string; name: string }[]
+  models: { id: string; name: string; capabilities?: string[] }[]
   default_model: string
   notice: string
   billing: string
@@ -223,7 +223,7 @@ function proposalStatusLabel(item: ReviewItem) {
 
 export function DashboardChat({ courses, items, semester, onOpenReview, onProposalCreated, reviewRevision, onResumeStudySession, studyChatRequest, onStudyChatRequestConsumed }: { courses: Course[]; items: LibraryItem[]; semester: string; onOpenReview: (reviewId: string) => void; onProposalCreated: () => void; reviewRevision: number; onResumeStudySession: (courseId: string, sessionId: string) => void; studyChatRequest: StudyChatRequest | null; onStudyChatRequestConsumed: () => void }) {
   const [providers, setProviders] = useState<ChatProviders | null>(null)
-  const [provider] = useState<'codex'>('codex')
+  const [provider, setProvider] = useState(() => localStorage.getItem('academia.chat.provider') || 'codex')
   const [messages, setMessages] = useState<Message[]>([])
   const [pendingChatStudy, setPendingChatStudy] = useState<ChatStudyDraft | null>(null)
   const [chatStudyRequest, setChatStudyRequest] = useState<ChatStudyRequest | null>(null)
@@ -439,6 +439,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
   const providerCatalog = providers?.chat ?? providers
   const providerOptions = providerCatalog?.providers ?? []
   const activeProvider = providerOptions.find((entry) => entry.id === provider)
+  const apiProvider = provider.startsWith('api:')
   const modelOptions = activeProvider?.models ?? []
   const defaultModel = activeProvider?.default_model ?? ''
   const isAvailable = Boolean(activeProvider?.available)
@@ -453,6 +454,11 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
   }, [provider])
 
   useEffect(() => { void api.chatProviders<ChatProviders>().then(setProviders).catch((reason) => setError(String(reason))) }, [])
+  useEffect(() => {
+    if (!apiProvider || !proposalMode) return
+    setProposalMode(false)
+    localStorage.setItem('academia.chat.proposals', 'false')
+  }, [apiProvider, proposalMode])
   useEffect(() => {
     let current = true
     const refresh = () => {
@@ -1087,6 +1093,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
         </div>
         <div className="chat-composer-wrap">
           {error && <p className="chat-error" role="alert">{error}</p>}
+          {apiProvider && <div className="chat-proposal-mode-note" role="note"><span>API provider mode is on. Study chat uses the selected provider and API billing.</span><small>Proposal mode, Codex web search, and Codex reasoning controls are available only with the ChatGPT/Codex subscription.</small></div>}
           {proposalMode && <div className="chat-proposal-mode-note" role="note">
             <span>Proposal mode is on. Grant only what the assistant may prepare:</span>
             <label><input type="checkbox" checked={proposalGrants.includes('task')} onChange={() => toggleProposalGrant('task')} /> Tasks</label>
@@ -1113,7 +1120,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
                 <ChatPicker id="course" icon="▣" value={courseId} placeholder="Course context" ariaLabel="Course context" options={[{ value: '', label: 'General study chat' }, ...courses.map((entry) => ({ value: entry.id, label: `${entry.code} · ${entry.name}` }))]} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={selectCourse} />
               </div>
               <div className="chat-composer-controls">
-                <ChatPicker id="provider" label="AI" value={provider} ariaLabel="AI provider" options={providerOptions.map((entry) => ({ value: entry.id, label: entry.name, disabled: !entry.available, reason: entry.reason }))} disabled={!providerOptions.length} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { if (value === 'codex') localStorage.setItem('academia.chat.provider', value) }} />
+                <ChatPicker id="provider" label="AI" value={provider} ariaLabel="AI provider" options={providerOptions.map((entry) => ({ value: entry.id, label: entry.name, disabled: !entry.available, reason: entry.reason }))} disabled={!providerOptions.length} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { setProvider(value); localStorage.setItem('academia.chat.provider', value) }} />
                 <ChatPicker id="model" label="Model" value={model || defaultModel} placeholder="Provider default" ariaLabel="Model" options={modelOptions.map((entry) => ({ value: entry.id, label: entry.name }))} disabled={!modelOptions.length} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { setModel(value); localStorage.setItem(`academia.chat.model.${provider}`, value); if (provider === 'codex') localStorage.setItem('academia.chat.model', value) }} />
                 <ChatPicker id="effort" label="Thinking" value={effort} ariaLabel="Thinking effort" options={thinkingOptions.map(([value, label]) => ({ value, label }))} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { setEffort(value); localStorage.setItem(`academia.chat.effort.${provider}`, value); localStorage.setItem('academia.chat.effort', value) }} />
                 {googleAvailable && <>
@@ -1136,7 +1143,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
                     <path d="M3.5 12h17M12 3.5c2.4 2.5 3.6 5.3 3.6 8.5s-1.2 6-3.6 8.5c-2.4-2.5-3.6-5.3-3.6-8.5S9.6 6 12 3.5Z" />
                   </svg>
                 </button>
-                <button className={`chat-proposal-toggle ${proposalMode ? 'active' : ''}`} type="button" aria-label={proposalMode ? 'Action proposals enabled' : 'Enable action proposals'} aria-pressed={proposalMode} disabled={busy || studyGenerationInProgress} data-tooltip={proposalMode ? 'Proposal mode is on · the assistant can create Review items but cannot approve or execute them' : 'Enable action proposals · the assistant can prepare exact task or import changes for Review'} data-tooltip-side="top" onClick={() => { const next = !proposalMode; setProposalMode(next); localStorage.setItem('academia.chat.proposals', String(next)) }}>
+                <button className={`chat-proposal-toggle ${proposalMode ? 'active' : ''}`} type="button" aria-label={proposalMode ? 'Action proposals enabled' : 'Enable action proposals'} aria-pressed={proposalMode} disabled={busy || studyGenerationInProgress || apiProvider} data-tooltip={proposalMode ? 'Proposal mode is on · the assistant can create Review items but cannot approve or execute them' : 'Enable action proposals · the assistant can prepare exact task or import changes for Review'} data-tooltip-side="top" onClick={() => { const next = !proposalMode; setProposalMode(next); localStorage.setItem('academia.chat.proposals', String(next)) }}>
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                     <path d="M7 3.5h7l3 3v14H7z" />
                     <path d="M14 3.5v3h3" />

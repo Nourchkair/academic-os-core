@@ -682,7 +682,7 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
     def _handle_chat_providers(self, origin: str | None) -> None:
         try:
             from .dashboard_chat import providers
-            self._send_json(200, providers(), cors_origin=origin)
+            self._send_json(200, providers(profile=self.dashboard.profile), cors_origin=origin)
         except (OSError, subprocess.TimeoutExpired, ValueError):
             self._send_json(200, {"available": False, "models": [], "default_model": None,
                                   "provider": "Codex CLI using ChatGPT sign-in"}, cors_origin=origin)

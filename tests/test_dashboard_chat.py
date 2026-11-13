@@ -10,7 +10,7 @@ import pytest
 
 from academia_os import dashboard_chat
 from academia_os.assistant.contracts import AssistantError, EventType, RunEvent, RunResult, ToolResult
-from academia_os.assistant.providers.base import CancelToken
+from academia_os.assistant.providers.base import CancelToken, ProviderResponse
 from academia_os.dashboard_chat import _proposal_card, _proposal_instruction, _validate_payload, respond, stream_chat
 from academia_os.study.providers import CLAUDE_UNAVAILABLE_NOTICE
 from tests.test_agent_interface import prepared_workspace
@@ -222,6 +222,106 @@ def test_respond_enables_live_web_search_only_with_the_grant(monkeypatch: pytest
     respond(payload(web_search=True))
     assert 'web_search="live"' in captured["command"]
     assert 'web_search="disabled"' not in captured["command"]
+
+
+def test_respond_uses_a_configured_api_provider(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+
+    class FakeCredentials:
+        def load(self, provider_id: str) -> str:
+            return "api-key"
+
+    class FakeManager:
+        credentials = FakeCredentials()
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def list(self) -> dict[str, Any]:
+            return {
+                "providers": [{
+                    "id": "openai",
+                    "name": "OpenAI",
+                    "status": "connected",
+                    "enabled": True,
+                    "base_url": "https://api.openai.com/v1",
+                    "auth": "configured",
+                    "models": [{"id": "gpt-test", "name": "GPT Test", "capabilities": ["chat"]}],
+                }],
+                "preferences": {"default": None, "fast": None, "deep": None, "vision": None, "image": None},
+            }
+
+    class FakeAdapter:
+        id = "api:openai"
+
+        def complete(self, request: Any, *, cancel: Any = None) -> ProviderResponse:
+            assert "STUDENT-SELECTED" in request.context or "study assistant" in request.context
+            return ProviderResponse(text="API answer")
+
+    monkeypatch.setattr(dashboard_chat, "ModelConnectionManager", FakeManager)
+    monkeypatch.setattr(dashboard_chat, "_api_adapter", lambda record, key, model: FakeAdapter())
+
+    result = respond(payload(provider="api:openai", model="gpt-test"), profile=profile)
+    assert result["message"] == "API answer"
+    assert result["provider"] == "api:openai"
+    assert result["model"] == "gpt-test"
+    assert result["notice"] is None
+
+    with pytest.raises(ValueError, match="require Codex"):
+        _validate_payload(payload(provider="api:openai", proposal_mode=True, granted_proposal_tools=["task"]))
+
+
+def test_respond_runs_api_provider_read_tools_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+    from tests.test_api_providers import FakeChatServer
+    from tests.test_model_connections import MemoryCredentials
+    from academia_os.model_connections import ModelConnectionManager
+
+    server = FakeChatServer()
+    manager = ModelConnectionManager(tmp_path / "model_connections.json", credentials=MemoryCredentials())  # type: ignore[arg-type]
+    try:
+        manager.add(provider="openai", api_key="key", base_url=server.origin + "/v1")
+        monkeypatch.setattr(dashboard_chat, "ModelConnectionManager", lambda _path: manager)
+        result = respond(payload(provider="api:openai", model="gpt-test"), profile=profile)
+        assert result["message"] == "API final answer"
+        assert result["provider"] == "api:openai"
+        assert any(message.get("role") == "tool" for message in server.openai_bodies[-1]["messages"])
+    finally:
+        server.close()
+
+
+def test_provider_catalog_includes_connected_api_models(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+
+    class FakeCredentials:
+        def load(self, provider_id: str) -> str:
+            return "api-key"
+
+    class FakeManager:
+        credentials = FakeCredentials()
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def list(self) -> dict[str, Any]:
+            return {
+                "providers": [{
+                    "id": "openai",
+                    "name": "OpenAI",
+                    "status": "connected",
+                    "enabled": True,
+                    "base_url": "https://api.openai.com/v1",
+                    "auth": "configured",
+                    "models": [{"id": "gpt-test", "name": "GPT Test", "capabilities": ["chat"]}],
+                }],
+                "preferences": {"default": "openai/gpt-test", "fast": None, "deep": None, "vision": None, "image": None},
+            }
+
+    monkeypatch.setattr(dashboard_chat, "ModelConnectionManager", FakeManager)
+    catalog = dashboard_chat.providers(profile)
+    api = next(entry for entry in catalog["providers"] if entry["id"] == "api:openai")
+    assert api["models"][0]["id"] == "gpt-test"
+    assert api["billing"] == "api"
 
 
 def test_respond_reports_plan_limit_and_generic_failure(monkeypatch: pytest.MonkeyPatch) -> None:

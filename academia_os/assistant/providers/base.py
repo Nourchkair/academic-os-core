@@ -24,6 +24,7 @@ class ProviderResponse:
 class ProviderRequest:
     messages: tuple[dict[str, Any], ...]
     tools: tuple[dict[str, Any], ...]
+    context: str = ""
 
 
 class CancelToken:

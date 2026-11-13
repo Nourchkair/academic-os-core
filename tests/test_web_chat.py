@@ -18,7 +18,7 @@ def post_chat(server: Any, body: bytes, *, content_type: str = "application/json
 
 
 def test_chat_providers_endpoint_returns_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(dashboard_chat, "providers", lambda: {"default_provider": "codex", "providers": [{"id": "codex"}]})
+    monkeypatch.setattr(dashboard_chat, "providers", lambda profile=None: {"default_provider": "codex", "providers": [{"id": "codex"}]})
     with running_server(tmp_path) as server:
         status, headers, payload = request(server, "GET", "/api/v1/chat/providers")
 
@@ -28,7 +28,7 @@ def test_chat_providers_endpoint_returns_catalog(tmp_path: Path, monkeypatch: py
 
 
 def test_chat_providers_endpoint_falls_back_when_detection_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    def fail() -> dict[str, Any]:
+    def fail(profile: Path | None = None) -> dict[str, Any]:
         raise OSError("provider lookup failed")
 
     monkeypatch.setattr(dashboard_chat, "providers", fail)

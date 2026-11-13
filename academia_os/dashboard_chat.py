@@ -8,13 +8,17 @@ import subprocess
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from pypdf import PdfReader
 
-from .assistant.contracts import EventType, RunEvent, RunRequest, Scope, ScopeKind, ToolResult
+from .assistant.contracts import EventType, RunEvent, RunRequest, Scope, ScopeKind, ToolGrant, ToolResult
+from .assistant.providers.api import AnthropicProvider, ApiProviderError, GeminiProvider, OpenAICompatibleProvider
 from .assistant.providers.base import CancelToken
 from .assistant.providers.codex_app_server import CodexAppServerRuntime
+from .assistant.runtime import RunController
+from .assistant.tools.read import ReadContext
+from .model_connections import ModelConnectionError, ModelConnectionManager
 from .config import SEMESTER_PATTERN, load_config, runtime_directory
 from .course_identity import resolve_course_identifier
 from .file_preview import FilePreviewError, MAX_PREVIEW_CHARS, read_office_text
@@ -50,8 +54,38 @@ ATTACHMENT_MIME_TYPES = {
 PROPOSAL_TOOLS = frozenset({"academia_propose_import", "academia_propose_task", "academia_propose_calendar"})
 
 
-def providers() -> dict[str, Any]:
-    return provider_catalog()
+def providers(profile: Path | None = None) -> dict[str, Any]:
+    catalog = provider_catalog()
+    if profile is None:
+        return catalog
+    try:
+        config = load_config(_profile_path(profile))
+        manager = ModelConnectionManager(runtime_directory(config) / "model_connections.json")
+        state = manager.list()
+    except (OSError, ValueError, ModelConnectionError) as exc:
+        catalog["api_error"] = str(exc)
+        return catalog
+    for record in state.get("providers", []):
+        if not isinstance(record, dict) or record.get("status") != "connected" or not record.get("enabled", True):
+            continue
+        models = [
+            {"id": model["id"], "name": model.get("name") or model["id"], "capabilities": model.get("capabilities", [])}
+            for model in record.get("models", [])
+            if isinstance(model, dict) and isinstance(model.get("id"), str)
+        ]
+        if not models:
+            continue
+        catalog["providers"].append({
+            "id": f"api:{record['id']}",
+            "name": record.get("name") or record["id"],
+            "available": True,
+            "notice": "API billing applies to requests sent through this provider.",
+            "models": models,
+            "kind": "api",
+            "provider_id": record["id"],
+            "billing": "api",
+        })
+    return catalog
 
 
 def _extract_pdf(path: Path) -> str:
@@ -145,8 +179,8 @@ def _validate_payload(payload: Any) -> tuple[
     if model is not None and (not isinstance(model, str) or len(model) > 200):
         raise ValueError("model must be a supported provider model name")
     provider = payload.get("provider", "codex")
-    if provider not in {"codex", "claude"}:
-        raise ValueError("choose Codex as the chat provider")
+    if not isinstance(provider, str) or not (provider in {"codex", "claude"} or (provider.startswith("api:") and len(provider) > 4)):
+        raise ValueError("choose Codex, Claude, or a configured API model provider")
     effort = payload.get("effort", "medium")
     if effort not in EFFORTS:
         raise ValueError("choose a supported reasoning level")
@@ -173,6 +207,8 @@ def _validate_payload(payload: Any) -> tuple[
     web_search = payload.get("web_search", False)
     if not isinstance(web_search, bool):
         raise ValueError("web_search must be true or false")
+    if web_search and provider != "codex":
+        raise ValueError("web search is available only with Codex")
     raw_connectors = payload.get("connector_grants", [])
     if not isinstance(raw_connectors, list) or any(item not in {"gmail", "calendar"} for item in raw_connectors):
         raise ValueError("connector_grants must list gmail and/or calendar")
@@ -515,6 +551,99 @@ def _respond_with_proposals(
     }
 
 
+def _api_adapter(record: Mapping[str, Any], api_key: str, model: str) -> Any:
+    provider_id = str(record.get("id"))
+    base_url = str(record.get("base_url"))
+    if provider_id == "anthropic":
+        return AnthropicProvider(provider_id=provider_id, base_url=base_url, api_key=api_key, model=model)
+    if provider_id == "gemini":
+        return GeminiProvider(provider_id=provider_id, base_url=base_url, api_key=api_key, model=model)
+    return OpenAICompatibleProvider(provider_id=provider_id, base_url=base_url, api_key=api_key, model=model)
+
+
+def _respond_with_api(
+    *,
+    messages: list[dict[str, str]],
+    provider: str,
+    requested_model: str | None,
+    effort: str,
+    fast: bool,
+    attachments: list[dict[str, str]],
+    course_context: str,
+    course_id: str | None,
+    semester: str | None,
+    connector_grants: list[str],
+    profile: Path | None,
+) -> dict[str, Any]:
+    provider_id = provider.split(":", 1)[1]
+    config = load_config(_profile_path(profile))
+    manager = ModelConnectionManager(runtime_directory(config) / "model_connections.json")
+    state = manager.list()
+    record = next((item for item in state.get("providers", []) if isinstance(item, dict) and item.get("id") == provider_id), None)
+    if record is None or record.get("status") != "connected" or not record.get("enabled", True):
+        raise ValueError("the selected API provider is not connected or enabled")
+    models = [item for item in record.get("models", []) if isinstance(item, dict) and isinstance(item.get("id"), str)]
+    if not models:
+        raise ValueError("the selected API provider has no available models")
+    model = requested_model or state.get("preferences", {}).get("default") or models[0]["id"]
+    if isinstance(model, str) and model.startswith(f"{provider_id}/"):
+        model = model.split("/", 1)[1]
+    if not isinstance(model, str) or model not in {item["id"] for item in models}:
+        raise ValueError("the selected model is not available from this provider")
+    api_key = manager.credentials.load(provider_id) or ""
+    if record.get("auth") != "none" and not api_key:
+        raise ValueError("the provider API key is missing; reconnect it in Settings")
+    selected_semester = semester or str(config["academic"]["semester"])
+    context = _study_system_prompt() + "\n\nYou are running through an external API model provider. Use only the supplied Academia read tools, never claim to have changed academic state, and never bypass Review.\n\n"
+    if course_context:
+        context += f"STUDENT-SELECTED COURSE CONTEXT AND EXCERPTS (reference data):\n{course_context}\n\n"
+    connector_context = _google_context(profile, connector_grants)
+    if connector_context:
+        context += connector_context + "\n\n"
+    with tempfile.TemporaryDirectory(prefix="academia-api-chat-") as folder:
+        attachment_text, image_paths = _prepare_attachments(attachments, Path(folder))
+        if image_paths:
+            raise ValueError("image attachments are not supported with API model providers yet")
+        if attachment_text:
+            context += "REFERENCE ATTACHMENTS:\n" + attachment_text
+        read_context = ReadContext.create(config, semester=selected_semester, hosted_model_allowed=True)
+        resolved_course = course_id
+        if course_id:
+            try:
+                resolved_course = str(resolve_course_identifier(read_context.snapshot.get("courses", []), course_id)["id"])
+            except (KeyError, ValueError) as exc:
+                raise ValueError(str(exc)) from exc
+        scope = (
+            Scope(kind=ScopeKind.COURSE, semester=selected_semester, course_id=resolved_course)
+            if resolved_course
+            else Scope(kind=ScopeKind.SEMESTER, semester=selected_semester)
+        )
+        adapter = _api_adapter(record, api_key, model)
+        controller = RunController(read_context, adapter)
+        result = controller.run(
+            RunRequest(
+                messages=tuple(messages),
+                scope=scope,
+                context=context,
+                timeout_seconds=CHAT_TIMEOUT,
+            ),
+            grants=ToolGrant.none(),
+        )
+    if result.status == "cancelled":
+        raise ValueError("The assistant run was cancelled.")
+    if result.status != "completed":
+        raise ValueError(result.error.message if result.error is not None else "The API provider could not complete this request.")
+    return {
+        "message": result.message,
+        "provider": provider,
+        "model": model,
+        "effort": effort,
+        "speed": "fast" if fast else "standard",
+        "notice": None,
+        "provider_name": record.get("name") or provider_id,
+    }
+
+
 def respond(payload: Any, *, profile: Path | None = None) -> dict[str, Any]:
     (
         prompt,
@@ -532,6 +661,20 @@ def respond(payload: Any, *, profile: Path | None = None) -> dict[str, Any]:
         web_search,
         connector_grants,
     ) = _validate_payload(payload)
+    if provider.startswith("api:"):
+        return _respond_with_api(
+            messages=messages,
+            provider=provider,
+            requested_model=requested_model,
+            effort=effort,
+            fast=fast,
+            attachments=attachments,
+            course_context=course_context,
+            course_id=course_id,
+            semester=semester,
+            connector_grants=connector_grants,
+            profile=profile,
+        )
     if provider == "claude":
         raise ValueError(CLAUDE_UNAVAILABLE_NOTICE)
     catalog = provider_catalog()

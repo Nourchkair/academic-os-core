@@ -1025,6 +1025,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_study_parser(sub)
     dashboard_chat = sub.add_parser("chat", help=argparse.SUPPRESS)
     dashboard_chat.add_argument("--input-file", required=True)
+    chat_providers = sub.add_parser("chat-providers", help=argparse.SUPPRESS)
     native_chat = sub.add_parser("chat-stream", help=argparse.SUPPRESS)
     native_chat.add_argument("--input-file", required=True)
     native_chat.add_argument("--run-id", required=True)
@@ -1071,7 +1072,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"process", "study", "chat", "chat-stream", "chat-cancel", "account", "models", "connectors", "courses", "today", "tasks", "task", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard", "mcp-connections"}:
+        if args.command in {"process", "study", "chat", "chat-providers", "chat-stream", "chat-cancel", "account", "models", "connectors", "courses", "today", "tasks", "task", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard", "mcp-connections"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -1400,6 +1401,10 @@ def dispatch(args: argparse.Namespace) -> int:
     if args.command == "study":
         from .study.cli import dispatch as dispatch_study
         _emit(dispatch_study(args, _profile_path(args)), as_json=args.json)
+        return 0
+    if args.command == "chat-providers":
+        from .dashboard_chat import providers
+        _emit(providers(profile=_profile_path(args)), as_json=True)
         return 0
     if args.command == "chat":
         try:
