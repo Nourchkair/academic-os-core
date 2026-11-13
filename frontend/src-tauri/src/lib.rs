@@ -170,6 +170,7 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
         "mcp-connections",
         "artifact",
         "account",
+        "models",
         "connectors",
     ];
     if !allowed.contains(&command.as_str()) {
@@ -211,6 +212,12 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
             return Err("Unsupported Academia account action".to_string());
         }
     }
+    if command == "models" {
+        let action = args.first().map(String::as_str).unwrap_or("");
+        if !["list", "test", "remove", "enable", "disable", "preferences", "set-preferences"].contains(&action) {
+            return Err("Unsupported Academia models action".to_string());
+        }
+    }
     if command == "connectors" {
         let provider = args.first().map(String::as_str).unwrap_or("");
         let action = args.get(1).map(String::as_str).unwrap_or("");
@@ -239,6 +246,19 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
 async fn academia_chat(app: tauri::AppHandle, payload: serde_json::Value) -> Result<String, String> {
     let path = stage_chat_payload(&payload)?;
     let result = run_academia(&app, vec!["chat".to_string(), "--input-file".to_string(), path.to_string_lossy().into_owned()]).await;
+    let _ = std::fs::remove_file(path);
+    result
+}
+
+#[tauri::command]
+async fn academia_models_add(app: tauri::AppHandle, payload: serde_json::Value) -> Result<String, String> {
+    let path = stage_chat_payload(&payload)?;
+    let result = run_academia(&app, vec![
+        "models".to_string(),
+        "add".to_string(),
+        "--input-file".to_string(),
+        path.to_string_lossy().into_owned(),
+    ]).await;
     let _ = std::fs::remove_file(path);
     result
 }
@@ -320,6 +340,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             academia_command,
             academia_chat,
+            academia_models_add,
             academia_chat_stream,
             academia_chat_cancel,
             academia_account_login_stream

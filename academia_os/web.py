@@ -193,6 +193,7 @@ class DashboardServer:
         self.account_manager = CodexAccountManager()
         self.mcp_manager: Any | None = None
         self.google_connector: Any | None = None
+        self.model_manager: Any | None = None
         server_class = _DashboardHTTPServerV6 if ":" in self.host else _DashboardHTTPServer
         self._httpd = server_class((self.host, port), _DashboardRequestHandler)
         self.allowed_origins = _allowed_origins(self.host, self.port)
@@ -239,6 +240,13 @@ class DashboardServer:
             config = load_config(self.profile)
             self.google_connector = GoogleConnector(runtime_directory(config) / "google_connector.json")
         return self.google_connector
+
+    def get_model_manager(self) -> Any:
+        if self.model_manager is None:
+            from .model_connections import ModelConnectionManager
+            config = load_config(self.profile)
+            self.model_manager = ModelConnectionManager(runtime_directory(config) / "model_connections.json")
+        return self.model_manager
 
     def unregister_chat_run(self, run_id: str) -> None:
         with self._chat_runs_lock:
@@ -411,6 +419,8 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 self._handle_mcp_connections(origin, "list")
             elif self.request_path == "/api/v1/connectors/google":
                 self._handle_google_connector(origin, "status")
+            elif self.request_path == "/api/v1/models":
+                self._handle_models(origin, "list")
             elif self.request_path == "/api/v1/connectors/google/calendar/events":
                 self._handle_google_calendar_events(origin)
             else:
@@ -491,6 +501,17 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
         }
         if self.request_path in google_actions:
             self._handle_google_connector(origin, google_actions[self.request_path])
+            return
+        model_actions = {
+            "/api/v1/models/add": "add",
+            "/api/v1/models/test": "test",
+            "/api/v1/models/remove": "remove",
+            "/api/v1/models/enable": "enable",
+            "/api/v1/models/disable": "disable",
+            "/api/v1/models/set-preferences": "set-preferences",
+        }
+        if self.request_path in model_actions:
+            self._handle_models(origin, model_actions[self.request_path])
             return
         if self.request_path != "/api/v1/command":
             if self._is_api_request():
@@ -705,6 +726,36 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
         if not isinstance(value, dict):
             raise DashboardRequestError(400, "MalformedJSON", "request must be a JSON object")
         return value
+
+    def _handle_models(self, origin: str | None, action: str) -> None:
+        try:
+            manager = self.dashboard.get_model_manager()
+            if action == "list":
+                value: Any = manager.list()
+            else:
+                body = self._small_json_body()
+                if action == "add":
+                    value = manager.add(
+                        provider=body.get("provider"),
+                        api_key=body.get("api_key") if isinstance(body.get("api_key"), str) else "",
+                        base_url=body.get("base_url") if isinstance(body.get("base_url"), str) else "",
+                        name=body.get("name") if isinstance(body.get("name"), str) else "",
+                    )
+                elif action == "test":
+                    value = manager.test(body.get("provider"))
+                elif action == "remove":
+                    value = manager.remove(body.get("provider"))
+                elif action in {"enable", "disable"}:
+                    value = manager.set_enabled(body.get("provider"), action == "enable")
+                elif action == "set-preferences":
+                    value = manager.set_preferences({role: body.get(role) for role in ("default", "fast", "deep", "vision", "image")})
+                else:
+                    raise DashboardRequestError(404, "NotFound", "Model action not found")
+            self._send_json(200, value, cors_origin=origin)
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except (OSError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(422, "ModelConnectionError", str(exc)), cors_origin=origin)
 
     def _handle_google_connector(self, origin: str | None, action: str) -> None:
         try:

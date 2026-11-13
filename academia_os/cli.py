@@ -427,6 +427,53 @@ def _google_calendar_workflow(args: argparse.Namespace) -> tuple[Any, ApprovalWo
     )
 
 
+def _model_manager(args: argparse.Namespace) -> Any:
+    from .model_connections import ModelConnectionManager
+    config = load_config(_profile_path(args))
+    return ModelConnectionManager(runtime_directory(config) / "model_connections.json")
+
+
+def _models(args: argparse.Namespace) -> Any:
+    manager = _model_manager(args)
+    if args.models_command in {"list", "providers"}:
+        value = manager.list()
+        return value if args.models_command == "list" else value["catalog"]
+    if args.models_command == "add":
+        payload: dict[str, Any] = {}
+        if getattr(args, "input_file", None):
+            try:
+                loaded = json.loads(Path(args.input_file).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError("model provider input file is not valid JSON") from exc
+            if not isinstance(loaded, dict):
+                raise ValueError("model provider input file must contain a JSON object")
+            payload = loaded
+        provider = payload.get("provider") or args.provider
+        api_key = payload.get("api_key") or args.api_key or ""
+        if not api_key and getattr(args, "api_key_file", None):
+            try:
+                api_key = Path(args.api_key_file).read_text(encoding="utf-8").strip()
+            except OSError as exc:
+                raise ValueError("model provider API key file could not be read") from exc
+        base_url = payload.get("base_url") or args.base_url or ""
+        name = payload.get("name") or args.name or ""
+        return manager.add(provider=str(provider or ""), api_key=str(api_key), base_url=str(base_url), name=str(name))
+    if args.models_command == "test":
+        return manager.test(args.provider_id)
+    if args.models_command == "remove":
+        return manager.remove(args.provider_id)
+    if args.models_command == "enable":
+        return manager.set_enabled(args.provider_id, True)
+    if args.models_command == "disable":
+        return manager.set_enabled(args.provider_id, False)
+    if args.models_command == "preferences":
+        return manager.list()["preferences"]
+    if args.models_command == "set-preferences":
+        values = {role: getattr(args, role) for role in ("default", "fast", "deep", "vision", "image") if getattr(args, role) is not None}
+        return manager.set_preferences(values)
+    raise ValueError(f"unsupported models command: {args.models_command}")
+
+
 def _connectors(args: argparse.Namespace) -> Any:
     if args.connector_command != "google":
         raise ValueError(f"unsupported connector: {args.connector_command}")
@@ -894,6 +941,35 @@ def build_parser() -> argparse.ArgumentParser:
     connections_call.add_argument("--tool", required=True)
     connections_call.add_argument("--arguments", default="{}", help="JSON object of tool arguments")
     connections_call.add_argument("--json", action="store_true")
+    models = sub.add_parser("models", help="Manage API model providers and model routing")
+    models_sub = models.add_subparsers(dest="models_command", required=True)
+    models_list = models_sub.add_parser("list", help="List configured model providers and routing preferences")
+    models_list.add_argument("--json", action="store_true")
+    models_providers = models_sub.add_parser("providers", help="List available provider presets")
+    models_providers.add_argument("--json", action="store_true")
+    models_add = models_sub.add_parser("add", help="Validate and add an API model provider")
+    models_add.add_argument("--input-file", help="JSON object with provider, api_key, base_url, and optional name")
+    models_add.add_argument("--provider")
+    models_add.add_argument("--api-key")
+    models_add.add_argument("--api-key-file")
+    models_add.add_argument("--base-url", default="")
+    models_add.add_argument("--name", default="")
+    models_add.add_argument("--json", action="store_true")
+    for action, summary in (
+        ("test", "Revalidate a configured provider and refresh its model list"),
+        ("remove", "Remove one provider and its local API key"),
+        ("enable", "Enable a configured provider for routing"),
+        ("disable", "Disable a configured provider without deleting it"),
+    ):
+        command = models_sub.add_parser(action, help=summary)
+        command.add_argument("provider_id")
+        command.add_argument("--json", action="store_true")
+    models_preferences = models_sub.add_parser("preferences", help="Read per-task model routing")
+    models_preferences.add_argument("--json", action="store_true")
+    models_set = models_sub.add_parser("set-preferences", help="Set per-task model routing")
+    for role in ("default", "fast", "deep", "vision", "image"):
+        models_set.add_argument(f"--{role}")
+    models_set.add_argument("--json", action="store_true")
     connectors = sub.add_parser("connectors", help="Manage Google Gmail and Calendar connections")
     connectors_sub = connectors.add_subparsers(dest="connector_command", required=True)
     google = connectors_sub.add_parser("google", help="Google account, Gmail, and Calendar")
@@ -995,7 +1071,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"process", "study", "chat", "chat-stream", "chat-cancel", "account", "connectors", "courses", "today", "tasks", "task", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard", "mcp-connections"}:
+        if args.command in {"process", "study", "chat", "chat-stream", "chat-cancel", "account", "models", "connectors", "courses", "today", "tasks", "task", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard", "mcp-connections"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -1007,6 +1083,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def dispatch(args: argparse.Namespace) -> int:
+    if args.command == "models":
+        _emit(_models(args), as_json=args.json)
+        return 0
     if args.command == "connectors":
         _emit(_connectors(args), as_json=args.json)
         return 0

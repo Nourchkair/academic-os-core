@@ -315,6 +315,33 @@ button.library-file-row:focus-visible { border-color: #a8a8a8; box-shadow: 0 0 0
 .connection-group > header > div { display: grid; gap: 3px; }
 .connection-group h4 { color: #4b4b4b; font-size: 13px; margin: 0; }
 .connection-type { background: #f6f5f1; border-radius: 999px; color: #8a8066; font-size: 8px; font-weight: 700; padding: 4px 8px; text-transform: uppercase; }
+.api-model-card { display: grid; gap: 12px; }
+.api-model-add-row { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
+.api-model-add-row p { color: #828282; font-size: 11px; line-height: 1.5; margin: 0; max-width: 620px; }
+.api-model-provider-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.api-model-provider-grid label { display: grid; gap: 5px; }
+.api-model-provider-grid label > span { color: #777; font-size: 10px; }
+.api-model-provider-grid input, .api-model-provider-grid select { background: #fff; border: 1px solid #e6e6e6; border-radius: 7px; color: #545454; font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 8px 9px; width: 100%; }
+.api-model-form { display: grid; gap: 10px; }
+.api-model-provider-list { display: grid; gap: 8px; }
+.api-model-provider { background: #fafafa; border: 1px solid #ececec; border-radius: 10px; display: grid; gap: 9px; padding: 11px; }
+.api-model-provider.disabled { opacity: .62; }
+.api-model-provider > header { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; }
+.api-model-provider > header > div:first-child { display: grid; gap: 3px; }
+.api-model-provider strong { color: #4e4e4e; font-size: 11px; }
+.api-model-provider small { color: #949494; font-size: 9px; overflow-wrap: anywhere; }
+.api-model-provider-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.api-model-provider-actions button { font-size: 9px; padding: 6px 8px; }
+.api-model-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.api-model-chips span { background: #f1f2ef; border-radius: 999px; color: #748074; font-size: 8px; padding: 4px 7px; }
+.api-model-routing { border-top: 1px solid #ededed; display: grid; gap: 10px; padding-top: 13px; }
+.api-model-routing-heading { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; }
+.api-model-routing-heading h4 { color: #4e4e4e; font-size: 12px; margin: 3px 0 0; }
+.api-model-routing-grid { display: grid; gap: 9px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.api-model-routing-grid label { display: grid; gap: 4px; }
+.api-model-routing-grid label > span { color: #777; font-size: 9px; }
+.api-model-routing-grid select { background: #fff; border: 1px solid #e6e6e6; border-radius: 7px; color: #545454; font: 10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 7px 8px; width: 100%; }
+@media (max-width: 760px) { .api-model-provider-grid, .api-model-routing-grid { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .connections-tabs { display: grid; grid-template-columns: 1fr; } .connections-tabs button { min-width: 0; } }
 @media (max-width: 1050px) { .course-browser-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.material-category-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .courses-toolbar { align-items: flex-start; flex-direction: column; }.semester-control { justify-content: space-between; width: 100%; }.semester-control .semester-picker { flex: 1; }.semester-status { align-self: flex-end; }.course-browser-grid { grid-template-columns: 1fr; }.material-category-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.course-material-heading { flex-direction: column; gap: 9px; }.course-material-toolbar { align-items: stretch; flex-wrap: wrap; }.course-material-toolbar .library-search { flex-basis: 100%; }.material-filter { flex: 1; justify-content: space-between; }.material-filter select { flex: 1; min-width: 0; }.action-panel-backdrop { padding: 0; }.action-panel { border-radius: 0; max-height: 100vh; min-height: 100vh; width: 100%; }.action-panel-header { padding: 20px 17px 15px; }.action-panel-tabs { padding-inline: 17px; }.action-panel-body { padding: 20px 17px 30px; } }

@@ -358,6 +358,52 @@ export type AccountStatus = {
   updated_at?: string
 }
 
+export type ModelRole = 'default' | 'fast' | 'deep' | 'vision' | 'image'
+
+export type ModelProviderCatalogEntry = {
+  id: string
+  name: string
+  kind: 'api' | 'local'
+  default_base_url: string
+  auth: string
+  models_path: string
+  docs: string
+}
+
+export type ModelInfo = {
+  id: string
+  name: string
+  capabilities: string[]
+}
+
+export type ModelProviderRecord = {
+  id: string
+  name: string
+  kind: 'api' | 'local'
+  base_url: string
+  auth: string
+  status: 'connected' | 'error'
+  enabled: boolean
+  models: ModelInfo[]
+  last_checked_at: string | null
+  error: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ModelConnectionsPayload = {
+  providers: ModelProviderRecord[]
+  preferences: Record<ModelRole, string | null>
+  catalog: ModelProviderCatalogEntry[]
+}
+
+export type ModelProviderInput = {
+  provider: string
+  api_key: string
+  base_url: string
+  name?: string
+}
+
 export type GoogleConnectorStatus = {
   schema_version: number
   client_id: string | null

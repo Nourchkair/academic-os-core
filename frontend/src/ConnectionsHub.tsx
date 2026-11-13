@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { APIModelProvidersCard } from './APIModelProvidersCard'
 import { AssistantAccountCard } from './AssistantAccountCard'
 import { GoogleConnectorCard } from './GoogleConnectorCard'
 import { MCPConnectionsCard } from './MCPConnectionsCard'
@@ -41,7 +42,7 @@ export function ConnectionsHub({ onOpenReview }: { onOpenReview: (reviewId: stri
           <div><p className="eyebrow">API</p><h4>Add a provider API key</h4></div>
           <span className="connection-type">Your provider account</span>
         </header>
-        <p className="account-note">API provider connections are the next setup step. When enabled, adding a key will validate it, fetch the provider&apos;s models, and store the key in the macOS Keychain through the local Academia sidecar.</p>
+        <APIModelProvidersCard />
       </section>
     </div>}
 
