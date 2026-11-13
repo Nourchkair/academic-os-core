@@ -65,15 +65,18 @@ describe('APIModelProvidersCard', () => {
     vi.mocked(api.addModelProvider).mockResolvedValue(connected)
     render(<APIModelProvidersCard />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Add API provider' }))
-    fireEvent.change(screen.getByPlaceholderText('Paste the provider API key'), { target: { value: 'sk-test' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Test and connect' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect a provider' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect OpenAI' }))
+    fireEvent.change(await screen.findByPlaceholderText('Paste the provider API key'), { target: { value: 'sk-test' } })
+    const setup = screen.getByRole('dialog', { name: /Connect with OpenAI/ })
+    fireEvent.click(setup.querySelector('button.primary-button') as HTMLElement)
 
     await waitFor(() => expect(api.addModelProvider).toHaveBeenCalledWith(expect.objectContaining({
       provider: 'openai',
       api_key: 'sk-test',
       base_url: 'https://api.openai.com/v1',
     })))
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage OpenAI' }))
     expect(await screen.findByText('GPT Test')).toBeInTheDocument()
   })
 
@@ -85,9 +88,8 @@ describe('APIModelProvidersCard', () => {
     })
     render(<APIModelProvidersCard />)
 
-    const defaultSelect = await screen.findByLabelText('Default chat')
+    const defaultSelect = await screen.findByLabelText('Default model')
     fireEvent.change(defaultSelect, { target: { value: 'openai/gpt-test' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save routing' }))
-    await waitFor(() => expect(api.setModelPreferences).toHaveBeenCalledWith(expect.objectContaining({ default: 'openai/gpt-test' })))
+    await waitFor(() => expect(api.setModelPreferences).toHaveBeenCalledWith({ default: 'openai/gpt-test' }))
   })
 })

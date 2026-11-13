@@ -953,3 +953,70 @@ button { -webkit-tap-highlight-color: transparent; }
 .mcp-tool.not-grantable { opacity: .64; }
 .mcp-tool.not-grantable em { color: #8b4b45; }
 .mcp-grant-actions { display: flex; justify-content: flex-end; }
+
+/* Connections hub — provider rows, setup dialogs, and readable light surfaces */
+.settings-page, .settings-section, .connection-group, .connections-panel, .ai-models-panel,
+.api-model-card, .notion-connector-card, .mcp-connections, .mcp-connection-card,
+.account-card, .provider-list, .connection-dialog { color: #2f2f2f; color-scheme: light; }
+.ai-models-panel { display: grid; gap: 20px; }
+.connection-block { display: grid; gap: 9px; }
+.connection-block-heading { align-items: baseline; display: flex; gap: 10px; justify-content: space-between; }
+.connection-block-heading > span { color: #3f3f3f; font-size: 12px; font-weight: 750; }
+.connection-block-heading > small { color: #8a8a8a; font-size: 9px; }
+.provider-list { background: #fff; border: 1px solid #e7e7e7; border-radius: 12px; overflow: hidden; }
+.provider-row, .provider-picker-row { align-items: center; background: #fff; color: #2f2f2f; display: flex; gap: 11px; min-height: 54px; padding: 10px 13px; text-align: left; width: 100%; }
+.provider-row { border-bottom: 1px solid #f0f0f0; }
+.provider-row:last-child { border-bottom: 0; }
+.provider-row.error { background: #fffafa; }
+.provider-mark { align-items: center; background: #f1f1f1; border-radius: 999px; color: #5d5d5d; display: inline-flex; flex: 0 0 29px; font-size: 11px; font-weight: 750; height: 29px; justify-content: center; width: 29px; }
+.provider-copy { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.provider-copy strong { color: #2f2f2f; font-size: 11px; font-weight: 650; }
+.provider-copy small { color: #8f8f8f; font-size: 9px; overflow-wrap: anywhere; }
+.provider-state { align-items: center; color: #9a9a9a; display: inline-flex; font-size: 9px; gap: 5px; white-space: nowrap; }
+.provider-state::before { background: #c9c9c9; border-radius: 50%; content: ""; height: 6px; width: 6px; }
+.provider-state.connected { color: #5d735d; }
+.provider-state.connected::before { background: #7fa07f; }
+.provider-row .quiet-button, .provider-picker-row .quiet-button { color: #6c6c6c; font-size: 10px; padding: 6px 8px; }
+.provider-expand { background: #fafafa; border-bottom: 1px solid #f0f0f0; color: #383838; display: grid; gap: 9px; padding: 12px 14px 14px 53px; }
+.provider-expand:last-of-type { border-bottom: 0; }
+.provider-expand-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; }
+.provider-expand-actions button { font-size: 9px; padding: 6px 8px; }
+.provider-url { color: #8a8a8a; flex: 1; font: 9px ui-monospace, SFMono-Regular, monospace; min-width: 160px; overflow-wrap: anywhere; }
+.provider-model-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.provider-model-chips span { background: #f0f1ee; border-radius: 999px; color: #697469; font-size: 8px; padding: 4px 7px; }
+.provider-connect-row { align-items: center; background: #fff; border-top: 1px solid #f0f0f0; color: #5d735d; display: flex; font-size: 11px; font-weight: 650; gap: 9px; min-height: 49px; padding: 10px 14px; text-align: left; width: 100%; }
+.provider-connect-row:hover, .provider-picker-row:hover { background: #fafafa; }
+.provider-plus { color: #7d8d7d; font-size: 17px; line-height: 1; width: 20px; }
+.connection-dialog-backdrop { align-items: center; background: #20202055; display: flex; inset: 0; justify-content: center; padding: 24px; position: fixed; z-index: 80; }
+.connection-dialog { background: #fff; border: 1px solid #e3e3e3; border-radius: 16px; box-shadow: 0 24px 70px #20202045; color: #2f2f2f; display: grid; gap: 14px; max-height: min(720px, 86vh); max-width: 430px; overflow: auto; padding: 20px; width: min(430px, 100%); }
+.connection-dialog > header { align-items: flex-start; display: flex; gap: 12px; justify-content: space-between; }
+.connection-dialog h3 { color: #262626; font-size: 18px; letter-spacing: -.02em; margin: 0 0 4px; }
+.connection-dialog header p { color: #808080; font-size: 10px; line-height: 1.5; margin: 0; max-width: 330px; }
+.connection-dialog .quiet-button { color: #777; font-size: 15px; padding: 2px 6px; }
+.provider-picker-group { display: grid; gap: 1px; }
+.provider-picker-group > span { color: #9a9a9a; font-size: 8px; font-weight: 750; letter-spacing: .08em; padding: 7px 4px 4px; text-transform: uppercase; }
+.provider-picker-row { border-radius: 8px; min-height: 43px; padding: 7px 8px; }
+.provider-picker-row > span:nth-child(2) { display: grid; gap: 1px; }
+.provider-picker-row strong { color: #343434; font-size: 10px; }
+.provider-picker-row small { color: #969696; font-size: 8px; }
+.provider-picker-row.custom { border-top: 1px solid #f0f0f0; border-radius: 0; margin-top: 4px; padding-top: 12px; }
+.setup-dialog-fields { display: grid; gap: 12px; }
+.setup-dialog-fields > label, .advanced-provider label { display: grid; gap: 5px; }
+.setup-dialog-fields label > span { color: #6e6e6e; font-size: 9px; font-weight: 700; }
+.setup-dialog-fields input { background: #fff; border: 1px solid #e1e1e1; border-radius: 8px; color: #2f2f2f; font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 10px 11px; width: 100%; }
+.setup-dialog-fields input::placeholder { color: #aaa; }
+.advanced-provider { border-top: 1px solid #f0f0f0; padding-top: 9px; }
+.advanced-provider summary { color: #8b8b8b; cursor: pointer; font-size: 9px; margin-bottom: 9px; }
+.setup-dialog-actions { display: flex; gap: 8px; justify-content: flex-end; padding-top: 2px; }
+.setup-dialog-actions button { font-size: 10px; padding: 8px 12px; }
+.model-route-list { background: #fff; border: 1px solid #e7e7e7; border-radius: 12px; overflow: hidden; }
+.model-route-row { align-items: center; display: flex; gap: 14px; justify-content: space-between; padding: 11px 13px; border-bottom: 1px solid #f0f0f0; }
+.model-route-row:last-child { border-bottom: 0; }
+.model-route-row > div { display: grid; gap: 2px; }
+.model-route-row strong { color: #343434; font-size: 10px; }
+.model-route-row small { color: #949494; font-size: 8px; }
+.model-route-row select { background: #fff; border: 1px solid #e3e3e3; border-radius: 7px; color: #3b3b3b; font: 10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 220px; padding: 7px 9px; width: 55%; }
+.connection-help-line { color: #8c8c8c; font-size: 9px; line-height: 1.5; margin: 0; }
+.connection-details { border-top: 1px solid #ededed; padding-top: 10px; }
+.connection-details > summary { color: #666; cursor: pointer; font-size: 10px; font-weight: 700; list-style-position: inside; }
+.connection-details-body { display: grid; gap: 10px; padding-top: 10px; }

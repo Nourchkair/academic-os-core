@@ -285,8 +285,11 @@ export function GoogleConnectorCard({ onOpenReview }: { onOpenReview: (reviewId:
       <button type="button" className="secondary-button" disabled={busy} onClick={() => void cancel()}>{busy ? 'Cancelling…' : 'Cancel sign-in'}</button>
     </div>}
     {authorized && <>
-      <p className="account-note">Gmail reads are read-only. Calendar create/edit is available only through duplicate-checked Review proposals; nothing changes in Google until you approve and separately execute the action, which is then verified against Google.</p>
+      <p className="account-note">Gmail read-only · Calendar changes require Review.</p>
       {notice && <p className="account-note" role="status">{notice}</p>}
+      <details className="connection-details">
+        <summary>Calendar activity and proposals</summary>
+        <div className="connection-details-body">
       <div className="google-calendar-heading">
         <div><strong>Upcoming primary-calendar events</strong><small>Next 14 days · read-only list</small></div>
         <button type="button" className="secondary-button" disabled={eventLoading || busy} onClick={() => void loadEvents()}>{eventLoading ? 'Refreshing…' : 'Refresh'}</button>
@@ -317,9 +320,11 @@ export function GoogleConnectorCard({ onOpenReview }: { onOpenReview: (reviewId:
           <button type="button" className="primary-button" disabled={busy || !calendarDraft.summary.trim() || !calendarDraft.start || !calendarDraft.end} onClick={() => void submitCalendarProposal()}>{busy ? 'Checking duplicates…' : 'Add to Review'}</button>
         </div>
       </div>}
+        </div>
+      </details>
     </>}
-    {!authorized && !waiting && configured && <p className="account-note">{status.error || 'Google is configured. Connect the test account to read Gmail and Calendar.'}</p>}
+    {!authorized && !waiting && configured && <p className="account-note">{status.error || 'Google is configured. Connect an account to read Gmail and Calendar.'}</p>}
     {error && <p className="account-note account-error" role="alert">{error}</p>}
-    <p className="account-privacy">Google tokens stay in the macOS Keychain. Academia does not store your Google password, and it never sends school-account messages or submits coursework. If macOS asks for a password once, it means your Mac login password, not your Google password.</p>
+    <p className="account-privacy">Tokens stay in the macOS Keychain. Academia never receives your Google password.</p>
   </div>
 }

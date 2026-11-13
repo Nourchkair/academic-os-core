@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { APIModelProvidersCard } from './APIModelProvidersCard'
-import { AssistantAccountCard } from './AssistantAccountCard'
 import { GoogleConnectorCard } from './GoogleConnectorCard'
 import { MCPConnectionsCard } from './MCPConnectionsCard'
 import { NotionConnectorCard } from './NotionConnectorCard'
@@ -31,21 +30,7 @@ export function ConnectionsHub({ onOpenReview }: { onOpenReview: (reviewId: stri
     </nav>
 
     {tab === 'models' && <div className="connections-panel" role="tabpanel" aria-label="AI models">
-      <section className="connection-group">
-        <header>
-          <div><p className="eyebrow">Subscription</p><h4>Use an existing model plan</h4></div>
-          <span className="connection-type">No API key</span>
-        </header>
-        <AssistantAccountCard />
-        <p className="account-note">ChatGPT/Codex is the supported subscription sign-in. Claude subscription sign-in is not offered inside Academia because Anthropic restricts it to Claude Code and native Anthropic apps; use Claude Code as an external agent or add an Anthropic API key in the API section. Academia will never silently switch a subscription request to API billing.</p>
-      </section>
-      <section className="connection-group">
-        <header>
-          <div><p className="eyebrow">API</p><h4>Add a provider API key</h4></div>
-          <span className="connection-type">Your provider account</span>
-        </header>
-        <APIModelProvidersCard />
-      </section>
+      <APIModelProvidersCard />
     </div>}
 
     {tab === 'apps' && <div className="connections-panel" role="tabpanel" aria-label="Apps">
