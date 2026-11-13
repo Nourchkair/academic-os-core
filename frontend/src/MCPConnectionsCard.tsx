@@ -155,8 +155,8 @@ export function MCPConnectionsCard() {
   return <div className="mcp-connections">
     <div className="mcp-connections-heading">
       <div>
-        <p>Connect an external tool server in four steps: add it, inspect its tools, trust its read-only declarations, then enable only the tools you want. Nothing starts automatically.</p>
-        <ol className="mcp-steps"><li>Add server</li><li>Inspect tools</li><li>Trust read-only tools</li><li>Enable</li></ol>
+        <p>Add a server, inspect its tools, trust read-only declarations, then enable. Nothing starts automatically.</p>
+        <ol className="mcp-steps"><li>Add</li><li>Inspect</li><li>Trust</li><li>Enable</li></ol>
       </div>
       <button type="button" className="secondary-button" onClick={() => { setAdding((value) => !value); setLocalAdvanced(false) }}>{adding ? 'Close form' : 'Connect a tool'}</button>
     </div>
@@ -176,7 +176,7 @@ export function MCPConnectionsCard() {
           </>}
         </>}
       </div>
-      <p className="account-note">Only server-declared read-only tools can be granted. For remote servers, you must inspect the declared tools and explicitly trust the server before granting anything.</p>
+      <p className="account-note">Only declared read-only tools can be granted. Remote servers must be inspected and trusted first.</p>
       <div className="coursework-editor-actions">
         <button type="button" className="secondary-button" onClick={() => { setAdding(false); setDraft(emptyDraft); setLocalAdvanced(false) }} disabled={busy === 'add'}>Cancel</button>
         <button type="button" className="primary-button" onClick={() => void add()} disabled={busy === 'add' || (draft.mode === 'local' ? !draft.command.trim() : !draft.url.trim())}>{busy === 'add' ? 'Adding…' : 'Add server'}</button>

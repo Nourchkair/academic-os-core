@@ -102,11 +102,12 @@ export function NotionConnectorCard() {
     {error && <p className="setup-error" role="alert">{error}</p>}
     {notice && <p className="settings-success" role="status">{notice}</p>}
     {!connected && <div className="coursework-editor api-model-form">
-      <p className="account-note">Create an internal Notion integration, share the pages or databases you want Academia to read, then paste its token. Academia can read shared pages and cannot edit or create Notion content.</p>
-      <label><span>Notion integration token</span><input type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} placeholder="Paste the internal integration token" /></label>
+      <p className="account-note">Read-only pages shared with a Notion integration.</p>
+      <label><span>Integration token</span><input type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} placeholder="Paste the internal integration token" /></label>
       <div className="coursework-editor-actions">
         <button type="button" className="primary-button" disabled={busy === 'connect' || !token.trim()} onClick={() => void connect()}>{busy === 'connect' ? 'Validating…' : 'Connect Notion'}</button>
       </div>
+      <details className="connection-details"><summary>How to get a token</summary><div className="connection-details-body"><p className="account-note">Create an internal Notion integration, share the pages you want Academia to read, then paste its token. Academia cannot edit or create Notion content.</p></div></details>
     </div>}
     {connected && <>
       <div className="notion-heading">

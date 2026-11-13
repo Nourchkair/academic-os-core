@@ -48,7 +48,7 @@ export function ConnectionsHub({ onOpenReview }: { onOpenReview: (reviewId: stri
         </header>
         <NotionConnectorCard />
       </section>
-      <p className="account-note">Future app connections will use the same model: explicit consent, least-privilege scopes, and local credentials. No app starts connected automatically.</p>
+      <p className="account-note">App connections use explicit consent and local credentials.</p>
     </div>}
 
     {tab === 'tools' && <div className="connections-panel" role="tabpanel" aria-label="MCP tools">
