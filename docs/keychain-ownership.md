@@ -11,7 +11,7 @@ Keychain, and without repeated password prompts.
 - The Tauri UI asks the sidecar for status; it never reads secrets directly.
 - The Google OAuth client ID and secret are bundled in the packaged sidecar.
   Packaged builds do not read the legacy Google client item from Keychain.
-- Keychain stores only user tokens and user-supplied API keys.
+- Keychain stores only user tokens (Google, Notion, remote MCP) and user-supplied API model keys.
 - No secret is written to `profile.json`, workflow preferences, the academic
   workspace, logs, or the repository.
 

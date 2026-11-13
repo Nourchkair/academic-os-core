@@ -193,6 +193,7 @@ class DashboardServer:
         self.account_manager = CodexAccountManager()
         self.mcp_manager: Any | None = None
         self.google_connector: Any | None = None
+        self.notion_connector: Any | None = None
         self.model_manager: Any | None = None
         server_class = _DashboardHTTPServerV6 if ":" in self.host else _DashboardHTTPServer
         self._httpd = server_class((self.host, port), _DashboardRequestHandler)
@@ -240,6 +241,13 @@ class DashboardServer:
             config = load_config(self.profile)
             self.google_connector = GoogleConnector(runtime_directory(config) / "google_connector.json")
         return self.google_connector
+
+    def get_notion_connector(self) -> Any:
+        if self.notion_connector is None:
+            from .connectors.notion import NotionConnector
+            config = load_config(self.profile)
+            self.notion_connector = NotionConnector(runtime_directory(config) / "notion_connector.json")
+        return self.notion_connector
 
     def get_model_manager(self) -> Any:
         if self.model_manager is None:
@@ -421,6 +429,8 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 self._handle_google_connector(origin, "status")
             elif self.request_path == "/api/v1/models":
                 self._handle_models(origin, "list")
+            elif self.request_path == "/api/v1/connectors/notion":
+                self._handle_notion_connector(origin, "status")
             elif self.request_path == "/api/v1/connectors/google/calendar/events":
                 self._handle_google_calendar_events(origin)
             else:
@@ -512,6 +522,16 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
         }
         if self.request_path in model_actions:
             self._handle_models(origin, model_actions[self.request_path])
+            return
+        notion_actions = {
+            "/api/v1/connectors/notion/setup": "setup",
+            "/api/v1/connectors/notion/test": "test",
+            "/api/v1/connectors/notion/disconnect": "disconnect",
+            "/api/v1/connectors/notion/search": "search",
+            "/api/v1/connectors/notion/read": "read",
+        }
+        if self.request_path in notion_actions:
+            self._handle_notion_connector(origin, notion_actions[self.request_path])
             return
         if self.request_path != "/api/v1/command":
             if self._is_api_request():
@@ -756,6 +776,37 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             self._send_api_error(exc, cors_origin=origin)
         except (OSError, ValueError) as exc:
             self._send_api_error(DashboardRequestError(422, "ModelConnectionError", str(exc)), cors_origin=origin)
+
+    def _handle_notion_connector(self, origin: str | None, action: str) -> None:
+        try:
+            connector = self.dashboard.get_notion_connector()
+            if action == "status":
+                value: Any = connector.status()
+            else:
+                body = self._small_json_body()
+                if action == "setup":
+                    value = connector.configure(body.get("token") if isinstance(body.get("token"), str) else "")
+                elif action == "test":
+                    value = connector.test()
+                elif action == "disconnect":
+                    value = connector.disconnect()
+                elif action == "search":
+                    value = connector.search(
+                        query=body.get("query") if isinstance(body.get("query"), str) else "",
+                        page_size=body.get("max") if isinstance(body.get("max"), int) else 10,
+                    )
+                elif action == "read":
+                    value = connector.read_page(
+                        body.get("page_id") if isinstance(body.get("page_id"), str) else "",
+                        max_blocks=body.get("max_blocks") if isinstance(body.get("max_blocks"), int) else 100,
+                    )
+                else:
+                    raise DashboardRequestError(404, "NotFound", "Notion connector action not found")
+            self._send_json(200, value, cors_origin=origin)
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except (OSError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(422, "NotionConnectorError", str(exc)), cors_origin=origin)
 
     def _handle_google_connector(self, origin: str | None, action: str) -> None:
         try:

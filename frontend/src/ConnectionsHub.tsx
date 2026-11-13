@@ -3,6 +3,7 @@ import { APIModelProvidersCard } from './APIModelProvidersCard'
 import { AssistantAccountCard } from './AssistantAccountCard'
 import { GoogleConnectorCard } from './GoogleConnectorCard'
 import { MCPConnectionsCard } from './MCPConnectionsCard'
+import { NotionConnectorCard } from './NotionConnectorCard'
 
 type ConnectionsTab = 'models' | 'apps' | 'tools'
 
@@ -54,6 +55,13 @@ export function ConnectionsHub({ onOpenReview }: { onOpenReview: (reviewId: stri
           <span className="connection-type">OAuth app</span>
         </header>
         <GoogleConnectorCard onOpenReview={onOpenReview} />
+      </section>
+      <section className="connection-group">
+        <header>
+          <div><p className="eyebrow">Notion</p><h4>Read-only Notion pages</h4></div>
+          <span className="connection-type">Integration token</span>
+        </header>
+        <NotionConnectorCard />
       </section>
       <p className="account-note">Future app connections will use the same model: explicit consent, least-privilege scopes, and local credentials. No app starts connected automatically.</p>
     </div>}

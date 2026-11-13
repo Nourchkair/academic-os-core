@@ -227,14 +227,23 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
         let action = args.get(1).map(String::as_str).unwrap_or("");
         let json_ok = args.last().map(String::as_str) == Some("--json");
         let core_len = if json_ok { args.len() - 1 } else { args.len() };
-        let valid = provider == "google" && match action {
-            "status" | "authorize" | "oauth-status" | "oauth-cancel" | "disconnect" => core_len == 2,
-            "setup" => {
-                core_len == 4
-                    && args.get(2).map(String::as_str) == Some("--client-json")
-                    && args.get(3).map(|value| !value.is_empty()).unwrap_or(false)
-            }
-            "calendar" => matches!(args.get(2).map(String::as_str), Some("list" | "propose-create" | "propose-update")),
+        let valid = match provider {
+            "google" => match action {
+                "status" | "authorize" | "oauth-status" | "oauth-cancel" | "disconnect" => core_len == 2,
+                "setup" => {
+                    core_len == 4
+                        && args.get(2).map(String::as_str) == Some("--client-json")
+                        && args.get(3).map(|value| !value.is_empty()).unwrap_or(false)
+                }
+                "calendar" => matches!(args.get(2).map(String::as_str), Some("list" | "propose-create" | "propose-update")),
+                _ => false,
+            },
+            "notion" => match action {
+                "status" | "test" | "disconnect" => core_len == 2,
+                "search" => core_len >= 2,
+                "read" => core_len >= 3,
+                _ => false,
+            },
             _ => false,
         };
         if !valid {
@@ -250,6 +259,20 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
 async fn academia_chat(app: tauri::AppHandle, payload: serde_json::Value) -> Result<String, String> {
     let path = stage_chat_payload(&payload)?;
     let result = run_academia(&app, vec!["chat".to_string(), "--input-file".to_string(), path.to_string_lossy().into_owned()]).await;
+    let _ = std::fs::remove_file(path);
+    result
+}
+
+#[tauri::command]
+async fn academia_notion_setup(app: tauri::AppHandle, payload: serde_json::Value) -> Result<String, String> {
+    let path = stage_chat_payload(&payload)?;
+    let result = run_academia(&app, vec![
+        "connectors".to_string(),
+        "notion".to_string(),
+        "setup".to_string(),
+        "--input-file".to_string(),
+        path.to_string_lossy().into_owned(),
+    ]).await;
     let _ = std::fs::remove_file(path);
     result
 }
@@ -344,6 +367,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             academia_command,
             academia_chat,
+            academia_notion_setup,
             academia_models_add,
             academia_chat_stream,
             academia_chat_cancel,

@@ -67,9 +67,33 @@ def test_validate_payload_requires_explicit_boolean_web_search() -> None:
 
 
 def test_validate_payload_accepts_bounded_google_connector_grants() -> None:
-    assert _validate_payload(payload(connector_grants=["gmail", "calendar"]))[-1] == ["gmail", "calendar"]
+    assert _validate_payload(payload(connector_grants=["gmail", "calendar", "notion"]))[-1] == ["gmail", "calendar", "notion"]
     with pytest.raises(ValueError, match="connector_grants"):
         _validate_payload(payload(connector_grants=["gmail", "drive"]))
+
+
+def test_notion_context_reads_only_granted_shared_pages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+    from academia_os.connectors import notion as notion_module
+
+    class FakeNotion:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def status(self) -> dict[str, Any]:
+            return {"auth_status": "connected", "account_name": "Student Workspace"}
+
+        def search(self, *, query: str = "", page_size: int = 5) -> dict[str, Any]:
+            return {"pages": [{"id": "page-1", "title": "POL 2103 Notes", "url": "https://notion.example/page-1"}]}
+
+        def read_page(self, page_id: str, *, max_blocks: int = 100) -> dict[str, Any]:
+            return {"text": "Week 4: read the chapter."}
+
+    monkeypatch.setattr(notion_module, "NotionConnector", FakeNotion)
+    text = dashboard_chat._notion_context(profile, ["notion"])
+    assert "POL 2103 Notes" in text
+    assert "Week 4: read the chapter." in text
+    assert dashboard_chat._notion_context(profile, ["gmail"]) == ""
 
 
 def test_calendar_proposal_grant_is_explicit_and_creates_a_review_card() -> None:
@@ -619,7 +643,7 @@ def test_stream_chat_reports_granted_google_context(tmp_path: Path, monkeypatch:
     )
 
     assert [event["type"] for event in events] == ["started", "tool_started", "tool_result", "final"]
-    assert events[1]["tool"] == "academia_google_context"
+    assert events[1]["tool"] == "academia_external_context"
     assert "GOOGLE CONTEXT MARKER" in captured["context"]
 
 

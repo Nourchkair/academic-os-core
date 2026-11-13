@@ -342,6 +342,22 @@ button.library-file-row:focus-visible { border-color: #a8a8a8; box-shadow: 0 0 0
 .api-model-routing-grid label > span { color: #777; font-size: 9px; }
 .api-model-routing-grid select { background: #fff; border: 1px solid #e6e6e6; border-radius: 7px; color: #545454; font: 10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 7px 8px; width: 100%; }
 @media (max-width: 760px) { .api-model-provider-grid, .api-model-routing-grid { grid-template-columns: 1fr; } }
+.notion-connector-card { display: grid; gap: 10px; }
+.notion-heading { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; }
+.notion-heading > div:first-child { display: grid; gap: 3px; }
+.notion-heading strong { color: #4e4e4e; font-size: 11px; }
+.notion-heading small { color: #949494; font-size: 9px; }
+.notion-search-row { display: flex; gap: 7px; }
+.notion-search-row input { background: #fff; border: 1px solid #e6e6e6; border-radius: 7px; color: #545454; flex: 1; font: 10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 8px 9px; }
+.notion-page-list { display: grid; gap: 5px; }
+.notion-page-row { background: #fff; border: 1px solid #ececec; border-radius: 8px; cursor: pointer; display: grid; gap: 3px; padding: 8px 9px; text-align: left; }
+.notion-page-row strong { color: #555; font-size: 10px; }
+.notion-page-row small { color: #999; font-size: 8px; }
+.notion-page-preview { background: #fff; border: 1px solid #ececec; border-radius: 8px; display: grid; gap: 6px; padding: 9px; }
+.notion-page-preview > header { align-items: center; display: flex; justify-content: space-between; }
+.notion-page-preview > header strong { color: #555; font-size: 10px; }
+.notion-page-preview pre { color: #666; font: 9px ui-monospace, SFMono-Regular, monospace; margin: 0; max-height: 240px; overflow: auto; white-space: pre-wrap; }
+.notion-page-preview small { color: #999; font-size: 8px; }
 @media (max-width: 760px) { .connections-tabs { display: grid; grid-template-columns: 1fr; } .connections-tabs button { min-width: 0; } }
 @media (max-width: 1050px) { .course-browser-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.material-category-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .courses-toolbar { align-items: flex-start; flex-direction: column; }.semester-control { justify-content: space-between; width: 100%; }.semester-control .semester-picker { flex: 1; }.semester-status { align-self: flex-end; }.course-browser-grid { grid-template-columns: 1fr; }.material-category-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.course-material-heading { flex-direction: column; gap: 9px; }.course-material-toolbar { align-items: stretch; flex-wrap: wrap; }.course-material-toolbar .library-search { flex-basis: 100%; }.material-filter { flex: 1; justify-content: space-between; }.material-filter select { flex: 1; min-width: 0; }.action-panel-backdrop { padding: 0; }.action-panel { border-radius: 0; max-height: 100vh; min-height: 100vh; width: 100%; }.action-panel-header { padding: 20px 17px 15px; }.action-panel-tabs { padding-inline: 17px; }.action-panel-body { padding: 20px 17px 30px; } }
@@ -890,6 +906,11 @@ button { -webkit-tap-highlight-color: transparent; }
 .mcp-connections-heading { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; }
 .mcp-connections-heading p { color: #828282; font-size: 11px; line-height: 1.55; margin: 0; max-width: 640px; }
 .mcp-add-form { margin-top: 2px; }
+.mcp-connections-heading > div { display: grid; gap: 7px; }
+.mcp-steps { color: #7f8a7f; display: flex; flex-wrap: wrap; font-size: 9px; gap: 5px 13px; list-style: none; margin: 0; padding: 0; }
+.mcp-steps li::before { color: #a6b2a5; content: "→ "; }
+.mcp-steps li:first-child::before { content: ""; }
+.mcp-next-step { background: #f7f6f1; border-radius: 7px; color: #7d745d; font-size: 9px; margin: 0; padding: 6px 8px; }
 .mcp-mode-switch { display: flex; gap: 6px; margin-bottom: 10px; }
 .mcp-mode-switch button { background: #ffffff; border: 1px solid #e6e6e6; border-radius: 7px; color: #8a8a8a; font-size: 9px; padding: 6px 10px; }
 .mcp-mode-switch button.active { background: #eef2ed; border-color: #cdd9cc; color: #4f6a50; font-weight: 700; }

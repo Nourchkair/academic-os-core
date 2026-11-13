@@ -4,7 +4,7 @@ import type { MCPConnection } from './types'
 
 type AddDraft = { mode: 'local' | 'remote'; name: string; command: string; url: string; args: string; cwd: string }
 
-const emptyDraft: AddDraft = { mode: 'local', name: '', command: '', url: '', args: '', cwd: '' }
+const emptyDraft: AddDraft = { mode: 'remote', name: '', command: '', url: '', args: '', cwd: '' }
 
 export function MCPConnectionsCard() {
   const [connections, setConnections] = useState<MCPConnection[]>([])
@@ -15,6 +15,7 @@ export function MCPConnectionsCard() {
   const [busy, setBusy] = useState('')
   const [pendingAuth, setPendingAuth] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const [localAdvanced, setLocalAdvanced] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -48,22 +49,27 @@ export function MCPConnectionsCard() {
   }
 
   const add = async () => {
-    if (!draft.name.trim()) return
     if (draft.mode === 'local' && !draft.command.trim()) return
     if (draft.mode === 'remote' && !draft.url.trim()) return
     setBusy('add')
     setError('')
     try {
       let connection: MCPConnection
+      let name = draft.name.trim()
+      if (!name && draft.mode === 'remote') {
+        try { name = new URL(draft.url.trim()).hostname } catch { name = 'Remote MCP server' }
+      }
+      if (!name) name = 'Local MCP server'
       if (draft.mode === 'remote') {
-        connection = await api.addRemoteMCPConnection({ name: draft.name.trim(), url: draft.url.trim() })
+        connection = await api.addRemoteMCPConnection({ name, url: draft.url.trim() })
       } else {
         const args = draft.args.split('\n').map((value) => value.trim()).filter(Boolean)
-        connection = await api.addMCPConnection({ name: draft.name.trim(), command: draft.command.trim(), args, cwd: draft.cwd.trim() || null })
+        connection = await api.addMCPConnection({ name, command: draft.command.trim(), args, cwd: draft.cwd.trim() || null })
       }
       setConnections((current) => [...current, connection])
       setGrants((current) => ({ ...current, [connection.id]: [] }))
       setDraft(emptyDraft)
+      setLocalAdvanced(false)
       setAdding(false)
     } catch (reason) {
       setError(`The MCP connection could not be added. ${String(reason)}`)
@@ -148,26 +154,32 @@ export function MCPConnectionsCard() {
 
   return <div className="mcp-connections">
     <div className="mcp-connections-heading">
-      <p>Connect a local stdio or remote HTTPS MCP server. Academia inspects the server's declared tools, and only tools marked read-only can be granted. Remote servers must be explicitly trusted. No credentials are stored in the academic workspace.</p>
-      <button type="button" className="secondary-button" onClick={() => setAdding((value) => !value)}>{adding ? 'Close form' : 'Add connection'}</button>
+      <div>
+        <p>Connect an external tool server in four steps: add it, inspect its tools, trust its read-only declarations, then enable only the tools you want. Nothing starts automatically.</p>
+        <ol className="mcp-steps"><li>Add server</li><li>Inspect tools</li><li>Trust read-only tools</li><li>Enable</li></ol>
+      </div>
+      <button type="button" className="secondary-button" onClick={() => { setAdding((value) => !value); setLocalAdvanced(false) }}>{adding ? 'Close form' : 'Connect a tool'}</button>
     </div>
     {error && <p className="setup-error" role="alert">{error}</p>}
     {adding && <div className="coursework-editor mcp-add-form">
       <div className="mcp-mode-switch">
-        <button type="button" className={draft.mode === 'local' ? 'active' : ''} onClick={() => setDraft((current) => ({ ...current, mode: 'local' }))}>Local stdio</button>
-        <button type="button" className={draft.mode === 'remote' ? 'active' : ''} onClick={() => setDraft((current) => ({ ...current, mode: 'remote' }))}>Remote HTTPS</button>
+        <button type="button" className={draft.mode === 'remote' ? 'active' : ''} onClick={() => setDraft((current) => ({ ...current, mode: 'remote' }))}>Remote server</button>
+        <button type="button" className={draft.mode === 'local' ? 'active' : ''} onClick={() => { setLocalAdvanced(true); setDraft((current) => ({ ...current, mode: 'local' })) }}>Local server</button>
       </div>
       <div className="coursework-editor-grid">
-        <label className="history-title-field"><span>Name</span><input value={draft.name} maxLength={120} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="e.g. Local research notes" /></label>
-        {draft.mode === 'local' ? <>
-          <label><span>Command</span><input value={draft.command} maxLength={1000} onChange={(event) => setDraft((current) => ({ ...current, command: event.target.value }))} placeholder="/path/to/mcp-server" /></label>
-          <label><span>Working directory <small>Optional</small></span><input value={draft.cwd} onChange={(event) => setDraft((current) => ({ ...current, cwd: event.target.value }))} /></label>
-          <label className="history-wide-field"><span>Arguments <small>One per line</small></span><textarea value={draft.args} rows={3} onChange={(event) => setDraft((current) => ({ ...current, args: event.target.value }))} /></label>
-        </> : <label className="history-wide-field"><span>Remote MCP URL</span><input value={draft.url} maxLength={2000} onChange={(event) => setDraft((current) => ({ ...current, url: event.target.value }))} placeholder="https://example.com/mcp" /></label>}
+        <label className="history-title-field"><span>Name <small>Optional</small></span><input value={draft.name} maxLength={120} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder={draft.mode === 'remote' ? 'e.g. Research tools' : 'e.g. Local notes'} /></label>
+        {draft.mode === 'remote' ? <label className="history-wide-field"><span>Server URL</span><input value={draft.url} maxLength={2000} onChange={(event) => setDraft((current) => ({ ...current, url: event.target.value }))} placeholder="https://example.com/mcp" /><small>Use the exact remote MCP endpoint. If it requires sign-in, Academia opens its official OAuth page.</small></label> : <>
+          {!localAdvanced ? <button type="button" className="quiet-button" onClick={() => setLocalAdvanced(true)}>Show local command fields</button> : <>
+            <label><span>Command</span><input value={draft.command} maxLength={1000} onChange={(event) => setDraft((current) => ({ ...current, command: event.target.value }))} placeholder="/path/to/mcp-server" /></label>
+            <label><span>Working directory <small>Optional</small></span><input value={draft.cwd} onChange={(event) => setDraft((current) => ({ ...current, cwd: event.target.value }))} /></label>
+            <label className="history-wide-field"><span>Arguments <small>One per line</small></span><textarea value={draft.args} rows={3} onChange={(event) => setDraft((current) => ({ ...current, args: event.target.value }))} /></label>
+          </>}
+        </>}
       </div>
+      <p className="account-note">Only server-declared read-only tools can be granted. For remote servers, you must inspect the declared tools and explicitly trust the server before granting anything.</p>
       <div className="coursework-editor-actions">
-        <button type="button" className="secondary-button" onClick={() => { setAdding(false); setDraft(emptyDraft) }} disabled={busy === 'add'}>Cancel</button>
-        <button type="button" className="primary-button" onClick={() => void add()} disabled={busy === 'add' || !draft.name.trim() || (draft.mode === 'local' ? !draft.command.trim() : !draft.url.trim())}>{busy === 'add' ? 'Adding…' : 'Add connection'}</button>
+        <button type="button" className="secondary-button" onClick={() => { setAdding(false); setDraft(emptyDraft); setLocalAdvanced(false) }} disabled={busy === 'add'}>Cancel</button>
+        <button type="button" className="primary-button" onClick={() => void add()} disabled={busy === 'add' || (draft.mode === 'local' ? !draft.command.trim() : !draft.url.trim())}>{busy === 'add' ? 'Adding…' : 'Add server'}</button>
       </div>
     </div>}
     {loading ? <p className="account-note" role="status">Loading local MCP connections…</p> : connections.length === 0 && !adding ? <p className="account-note">No external MCP connections configured. Adding one does not connect it until you inspect its tools and grant read-only access.</p> : <div className="mcp-connection-list">
@@ -195,6 +207,7 @@ export function MCPConnectionsCard() {
           <code className="mcp-command">{remote ? connection.url : [connection.command, ...connection.args].join(' ')}</code>
           {remote && <p className="mcp-auth-line">Authorization · {connection.auth_status === 'authorized' ? 'Signed in; tokens are in the system credential store' : connection.auth_status === 'pending' ? 'Waiting for the browser sign-in' : connection.auth_status === 'error' ? 'Authorization failed' : 'Not connected'}</p>}
           {connection.error && <p className="setup-error" role="alert">{connection.error}</p>}
+          {!connection.enabled && <p className="mcp-next-step">{needsAuthorization ? 'Next: sign in to this server.' : connection.status !== 'available' ? 'Next: inspect the server to see its declared tools.' : remote && !trusted ? 'Next: review the declared tools and trust this server.' : !connection.granted_tools.length ? 'Next: select read-only tools below and save the grants.' : 'Next: enable this connection.'}</p>}
           {connection.status === 'available' && <div className="mcp-tools">
             <p>Server-declared tools. Only read-only tools are eligible.{remote && !trusted ? ' Trust this remote server before granting its tools.' : ''}</p>
             {connection.tools.map((tool) => <label className={`mcp-tool ${tool.read_only ? '' : 'not-grantable'}`} key={tool.name}>

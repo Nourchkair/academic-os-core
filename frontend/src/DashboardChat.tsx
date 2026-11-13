@@ -204,7 +204,7 @@ function toolProgressLabel(tool: string) {
   if (tool === 'academia_agent_context') return 'Checking academic context'
   if (tool === 'academia_tasks') return 'Checking tasks'
   if (tool === 'academia_status') return 'Checking the workspace'
-  if (tool === 'academia_google_context') return 'Reading granted Gmail and Calendar context'
+  if (tool === 'academia_external_context' || tool === 'academia_google_context') return 'Reading granted Gmail, Calendar, and Notion context'
   if (tool === 'academia_propose_calendar') return 'Checking duplicates and preparing a Calendar proposal'
   return 'Using an Academia tool'
 }
@@ -246,6 +246,8 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
   const [proposalMode, setProposalMode] = useState(() => localStorage.getItem('academia.chat.proposals') === 'true')
   const [webSearch, setWebSearch] = useState(() => localStorage.getItem('academia.chat.webSearch') === 'true')
   const [googleAvailable, setGoogleAvailable] = useState(false)
+  const [notionAvailable, setNotionAvailable] = useState(false)
+  const [notionGrant, setNotionGrant] = useState(() => localStorage.getItem('academia.chat.notionGrant') === 'true')
   const [googleGrants, setGoogleGrants] = useState<string[]>(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem('academia.chat.googleGrants') || '[]')
@@ -459,6 +461,28 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
     setProposalMode(false)
     localStorage.setItem('academia.chat.proposals', 'false')
   }, [apiProvider, proposalMode])
+  useEffect(() => {
+    let current = true
+    const refresh = () => {
+      void api.notionStatus().then((status) => {
+        if (!current) return
+        const available = status.auth_status === 'connected'
+        setNotionAvailable(available)
+        if (!available) {
+          setNotionGrant(false)
+          localStorage.setItem('academia.chat.notionGrant', 'false')
+        }
+      }).catch(() => { if (current) setNotionAvailable(false) })
+    }
+    refresh()
+    window.addEventListener('focus', refresh)
+    window.addEventListener('academia-notion-connection-changed', refresh)
+    return () => {
+      current = false
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener('academia-notion-connection-changed', refresh)
+    }
+  }, [])
   useEffect(() => {
     let current = true
     const refresh = () => {
@@ -764,7 +788,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
         boundedMessages.unshift(message)
         historyLength += message.content.length
       }
-      const chatPayload = { provider, messages: boundedMessages.map(({ role, content }) => ({ role, content })), model: model || defaultModel || null, effort, speed, attachments: uploaded.map((attachment) => ({ name: attachment.name, type: attachment.type, data: attachment.data })), course_context: courseContext, proposal_mode: proposalMode, course_id: courseId || null, semester: semester || null, granted_proposal_tools: proposalMode ? proposalGrants : [], web_search: webSearch, connector_grants: googleGrants }
+      const chatPayload = { provider, messages: boundedMessages.map(({ role, content }) => ({ role, content })), model: model || defaultModel || null, effort, speed, attachments: uploaded.map((attachment) => ({ name: attachment.name, type: attachment.type, data: attachment.data })), course_context: courseContext, proposal_mode: proposalMode, course_id: courseId || null, semester: semester || null, granted_proposal_tools: proposalMode ? proposalGrants : [], web_search: webSearch, connector_grants: [...googleGrants, ...(notionGrant ? ['notion'] : [])] }
       let result: ChatResult
       if (proposalMode) {
         const controller = new AbortController()
@@ -1101,6 +1125,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
             {googleAvailable && <label><input type="checkbox" checked={proposalGrants.includes('calendar')} onChange={() => toggleProposalGrant('calendar')} /> Google Calendar proposals</label>}
             <small>{proposalGrants.length ? 'It cannot approve, execute, send email, or change Google Calendar directly. Calendar proposals still require a separate Review decision.' : 'Select at least one proposal tool before sending.'}</small>
           </div>}
+          {notionGrant && <div className="chat-proposal-mode-note" role="note"><span>Notion context is on for this message: shared Notion pages and excerpts are sent to the selected AI provider as external reference.</span><small>Academia can only read pages shared with the Notion integration; it cannot edit Notion.</small></div>}
           {googleGrants.length > 0 && <div className="chat-proposal-mode-note" role="note">
             <span>Google context is on for this message: {googleGrants.includes('gmail') ? 'recent Gmail messages' : ''}{googleGrants.length === 2 ? ' and ' : ''}{googleGrants.includes('calendar') ? 'upcoming Calendar events' : ''}.</span>
             <small>That data is sent to the selected AI provider as external reference. Academia will not send mail or change your calendar.</small>
@@ -1123,6 +1148,12 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
                 <ChatPicker id="provider" label="AI" value={provider} ariaLabel="AI provider" options={providerOptions.map((entry) => ({ value: entry.id, label: entry.name, disabled: !entry.available, reason: entry.reason }))} disabled={!providerOptions.length} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { setProvider(value); localStorage.setItem('academia.chat.provider', value) }} />
                 <ChatPicker id="model" label="Model" value={model || defaultModel} placeholder="Provider default" ariaLabel="Model" options={modelOptions.map((entry) => ({ value: entry.id, label: entry.name }))} disabled={!modelOptions.length} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { setModel(value); localStorage.setItem(`academia.chat.model.${provider}`, value); if (provider === 'codex') localStorage.setItem('academia.chat.model', value) }} />
                 <ChatPicker id="effort" label="Thinking" value={effort} ariaLabel="Thinking effort" options={thinkingOptions.map(([value, label]) => ({ value, label }))} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { setEffort(value); localStorage.setItem(`academia.chat.effort.${provider}`, value); localStorage.setItem('academia.chat.effort', value) }} />
+                {notionAvailable && <button className={`chat-proposal-toggle ${notionGrant ? 'active' : ''}`} type="button" aria-label={notionGrant ? 'Notion context enabled' : 'Enable Notion context'} aria-pressed={notionGrant} disabled={busy || studyGenerationInProgress} data-tooltip={notionGrant ? 'Notion context is on · shared page text is sent to the selected AI provider for this message' : 'Use shared Notion pages as external context for this message'} data-tooltip-side="top" onClick={() => { const next = !notionGrant; setNotionGrant(next); localStorage.setItem('academia.chat.notionGrant', String(next)) }}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M6 4.5h8l4 4v11H6z" />
+                    <path d="M14 4.5v4h4M9 12h6M9 15h6" />
+                  </svg>
+                </button>}
                 {googleAvailable && <>
                   <button className={`chat-proposal-toggle ${googleGrants.includes('gmail') ? 'active' : ''}`} type="button" aria-label={googleGrants.includes('gmail') ? 'Gmail context enabled' : 'Enable Gmail context'} aria-pressed={googleGrants.includes('gmail')} disabled={busy || studyGenerationInProgress} data-tooltip={googleGrants.includes('gmail') ? 'Gmail context is on · recent message metadata and snippets are sent to the selected AI provider for this message' : 'Use recent Gmail messages as external context for this message'} data-tooltip-side="top" onClick={() => toggleGoogleGrant('gmail')}>
                     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">

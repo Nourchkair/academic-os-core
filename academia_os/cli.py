@@ -474,7 +474,40 @@ def _models(args: argparse.Namespace) -> Any:
     raise ValueError(f"unsupported models command: {args.models_command}")
 
 
+def _notion_connector(args: argparse.Namespace) -> Any:
+    from .connectors.notion import NotionConnector
+    config = load_config(_profile_path(args))
+    return NotionConnector(runtime_directory(config) / "notion_connector.json")
+
+
 def _connectors(args: argparse.Namespace) -> Any:
+    if args.connector_command == "notion":
+        connector = _notion_connector(args)
+        if args.notion_command == "setup":
+            token = ""
+            if getattr(args, "input_file", None):
+                try:
+                    value = json.loads(Path(args.input_file).read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError) as exc:
+                    raise ValueError("Notion setup input is not valid JSON") from exc
+                token = value.get("token") if isinstance(value, dict) else ""
+            if getattr(args, "token_file", None):
+                try:
+                    token = Path(args.token_file).read_text(encoding="utf-8").strip()
+                except OSError as exc:
+                    raise ValueError("Notion token file could not be read") from exc
+            return connector.configure(str(token or ""))
+        if args.notion_command == "status":
+            return connector.status()
+        if args.notion_command == "test":
+            return connector.test()
+        if args.notion_command == "disconnect":
+            return connector.disconnect()
+        if args.notion_command == "search":
+            return connector.search(query=args.query or "", page_size=args.max_results)
+        if args.notion_command == "read":
+            return connector.read_page(args.page_id, max_blocks=args.max_blocks)
+        raise ValueError(f"unsupported Notion command: {args.notion_command}")
     if args.connector_command != "google":
         raise ValueError(f"unsupported connector: {args.connector_command}")
     connector = _google_connector(args)
@@ -1021,6 +1054,27 @@ def build_parser() -> argparse.ArgumentParser:
     calendar_update.add_argument("--description")
     calendar_update.add_argument("--clear-description", action="store_true")
     calendar_update.add_argument("--json", action="store_true")
+    notion = connectors_sub.add_parser("notion", help="Connect a read-only Notion workspace")
+    notion_sub = notion.add_subparsers(dest="notion_command", required=True)
+    notion_setup = notion_sub.add_parser("setup", help="Validate and store a Notion integration token")
+    notion_setup.add_argument("--input-file", help="JSON object with a token field")
+    notion_setup.add_argument("--token-file", help="Plain-text file containing the integration token")
+    notion_setup.add_argument("--json", action="store_true")
+    for action, summary in (
+        ("status", "Show the Notion connection status"),
+        ("test", "Revalidate the stored Notion token"),
+        ("disconnect", "Remove the stored Notion token"),
+    ):
+        command = notion_sub.add_parser(action, help=summary)
+        command.add_argument("--json", action="store_true")
+    notion_search = notion_sub.add_parser("search", help="Search pages shared with the Notion integration")
+    notion_search.add_argument("--query", default="")
+    notion_search.add_argument("--max", dest="max_results", type=int, default=10)
+    notion_search.add_argument("--json", action="store_true")
+    notion_read = notion_sub.add_parser("read", help="Read one Notion page")
+    notion_read.add_argument("page_id")
+    notion_read.add_argument("--max-blocks", type=int, default=100)
+    notion_read.add_argument("--json", action="store_true")
     from .study.cli import add_parser as add_study_parser
     add_study_parser(sub)
     dashboard_chat = sub.add_parser("chat", help=argparse.SUPPRESS)

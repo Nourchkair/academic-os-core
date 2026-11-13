@@ -360,6 +360,32 @@ export type AccountStatus = {
 
 export type ModelRole = 'default' | 'fast' | 'deep' | 'vision' | 'image'
 
+export type NotionStatus = {
+  schema_version: number
+  auth_status: 'not_configured' | 'connected' | 'error'
+  account_name: string | null
+  error: string | null
+  last_checked_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type NotionPage = {
+  id: string
+  object: string
+  title: string
+  url: string | null
+  last_edited_time: string | null
+  archived: boolean | null
+}
+
+export type NotionPageContent = {
+  page_id: string
+  text: string
+  block_count: number
+  truncated: boolean
+}
+
 export type ModelProviderCatalogEntry = {
   id: string
   name: string
