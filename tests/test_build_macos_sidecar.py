@@ -49,44 +49,35 @@ def test_local_packaging_can_read_the_client_from_keychain(monkeypatch: pytest.M
     assert google_oauth_client_config() == CLIENT
 
 
-def test_bundled_client_bootstraps_to_keychain_on_first_use(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_bundled_client_does_not_read_or_write_the_client_keychain_item(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     resource = tmp_path / "google_client" / "client.json"
     resource.parent.mkdir()
     resource.write_text(json.dumps(CLIENT), encoding="utf-8")
     monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
-    passwords: dict[tuple[str, str], str] = {}
+    writes: list[tuple[str, str, str]] = []
     keyring = types.SimpleNamespace(
-        get_password=lambda service, account: passwords.get((service, account)),
-        set_password=lambda service, account, value: passwords.__setitem__((service, account), value),
+        get_password=lambda *_args: (_ for _ in ()).throw(AssertionError("client keychain must not be read")),
+        set_password=lambda service, account, value: writes.append((service, account, value)),
     )
     monkeypatch.setitem(sys.modules, "keyring", keyring)
 
     client = GoogleCredentialStore().load_client()
     assert client == CLIENT["installed"]
-    saved = json.loads(passwords[("academia-os-google-oauth", "client")])
-    assert saved == CLIENT["installed"]
+    assert writes == []
 
 
-def test_new_sidecar_client_secret_refreshes_same_client_keychain_copy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_bundled_client_overrides_a_legacy_client_keychain_item(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     resource = tmp_path / "google_client" / "client.json"
     resource.parent.mkdir()
     resource.write_text(json.dumps(CLIENT), encoding="utf-8")
     monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
-    passwords = {
-        ("academia-os-google-oauth", "client"): json.dumps({
-            "client_id": CLIENT["installed"]["client_id"],
-            "client_secret": "previous-secret",
-        })
-    }
     keyring = types.SimpleNamespace(
-        get_password=lambda service, account: passwords.get((service, account)),
-        set_password=lambda service, account, value: passwords.__setitem__((service, account), value),
+        get_password=lambda *_args: (_ for _ in ()).throw(AssertionError("legacy client must not be read")),
+        set_password=lambda *_args: (_ for _ in ()).throw(AssertionError("client must not be written")),
     )
     monkeypatch.setitem(sys.modules, "keyring", keyring)
 
     assert GoogleCredentialStore().load_client() == CLIENT["installed"]
-    saved = json.loads(passwords[("academia-os-google-oauth", "client")])
-    assert saved["client_secret"] == "test-secret"
 
 
 def test_build_resource_is_staged_private_and_outside_the_repository(tmp_path: Path) -> None:

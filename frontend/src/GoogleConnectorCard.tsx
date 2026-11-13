@@ -320,6 +320,6 @@ export function GoogleConnectorCard({ onOpenReview }: { onOpenReview: (reviewId:
     </>}
     {!authorized && !waiting && configured && <p className="account-note">{status.error || 'Google is configured. Connect the test account to read Gmail and Calendar.'}</p>}
     {error && <p className="account-note account-error" role="alert">{error}</p>}
-    <p className="account-privacy">Google tokens stay in the macOS Keychain. Academia does not store your Google password, and it never sends school-account messages or submits coursework.</p>
+    <p className="account-privacy">Google tokens stay in the macOS Keychain. Academia does not store your Google password, and it never sends school-account messages or submits coursework. If macOS asks for a password once, it means your Mac login password, not your Google password.</p>
   </div>
 }

@@ -202,15 +202,13 @@ class GoogleCredentialStore:
         return {"client_id": client_id, "client_secret": client_secret}
 
     def load_client(self) -> dict[str, str] | None:
-        value = self._load("client")
         bundled = self._bundled_client()
-        if bundled is not None and (value is None or value.get("client_id") == bundled["client_id"]):
-            # Refresh the Keychain copy when an official app build rotates the
-            # secret for the same OAuth client. A separately configured local
-            # client with a different ID remains the user's explicit override.
-            if value != bundled:
-                self.save_client(bundled["client_id"], bundled["client_secret"])
+        if bundled is not None:
+            # Packaged builds carry the app-level client in the sidecar. Do not
+            # read the legacy client item from Keychain: that item was created
+            # by development CLIs and can trigger a macOS access prompt.
             return bundled
+        value = self._load("client")
         if value is None:
             return None
         client_id = value.get("client_id")
