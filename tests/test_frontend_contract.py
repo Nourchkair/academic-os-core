@@ -94,8 +94,9 @@ def test_settings_exposes_agent_setup_playbooks_and_the_google_connector() -> No
     assert "workflow-editor" not in source
     assert "Save my playbook preferences" in source
     assert "This does not configure an external service" in source
-    assert "GoogleConnectorCard" in source
-    assert "read-only access" in source
+    assert "ConnectionsHub" in source
+    assert "GoogleConnectorCard" in (FRONTEND / "ConnectionsHub.tsx").read_text(encoding="utf-8")
+    assert "Gmail and Google Calendar" in (FRONTEND / "ConnectionsHub.tsx").read_text(encoding="utf-8")
     assert "Connect Brightspace" not in source
     assert "Automation enabled" not in source
 

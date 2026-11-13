@@ -301,6 +301,21 @@ button.library-file-row:focus-visible { border-color: #a8a8a8; box-shadow: 0 0 0
 .action-panel-body { overflow: auto; padding: 23px 25px 30px; }
 .action-panel-body > .page-stack { gap: 22px; }
 .action-panel-body .page-intro { max-width: none; }.settings-page { max-width: 1080px; }.settings-layout { display: grid; gap: 16px; }.settings-section { align-items: start; margin: 0; padding: 24px 26px; }.settings-section-content { min-width: 0; }.settings-section-content > .settings-note { margin-bottom: 0; }.settings-actions { max-width: 1080px; }.action-panel-header { position: relative; }.action-panel-heading { flex: 1; text-align: center; }.action-panel-heading > p:last-child { margin-inline: auto; }.action-panel-header > .icon-button { position: absolute; right: 25px; top: 23px; }.workspace-action-button:disabled { cursor: wait; opacity: .55; } @media (max-width: 760px) { .settings-section { padding: 20px 18px; }.action-panel-heading { padding-inline: 8px; }.action-panel-header > .icon-button { right: 17px; top: 20px; } }
+.connections-hub { display: grid; gap: 14px; }
+.connections-tabs { display: flex; flex-wrap: wrap; gap: 7px; }
+.connections-tabs button { background: #fafafa; border: 1px solid #e7e7e7; border-radius: 10px; color: #777; cursor: pointer; display: grid; gap: 3px; min-width: 138px; padding: 10px 12px; text-align: left; }
+.connections-tabs button strong { color: #4d4d4d; font-size: 11px; }
+.connections-tabs button small { color: #999; font-size: 9px; line-height: 1.35; }
+.connections-tabs button.active { background: #eef2ed; border-color: #cdd9cc; }
+.connections-tabs button.active strong { color: #4f6a50; }
+.connections-panel { display: grid; gap: 14px; }
+.connection-group { border-top: 1px solid #ededed; display: grid; gap: 11px; padding-top: 14px; }
+.connection-group:first-child { border-top: 0; padding-top: 0; }
+.connection-group > header { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; }
+.connection-group > header > div { display: grid; gap: 3px; }
+.connection-group h4 { color: #4b4b4b; font-size: 13px; margin: 0; }
+.connection-type { background: #f6f5f1; border-radius: 999px; color: #8a8066; font-size: 8px; font-weight: 700; padding: 4px 8px; text-transform: uppercase; }
+@media (max-width: 760px) { .connections-tabs { display: grid; grid-template-columns: 1fr; } .connections-tabs button { min-width: 0; } }
 @media (max-width: 1050px) { .course-browser-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.material-category-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .courses-toolbar { align-items: flex-start; flex-direction: column; }.semester-control { justify-content: space-between; width: 100%; }.semester-control .semester-picker { flex: 1; }.semester-status { align-self: flex-end; }.course-browser-grid { grid-template-columns: 1fr; }.material-category-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.course-material-heading { flex-direction: column; gap: 9px; }.course-material-toolbar { align-items: stretch; flex-wrap: wrap; }.course-material-toolbar .library-search { flex-basis: 100%; }.material-filter { flex: 1; justify-content: space-between; }.material-filter select { flex: 1; min-width: 0; }.action-panel-backdrop { padding: 0; }.action-panel { border-radius: 0; max-height: 100vh; min-height: 100vh; width: 100%; }.action-panel-header { padding: 20px 17px 15px; }.action-panel-tabs { padding-inline: 17px; }.action-panel-body { padding: 20px 17px 30px; } }
 .agent-playbooks { background: linear-gradient(135deg, #f6f6f6, #fcfcfc); border: 1px solid #e3e3e3; border-radius: 20px; margin-top: 18px; max-width: 1080px; padding: 24px 26px 26px; }

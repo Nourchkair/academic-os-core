@@ -300,8 +300,9 @@ def test_dashboard_exposes_agent_setup_playbooks_and_editable_preferences_with_g
     assert "JSON.stringify(preferences)" in api_source
     assert "Agent Setup Playbook" in source
     assert "api.playbooks" in source
-    assert "GoogleConnectorCard" in source
-    assert "read-only access" in source
+    assert "ConnectionsHub" in source
+    assert "GoogleConnectorCard" in (FRONTEND / "ConnectionsHub.tsx").read_text(encoding="utf-8")
+    assert "Gmail and Google Calendar" in (FRONTEND / "ConnectionsHub.tsx").read_text(encoding="utf-8")
     assert "Connect Brightspace" not in source
     assert "automation definitely running" not in source
 
