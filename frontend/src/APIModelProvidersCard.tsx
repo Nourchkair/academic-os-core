@@ -49,7 +49,7 @@ export function APIModelProvidersCard() {
 
   const catalog = payload?.catalog ?? []
   const providers = payload?.providers ?? []
-  const apiRows = catalog.filter((entry) => entry.kind === 'api')
+  const apiRows = catalog.filter((entry) => entry.kind === 'api' && entry.id !== 'custom')
   const localRows = catalog.filter((entry) => entry.kind === 'local')
   const modelOptions = useMemo(() => providers
     .filter((provider) => provider.enabled && provider.status === 'connected')
