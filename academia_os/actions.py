@@ -13,6 +13,11 @@ from .state import JsonStateStore
 class ActionType(StrEnum):
     FILE_COPY = "file_copy"
     FILE_MOVE = "file_move"
+    FILE_TRASH = "file_trash"
+    FILE_RESTORE = "file_restore"
+    GRADE_RECORD = "grade_record"
+    COURSE_CREATE = "course_create"
+    SEMESTER_CREATE = "semester_create"
     CALENDAR_CHANGE = "calendar_change"
     CONFIGURATION_CHANGE = "configuration_change"
     DOMAIN_CHANGE = "domain_change"

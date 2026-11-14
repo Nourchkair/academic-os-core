@@ -4,13 +4,16 @@ export type ChatProposal = {
   title: string
   summary: string
   effects: string[]
-  review_id: string
+  review_id: string | null
   proposal_id?: string | null
+  tier?: 'auto' | 'inline' | 'review' | null
+  action_type?: string | null
   status?: string | null
   action_status?: string | null
   status_label?: string
 }
-export type ChatMessage = { role: 'user' | 'assistant'; content: string; attachments?: ChatMessageAttachment[]; proposals?: ChatProposal[] }
+export type ChatTraceStep = { tool: string; ok: boolean; ms?: number | null }
+export type ChatMessage = { role: 'user' | 'assistant'; content: string; at?: string; attachments?: ChatMessageAttachment[]; proposals?: ChatProposal[]; trace?: ChatTraceStep[]; mentions?: string[] }
 
 export type ChatConversation = {
   id: string
@@ -23,75 +26,55 @@ export type ChatConversation = {
   updatedAt: string
 }
 
+export type ChatConversationSummary = {
+  id: string
+  title: string
+  courseId: string
+  courseLabel: string
+  messageCount: number
+  preview: string
+  createdAt: string
+  updatedAt: string
+}
+
 export type StudyChatRequest =
   | { id: string; action: 'open'; conversationId: string }
   | { id: string; action: 'new'; courseId: string; prompt?: string }
 
-const databaseName = 'academia-os-dashboard'
-const databaseVersion = 2
-const conversationStore = 'chat-conversations'
-let persistenceRequest: Promise<boolean> | null = null
+const sessionsPath = '/api/v1/agent/sessions'
+const migrationKey = 'academia.chat.historyMigrated.v1'
 
-function requestPersistentStorage(): Promise<boolean> {
-  if (!navigator.storage?.persist) return Promise.resolve(false)
-  persistenceRequest ??= navigator.storage.persist().catch(() => false)
-  return persistenceRequest
+function isDesktopShell() {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
-function withoutAttachmentPreviews(value: unknown): ChatConversation | null {
-  if (!value || typeof value !== 'object') return null
-  const conversation = value as Partial<ChatConversation>
-  if (!Array.isArray(conversation.messages)) return null
-  const sanitized = {
-    ...conversation,
-    messages: conversation.messages.map((message) => {
-      if (!message || typeof message !== 'object') return message
-      const { attachments, ...rest } = message
-      return {
-        ...rest,
-        ...(Array.isArray(attachments) ? {
-          attachments: attachments.map((attachment) => {
-            if (!attachment || typeof attachment !== 'object') return attachment
-            const metadata = { ...attachment }
-            delete metadata.preview
-            return metadata
-          }),
-        } : attachments === undefined ? {} : { attachments }),
-      }
-    }),
+async function invokeSessions<T>(args: string[]): Promise<T> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  const raw = await invoke<string>('academia_command', { command: 'sessions', args })
+  return JSON.parse(raw) as T
+}
+
+async function failure(response: Response): Promise<Error> {
+  try {
+    const value = await response.json()
+    if (value && typeof value.error === 'string') return new Error(value.error)
+  } catch {
+    /* fall through */
   }
-  return isConversation(sanitized) ? sanitized : null
+  return new Error(`The workspace returned HTTP ${response.status}.`)
 }
 
 export function stripChatAttachmentPreviews(conversation: ChatConversation): ChatConversation {
-  return withoutAttachmentPreviews(conversation) ?? conversation
-}
-
-async function openDatabase(): Promise<IDBDatabase> {
-  if (!('indexedDB' in window)) return Promise.reject(new Error('Local chat history is unavailable in this browser.'))
-  await requestPersistentStorage()
-
-  return new Promise((resolve, reject) => {
-    const request = window.indexedDB.open(databaseName, databaseVersion)
-    request.onupgradeneeded = (event) => {
-      const database = request.result
-      if (!database.objectStoreNames.contains(conversationStore)) database.createObjectStore(conversationStore, { keyPath: 'id' })
-      const oldVersion = (event as IDBVersionChangeEvent).oldVersion
-      if (oldVersion > 0 && oldVersion < 2) {
-        const cursorRequest = request.transaction?.objectStore(conversationStore).openCursor()
-        if (cursorRequest) cursorRequest.onsuccess = () => {
-          const cursor = cursorRequest.result
-          if (!cursor) return
-          const sanitized = withoutAttachmentPreviews(cursor.value)
-          if (sanitized) cursor.update(sanitized)
-          cursor.continue()
-        }
+  return {
+    ...conversation,
+    messages: conversation.messages.map((message) => {
+      if (!Array.isArray(message.attachments)) return message
+      return {
+        ...message,
+        attachments: message.attachments.map(({ name, type }) => ({ name, type })),
       }
-    }
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error || new Error('Could not open local chat history.'))
-    request.onblocked = () => reject(new Error('Local chat history is busy in another dashboard tab. Close the other tab and try again.'))
-  })
+    }),
+  }
 }
 
 function isConversation(value: unknown): value is ChatConversation {
@@ -102,49 +85,122 @@ function isConversation(value: unknown): value is ChatConversation {
     && typeof conversation.courseId === 'string'
     && typeof conversation.courseLabel === 'string'
     && Array.isArray(conversation.messages)
-    && conversation.messages.every((message) => message && (message.role === 'user' || message.role === 'assistant') && typeof message.content === 'string'
-      && (message.attachments === undefined || (Array.isArray(message.attachments) && message.attachments.every((attachment) => attachment
-        && typeof attachment.name === 'string' && typeof attachment.type === 'string'
-        && (attachment.preview === undefined || (typeof attachment.preview === 'string' && attachment.preview.length <= 180_000))))))
-    && Array.isArray(conversation.sourceIds) && conversation.sourceIds.every((id) => typeof id === 'string')
-    && Array.isArray(conversation.excludedCourseSourceIds) && conversation.excludedCourseSourceIds.every((id) => typeof id === 'string')
+    && Array.isArray(conversation.sourceIds)
+    && Array.isArray(conversation.excludedCourseSourceIds)
     && typeof conversation.updatedAt === 'string'
 }
 
-export async function listChatConversations(): Promise<ChatConversation[]> {
-  const database = await openDatabase()
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction(conversationStore, 'readonly')
-    const request = transaction.objectStore(conversationStore).getAll()
-    let conversations: ChatConversation[] = []
-    request.onsuccess = () => {
-      conversations = (request.result as unknown[]).filter(isConversation)
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-    }
-    transaction.oncomplete = () => { database.close(); resolve(conversations) }
-    transaction.onerror = () => { database.close(); reject(transaction.error || new Error('Could not read local chat history.')) }
-    transaction.onabort = () => { database.close(); reject(transaction.error || new Error('Could not read local chat history.')) }
-  })
+export async function listChatConversations(): Promise<ChatConversationSummary[]> {
+  let sessions: unknown[] = []
+  if (isDesktopShell()) {
+    const value = await invokeSessions<{ sessions?: unknown[] }>(['list', '--json'])
+    sessions = Array.isArray(value?.sessions) ? value.sessions : []
+  } else {
+    const response = await fetch(sessionsPath)
+    if (!response.ok) throw await failure(response)
+    const value = await response.json()
+    sessions = Array.isArray(value?.sessions) ? value.sessions : []
+  }
+  const summaries = sessions.filter((session: unknown): session is ChatConversationSummary => Boolean(session)
+    && typeof (session as ChatConversationSummary).id === 'string'
+    && typeof (session as ChatConversationSummary).title === 'string')
+  if (!summaries.length) await migrateLegacyHistory()
+  return summaries
+}
+
+export async function loadChatConversation(id: string): Promise<ChatConversation> {
+  const value = isDesktopShell()
+    ? await invokeSessions<{ session?: unknown }>(['load', id, '--json'])
+    : await fetch(`${sessionsPath}/load?id=${encodeURIComponent(id)}`).then(async (response) => {
+        if (!response.ok) throw await failure(response)
+        return response.json() as Promise<{ session?: unknown }>
+      })
+  if (!isConversation(value?.session)) throw new Error('That conversation could not be read.')
+  return value.session
 }
 
 export async function saveChatConversation(conversation: ChatConversation): Promise<void> {
-  const database = await openDatabase()
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction(conversationStore, 'readwrite')
-    transaction.objectStore(conversationStore).put(conversation)
-    transaction.oncomplete = () => { database.close(); resolve() }
-    transaction.onerror = () => { database.close(); reject(transaction.error || new Error('Could not save this conversation locally.')) }
-    transaction.onabort = () => { database.close(); reject(transaction.error || new Error('Could not save this conversation locally.')) }
+  const payload = { session: stripChatAttachmentPreviews(conversation) }
+  if (isDesktopShell()) {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke<string>('academia_sessions_save', { payload })
+    return
+  }
+  const response = await fetch(`${sessionsPath}/save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   })
+  if (!response.ok) throw await failure(response)
 }
 
 export async function deleteChatConversation(id: string): Promise<void> {
-  const database = await openDatabase()
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction(conversationStore, 'readwrite')
-    transaction.objectStore(conversationStore).delete(id)
-    transaction.oncomplete = () => { database.close(); resolve() }
-    transaction.onerror = () => { database.close(); reject(transaction.error || new Error('Could not delete this local conversation.')) }
-    transaction.onabort = () => { database.close(); reject(transaction.error || new Error('Could not delete this local conversation.')) }
+  if (isDesktopShell()) {
+    await invokeSessions(['delete', id, '--json'])
+    return
+  }
+  const response = await fetch(`${sessionsPath}/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
   })
+  if (!response.ok) throw await failure(response)
+}
+
+type LegacyConversation = ChatConversation
+
+async function readLegacyIndexedDb(): Promise<LegacyConversation[]> {
+  if (typeof window === 'undefined' || !('indexedDB' in window)) return []
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (value: LegacyConversation[]) => {
+      if (settled) return
+      settled = true
+      resolve(value)
+    }
+    const request = window.indexedDB.open('academia-os-dashboard')
+    request.onupgradeneeded = () => finish([])
+    request.onerror = () => finish([])
+    request.onsuccess = () => {
+      const database = request.result
+      if (!database.objectStoreNames.contains('chat-conversations')) {
+        database.close()
+        finish([])
+        return
+      }
+      try {
+        const transaction = database.transaction('chat-conversations', 'readonly')
+        const all = transaction.objectStore('chat-conversations').getAll()
+        all.onsuccess = () => {
+          database.close()
+          finish((all.result as unknown[]).filter(isConversation))
+        }
+        all.onerror = () => {
+          database.close()
+          finish([])
+        }
+      } catch {
+        database.close()
+        finish([])
+      }
+    }
+  })
+}
+
+/** One-time move of browser-era conversations into the local workspace store. */
+export async function migrateLegacyHistory(): Promise<number> {
+  if (typeof window === 'undefined') return 0
+  if (window.localStorage.getItem(migrationKey) === 'done') return 0
+  const legacy = await readLegacyIndexedDb()
+  let migrated = 0
+  for (const conversation of legacy) {
+    try {
+      await saveChatConversation(conversation)
+      migrated += 1
+    } catch {
+      /* keep going; a single broken conversation must not block the rest */
+    }
+  }
+  window.localStorage.setItem(migrationKey, 'done')
+  return migrated
 }

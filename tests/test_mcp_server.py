@@ -29,6 +29,7 @@ EXPECTED_TOOLS = {
     "academia_import_targets",
     "academia_library",
     "academia_processing_status",
+    "academia_propose_action",
     "academia_propose_calendar",
     "academia_propose_import",
     "academia_propose_task",
@@ -175,6 +176,7 @@ def test_read_only_mode_hides_and_rejects_write_tools(tmp_path: Path) -> None:
         "academia_propose_import",
         "academia_propose_task",
         "academia_propose_calendar",
+        "academia_propose_action",
         }
         error = call_error(server, "academia_review_decide", {"review_id": "missing", "decision": "use_new"})
         assert "disabled in read-only mode" in error
@@ -271,7 +273,7 @@ def test_tools_list_is_stable_and_schemas_are_complete(mcp: tuple[McpServer, Pat
         assert isinstance(schema.get("required"), list)
         assert schema.get("additionalProperties") is False
         assert set(schema["required"]) <= set(schema["properties"])
-        if tool["name"] in {"academia_review_decide", "academia_review_execute", "academia_import_file", "academia_propose_import", "academia_propose_task", "academia_propose_calendar"}:
+        if tool["name"] in {"academia_review_decide", "academia_review_execute", "academia_import_file", "academia_propose_import", "academia_propose_task", "academia_propose_calendar", "academia_propose_action"}:
             assert tool.get("annotations", {}).get("readOnlyHint") is False
         else:
             assert tool.get("annotations", {}).get("readOnlyHint") is True

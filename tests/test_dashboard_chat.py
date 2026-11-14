@@ -283,7 +283,7 @@ def test_respond_uses_a_configured_api_provider(tmp_path: Path, monkeypatch: pyt
             return ProviderResponse(text="API answer")
 
     monkeypatch.setattr(dashboard_chat, "ModelConnectionManager", FakeManager)
-    monkeypatch.setattr(dashboard_chat, "_api_adapter", lambda record, key, model: FakeAdapter())
+    monkeypatch.setattr(dashboard_chat, "_api_adapter", lambda record, key, model, **_: FakeAdapter())
 
     result = respond(payload(provider="api:openai", model="gpt-test"), profile=profile)
     assert result["message"] == "API answer"
@@ -291,8 +291,8 @@ def test_respond_uses_a_configured_api_provider(tmp_path: Path, monkeypatch: pyt
     assert result["model"] == "gpt-test"
     assert result["notice"] is None
 
-    with pytest.raises(ValueError, match="require Codex"):
-        _validate_payload(payload(provider="api:openai", proposal_mode=True, granted_proposal_tools=["task"]))
+    # API providers may propose catalog actions; the task/import grant stays Codex-only.
+    assert _validate_payload(payload(provider="api:openai", proposal_mode=True, granted_proposal_tools=["actions"]))[-3] == ["actions"]
 
 
 def test_respond_runs_api_provider_read_tools_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -409,7 +409,7 @@ def test_validate_payload_accepts_and_bounds_proposal_scope() -> None:
 
     with pytest.raises(ValueError, match="proposal_mode"):
         _validate_payload(payload(proposal_mode="yes"))
-    with pytest.raises(ValueError, match="action proposals require Codex"):
+    with pytest.raises(ValueError, match="connected model provider"):
         _validate_payload(payload(proposal_mode=True, provider="claude"))
     with pytest.raises(ValueError, match="course_id"):
         _validate_payload(payload(proposal_mode=True, course_id=5))
@@ -713,3 +713,39 @@ def test_proposal_card_names_an_import_source() -> None:
     })
     assert card is not None
     assert card["summary"] == "Copy lecture-notes.md into Fall 2026/POL 2103 - Politics/00_INBOX"
+
+
+def test_action_proposals_become_inline_cards() -> None:
+    from academia_os.dashboard_chat import _proposal_card
+
+    inline = _proposal_card("academia_propose_action", {
+        "proposal_id": "proposal-1",
+        "action_type": "grade_record",
+        "tier": "inline",
+        "review_id": None,
+        "preview": {
+            "title": "Record a coursework grade",
+            "summary": "Update First Essay in POL 2103.",
+            "changes": [{"label": "Grade", "from": None, "to": "82%"}],
+        },
+    })
+    assert inline is not None
+    assert inline["kind"] == "action"
+    assert inline["tier"] == "inline"
+    assert inline["proposal_id"] == "proposal-1"
+    assert inline["review_id"] is None
+    assert inline["effects"] == ["Grade: — → 82%"]
+    assert inline["status_label"] == "Waiting for Allow"
+
+    review = _proposal_card("action.propose", {
+        "proposal_id": "proposal-2",
+        "action_type": "file_trash",
+        "tier": "review",
+        "review_id": "review-2",
+        "preview": {"title": "Move a file to trash", "changes": []},
+    })
+    assert review is not None
+    assert review["status_label"] == "Waiting for Review"
+    assert review["review_id"] == "review-2"
+
+    assert _proposal_card("academia_propose_action", {"tier": "inline"}) is None

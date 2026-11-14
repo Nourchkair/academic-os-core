@@ -20,7 +20,7 @@ from .workspace import build_workspace_snapshot
 _MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 _PROTOCOL_VERSION = "2024-11-05"
 _WRITE_TOOL_NAMES = frozenset({"academia_review_decide", "academia_review_execute", "academia_import_file"})
-_PROPOSAL_TOOL_NAMES = frozenset({"academia_propose_import", "academia_propose_task", "academia_propose_calendar"})
+_PROPOSAL_TOOL_NAMES = frozenset({"academia_propose_import", "academia_propose_task", "academia_propose_calendar", "academia_propose_action"})
 
 
 def _tools_for_mode(read_only: bool, proposal_only: bool = False, proposal_tools: set[str] | None = None) -> list[dict[str, Any]]:
@@ -215,6 +215,29 @@ _TOOLS = [
             "description": {"type": ["string", "null"], "maxLength": 8192},
         },
         ["action"],
+        annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
+    ),
+    _tool(
+        "academia_propose_action",
+        "Propose one workspace change from the Academia action catalog and return its exact preview. It never performs the change. Inline actions (grade records, course or semester creation, trash restore, personal tasks) run only after the student presses Allow. Review actions (moves, trash, settings) require a Review decision and a separate verified execute.",
+        {
+            "action_type": {
+                "type": "string",
+                "enum": [
+                    "task_change",
+                    "grade_record",
+                    "file_restore",
+                    "course_create",
+                    "semester_create",
+                    "file_move",
+                    "file_trash",
+                    "configuration_change",
+                ],
+            },
+            "details": {"type": "object", "description": "Exact action fields, for example {\"path\": \"Fall 2026/Course/00_INBOX/file.pdf\"} or {\"course_id\": \"...\", \"values\": {\"grade\": \"82%\"}}."},
+            "title": {"type": "string"},
+        },
+        ["action_type", "details"],
         annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
     ),
 ]
@@ -693,6 +716,17 @@ def _call_tool(
         context = ReadContext.create(config, semester=scope.semester if scope else None, hosted_model_allowed=False)
         source_label = values.get("source_label") if isinstance(values.get("source_label"), str) else None
         return propose_import(context, source_path=source_value, target_id=target_id, source_label=source_label)
+    if name == "academia_propose_action":
+        from .action_service import ActionService
+
+        action_type = values.get("action_type")
+        details = values.get("details")
+        if not isinstance(action_type, str) or not action_type.strip():
+            raise McpError("action_type is required.")
+        if not isinstance(details, dict):
+            raise McpError("details must be a JSON object.")
+        title = values.get("title") if isinstance(values.get("title"), str) else None
+        return ActionService(_profile_path(profile)).propose(action_type, details, title=title)
     if name == "academia_propose_task":
         from .assistant.tools.write import propose_task_change
         action = values.get("action")

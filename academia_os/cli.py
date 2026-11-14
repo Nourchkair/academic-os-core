@@ -746,7 +746,7 @@ def build_parser() -> argparse.ArgumentParser:
     assistant_run.add_argument("--course", dest="course_id", help="Optional exact course ID, code, or name")
     assistant_run.add_argument("--model", help="Optional Codex model override")
     assistant_run.add_argument("--proposal-mode", action="store_true", help="Let Codex create Review/Action proposals, never direct writes")
-    assistant_run.add_argument("--proposal-tool", action="append", choices=("propose_import", "propose_task", "propose_calendar"), dest="proposal_tools", help="Grant one exact proposal tool in proposal mode; may be repeated")
+    assistant_run.add_argument("--proposal-tool", action="append", choices=("propose_import", "propose_task", "propose_calendar", "propose_action"), dest="proposal_tools", help="Grant one exact proposal tool in proposal mode; may be repeated")
     assistant_run.add_argument("--json", action="store_true")
     assistant_propose_import = assistant_sub.add_parser("propose-import", help="Create a Review/Action proposal for one local file import")
     assistant_propose_import.add_argument("--source", required=True, help="Exact local source file")
@@ -790,7 +790,7 @@ def build_parser() -> argparse.ArgumentParser:
     semester.add_argument("--timezone", default="UTC")
     semester.add_argument("--json", action="store_true")
     review = sub.add_parser("review")
-    review.add_argument("action", choices=["list", "show", "approve", "reject", "resolve", "decide", "execute", "amend"], nargs="?", default="list")
+    review.add_argument("action", choices=["list", "show", "approve", "reject", "resolve", "decide", "execute", "amend", "advice"], nargs="?", default="list")
     review.add_argument("item_id", nargs="?")
     review.add_argument("decision", nargs="?", help="Typed decision such as use_new or choose_course:...")
     review.add_argument("--actor", choices=("user", "agent:mcp"), default="user", help="Audit attribution for a user-authorized review action")
@@ -927,7 +927,7 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_mode = mcp_serve.add_mutually_exclusive_group()
     mcp_mode.add_argument("--read-only", action="store_true", help="Expose read tools only; disable all write and proposal tools")
     mcp_mode.add_argument("--proposal-only", action="store_true", help="Expose read tools and exact approval proposals, but no direct writes")
-    mcp_serve.add_argument("--proposal-tool", action="append", choices=("propose_import", "propose_task", "propose_calendar"), dest="proposal_tools", help="Grant one exact proposal tool in proposal-only mode; may be repeated")
+    mcp_serve.add_argument("--proposal-tool", action="append", choices=("propose_import", "propose_task", "propose_calendar", "propose_action"), dest="proposal_tools", help="Grant one exact proposal tool in proposal-only mode; may be repeated")
     mcp_serve.add_argument("--semester", help="Limit read tools to one exact semester folder")
     mcp_serve.add_argument("--course", help="Limit read tools to one exact course ID, code, or name")
     connections = sub.add_parser("mcp-connections", help="Manage local external MCP connections and read-only tool grants")
@@ -1079,6 +1079,36 @@ def build_parser() -> argparse.ArgumentParser:
     add_study_parser(sub)
     dashboard_chat = sub.add_parser("chat", help=argparse.SUPPRESS)
     dashboard_chat.add_argument("--input-file", required=True)
+    actions_parser = sub.add_parser("actions", help=argparse.SUPPRESS)
+    actions_sub = actions_parser.add_subparsers(dest="actions_command", required=True)
+    actions_pending = actions_sub.add_parser("pending")
+    actions_pending.add_argument("--json", action="store_true")
+    actions_propose = actions_sub.add_parser("propose")
+    actions_propose.add_argument("--input-file", required=True)
+    actions_propose.add_argument("--json", action="store_true")
+    actions_execute = actions_sub.add_parser("execute")
+    actions_execute.add_argument("proposal_id")
+    actions_execute.add_argument("--json", action="store_true")
+    actions_discard = actions_sub.add_parser("discard")
+    actions_discard.add_argument("proposal_id")
+    actions_discard.add_argument("--json", action="store_true")
+    preflight_parser = sub.add_parser("import-preflight", help=argparse.SUPPRESS)
+    preflight_parser.add_argument("--destination", required=True)
+    preflight_parser.add_argument("--path", dest="paths", action="append", required=True)
+    preflight_parser.add_argument("--json", action="store_true")
+    sessions = sub.add_parser("sessions", help=argparse.SUPPRESS)
+    sessions_sub = sessions.add_subparsers(dest="sessions_command", required=True)
+    sessions_list = sessions_sub.add_parser("list", help="List saved agent conversations")
+    sessions_list.add_argument("--json", action="store_true")
+    sessions_load = sessions_sub.add_parser("load", help="Load one saved agent conversation")
+    sessions_load.add_argument("session_id")
+    sessions_load.add_argument("--json", action="store_true")
+    sessions_save = sessions_sub.add_parser("save", help="Save one agent conversation")
+    sessions_save.add_argument("--input-file", required=True)
+    sessions_save.add_argument("--json", action="store_true")
+    sessions_delete = sessions_sub.add_parser("delete", help="Delete one saved agent conversation")
+    sessions_delete.add_argument("session_id")
+    sessions_delete.add_argument("--json", action="store_true")
     chat_providers = sub.add_parser("chat-providers", help=argparse.SUPPRESS)
     native_chat = sub.add_parser("chat-stream", help=argparse.SUPPRESS)
     native_chat.add_argument("--input-file", required=True)
@@ -1126,7 +1156,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"process", "study", "chat", "chat-providers", "chat-stream", "chat-cancel", "account", "models", "connectors", "courses", "today", "tasks", "task", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard", "mcp-connections"}:
+        if args.command in {"process", "study", "chat", "chat-providers", "chat-stream", "chat-cancel", "account", "models", "connectors", "courses", "today", "tasks", "task", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard", "mcp-connections", "sessions", "actions", "import-preflight"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -1456,6 +1486,47 @@ def dispatch(args: argparse.Namespace) -> int:
         from .study.cli import dispatch as dispatch_study
         _emit(dispatch_study(args, _profile_path(args)), as_json=args.json)
         return 0
+    if args.command == "actions":
+        from .action_service import ActionService
+        service = ActionService(_profile_path(args))
+        if args.actions_command == "pending":
+            _emit({"actions": service.pending()}, as_json=True)
+            return 0
+        if args.actions_command == "propose":
+            payload = json.loads(Path(args.input_file).read_text(encoding="utf-8"))
+            _emit(service.propose(str(payload.get("action_type") or ""), payload.get("details") or {}, title=payload.get("title")), as_json=True)
+            return 0
+        if args.actions_command == "execute":
+            _emit(service.execute_inline(args.proposal_id), as_json=True)
+            return 0
+        _emit(service.discard(args.proposal_id), as_json=True)
+        return 0
+    if args.command == "import-preflight":
+        from .import_preflight import preflight
+        config = load_config(_profile_path(args))
+        _emit(preflight(args.paths, args.destination, Path(str(config["academic"]["root_directory"]))), as_json=True)
+        return 0
+    if args.command == "sessions":
+        from .agent_sessions import AgentSessionStore, AgentSessionError, summarize
+        config = load_config(_profile_path(args))
+        store = AgentSessionStore(runtime_directory(config) / "agent_sessions")
+        if args.sessions_command == "list":
+            _emit({"sessions": store.list()}, as_json=True)
+            return 0
+        if args.sessions_command == "load":
+            _emit({"session": store.load(args.session_id)}, as_json=True)
+            return 0
+        if args.sessions_command == "save":
+            payload = json.loads(Path(args.input_file).read_text(encoding="utf-8"))
+            session = payload.get("session") if isinstance(payload, dict) else None
+            if not isinstance(session, dict):
+                raise ValueError("sessions save needs a session object")
+            saved = store.save(session)
+            _emit({"session": summarize(saved)}, as_json=True)
+            return 0
+        store.delete(args.session_id)
+        _emit({"deleted": True}, as_json=True)
+        return 0
     if args.command == "chat-providers":
         from .dashboard_chat import providers
         _emit(providers(profile=_profile_path(args)), as_json=True)
@@ -1742,6 +1813,19 @@ def dispatch(args: argparse.Namespace) -> int:
                         lambda proposal: execute_task_change(proposal, workspace_root=Path(snapshot["academic_root"])),
                         actor=args.actor if args.actor != "user" else "system",
                     ))
+                elif action_type in {"file_move", "file_trash", "file_restore", "grade_record"}:
+                    from .action_catalog import ActionContext, execute_action
+                    context = ActionContext(
+                        workspace_root=Path(snapshot["academic_root"]),
+                        state_root=state_root,
+                        semester=str(config["academic"]["semester"]),
+                    )
+                    actor = args.actor if args.actor != "user" else "user"
+                    value = asdict(workflow.execute_approved(
+                        review_item.action_proposal_id,
+                        lambda proposal: execute_action(proposal, context, actor=actor),
+                        actor=args.actor if args.actor != "user" else "system",
+                    ))
                 elif action_type == "calendar_change":
                     from .connectors.google import GoogleConnector
                     from .connectors.google_actions import execute_calendar_change
@@ -1753,6 +1837,10 @@ def dispatch(args: argparse.Namespace) -> int:
                     ))
                 else:
                     raise ValueError(f"no supported executor for approved action type: {action_type}")
+            elif args.action == "advice":
+                from .review_advice import advise
+                _emit(advise(args.item_id, profile=_profile_path(args)), as_json=args.json)
+                return 0
             elif args.action == "amend":
                 from .assistant.tools.write import amend_task_proposal
                 fields: dict[str, Any] = {}

@@ -80,6 +80,30 @@ describe('APIModelProvidersCard', () => {
     expect(await screen.findByText('GPT Test')).toBeInTheDocument()
   })
 
+  it('filters the provider picker', async () => {
+    vi.mocked(api.modelConnections).mockResolvedValue({
+      ...empty,
+      catalog: [
+        ...catalog,
+        { id: 'xai', name: 'xAI (Grok)', kind: 'api', default_base_url: 'https://api.x.ai/v1', auth: 'bearer', models_path: '/models', docs: '' },
+        { id: 'opencode-zen', name: 'OpenCode Zen', kind: 'api', default_base_url: 'https://opencode.ai/zen/v1', auth: 'bearer', models_path: '/models', docs: '' },
+        { id: 'opencode-go', name: 'OpenCode Go', kind: 'api', default_base_url: 'https://opencode.ai/zen/go/v1', auth: 'bearer', models_path: '/models', docs: '' },
+      ],
+    })
+    render(<APIModelProvidersCard />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect a provider' }))
+    expect(await screen.findByRole('button', { name: 'Connect OpenAI' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Connect OpenCode Go' })).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Search providers'), { target: { value: 'grok' } })
+    expect(await screen.findByRole('button', { name: 'Connect xAI (Grok)' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Connect OpenAI' })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Search providers'), { target: { value: 'zzz' } })
+    expect(await screen.findByText(/No provider matches/)).toBeInTheDocument()
+  })
+
   it('saves per-task model routing', async () => {
     vi.mocked(api.modelConnections).mockResolvedValue(connected)
     vi.mocked(api.setModelPreferences).mockResolvedValue({

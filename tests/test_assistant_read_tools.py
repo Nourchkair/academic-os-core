@@ -36,9 +36,12 @@ def test_registry_advertises_only_read_tools_with_stable_versions() -> None:
         "review.attention",
         "activity.changes",
         "context.get",
+        "web.search",
     }
     assert all(tool["version"] == 1 for tool in tools)
-    assert all(tool["permission"] == "read_local" for tool in tools)
+    external = [tool for tool in tools if tool["permission"] != "read_local"]
+    assert [tool["name"] for tool in external] == ["web.search"]
+    assert external[0]["permission"] == "read_external"
     assert all(tool["side_effect"] == "none" for tool in tools)
     assert descriptor("library.get").disclosure.value == "hosted_model_eligible"
 

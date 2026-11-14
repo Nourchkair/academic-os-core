@@ -309,3 +309,28 @@ def test_cli_review_execute_runs_the_approved_import(tmp_path: Path) -> None:
     value = json.loads(result.stdout)
     assert value["status"] == "verified"
     assert (inbox / "lecture.md").is_file()
+
+
+def test_action_proposal_tool_requires_a_grant_and_creates_a_preview(tmp_path: Path) -> None:
+    from academia_os.assistant.contracts import ToolGrant
+    from academia_os.assistant.registry import invoke_granted
+    from academia_os.assistant.tools.read import ReadContext
+    from academia_os.actions import ActionStore
+    from academia_os.config import runtime_directory
+    from tests.test_agent_interface import prepared_workspace
+
+    config, root, _ = prepared_workspace(tmp_path)
+    context = ReadContext.create(config, semester="Fall 2026")
+    arguments = {"action_type": "semester_create", "details": {"semester": "Winter 2027"}}
+
+    with pytest.raises(Exception, match="not granted"):
+        invoke_granted("action.propose", arguments, context, grants=ToolGrant.none())
+
+    result = invoke_granted("action.propose", arguments, context, grants=ToolGrant(frozenset({"action.propose"})))
+    assert result.data["tier"] == "inline"
+    assert result.data["preview"]["changes"][0]["to"] == "Winter 2027"
+
+    store = ActionStore(runtime_directory(config) / "actions.json")
+    saved = store.get(result.data["proposal_id"])
+    assert saved.action_type == "semester_create"
+    assert not (root / "Winter 2027").exists()

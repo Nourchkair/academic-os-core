@@ -10,12 +10,14 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Mapping
+import uuid
+from typing import Any, Iterator, Mapping
 
 from .base import CancelToken, ProviderRequest, ProviderResponse, ProviderToolCall
 
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 DEFAULT_TIMEOUT = 180.0
+USER_AGENT = "AcademiaOS/1.0 (academic study assistant)"
 
 
 class ApiProviderError(RuntimeError):
@@ -40,7 +42,7 @@ def _post(url: str, headers: Mapping[str, str], body: Mapping[str, Any], *, time
         _safe_url(url),
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
         method="POST",
-        headers={"Content-Type": "application/json", "Accept": "application/json", **dict(headers)},
+        headers={"User-Agent": USER_AGENT, "Content-Type": "application/json", "Accept": "application/json", **dict(headers)},
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -121,12 +123,13 @@ def _openai_tools(request: ProviderRequest) -> list[dict[str, Any]]:
 
 
 class OpenAICompatibleProvider:
-    def __init__(self, *, provider_id: str, base_url: str, api_key: str, model: str, timeout: float = DEFAULT_TIMEOUT) -> None:
+    def __init__(self, *, provider_id: str, base_url: str, api_key: str, model: str, timeout: float = DEFAULT_TIMEOUT, session_id: str | None = None) -> None:
         self.id = f"api:{provider_id}"
         self.base_url = _safe_url(base_url)
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
+        self.session_id = session_id
 
     def capabilities(self) -> dict[str, Any]:
         return {"streaming": False, "tools": True, "images": True}
@@ -143,6 +146,8 @@ class OpenAICompatibleProvider:
             body["tools"] = tools
             body["tool_choice"] = "auto"
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        if self.id == "api:opencode-go":
+            headers["x-opencode-session"] = self.session_id or uuid.uuid4().hex
         value = _post(url, headers, body, timeout=self.timeout)
         choices = value.get("choices") if isinstance(value.get("choices"), list) else []
         if not choices or not isinstance(choices[0], dict):
@@ -170,6 +175,44 @@ class OpenAICompatibleProvider:
             finish_reason=str(choices[0].get("finish_reason") or "stop"),
             usage=value.get("usage") if isinstance(value.get("usage"), dict) else {},
         )
+
+
+
+    def stream(self, request: ProviderRequest, *, cancel: CancelToken | None = None) -> Iterator[tuple[str, str]]:
+        """Yield ("text" | "reasoning", chunk) tuples from an OpenAI-style stream."""
+
+        from .streaming import iter_sse_events, reasoning_delta, text_delta
+
+        url = f"{self.base_url}/chat/completions"
+        body: dict[str, Any] = {"model": self.model, "messages": _openai_messages(request), "stream": True}
+        tools = _openai_tools(request)
+        if tools:
+            body["tools"] = tools
+            body["tool_choice"] = "auto"
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        if self.id == "api:opencode-go":
+            headers["x-opencode-session"] = self.session_id or uuid.uuid4().hex
+        http_request = urllib.request.Request(
+            _safe_url(url),
+            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            method="POST",
+            headers={"User-Agent": USER_AGENT, "Content-Type": "application/json", "Accept": "text/event-stream", **headers},
+        )
+        try:
+            with urllib.request.urlopen(http_request, timeout=self.timeout) as response:
+                for event in iter_sse_events(response):
+                    if cancel is not None and cancel.cancelled:
+                        return
+                    reasoning = reasoning_delta(event)
+                    if reasoning:
+                        yield ("reasoning", reasoning)
+                    text = text_delta(event)
+                    if text:
+                        yield ("text", text)
+        except urllib.error.HTTPError as exc:
+            raise ApiProviderError(f"provider returned HTTP {exc.code}") from exc
+        except (OSError, urllib.error.URLError) as exc:
+            raise ApiProviderError(f"provider could not be reached: {exc}") from exc
 
 
 def _anthropic_messages(request: ProviderRequest) -> list[dict[str, Any]]:

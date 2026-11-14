@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { api } from './lib/api'
 import type { Course, ReviewItem, TaskProposalAmendment } from './types'
 
 type ReviewCardProps = {
@@ -10,6 +11,21 @@ type ReviewCardProps = {
 }
 
 export function ReviewCard({ item, courses, busy, onDecision, onAmend }: ReviewCardProps) {
+  const [advice, setAdvice] = useState<{ options: Array<{ decision: string; label: string; rationale: string }>; recommended: string; note: string } | null>(null)
+  const [adviceBusy, setAdviceBusy] = useState(false)
+  const [adviceError, setAdviceError] = useState('')
+  const askForAdvice = async () => {
+    setAdviceBusy(true)
+    setAdviceError('')
+    try {
+      const value = await api.reviewAdvice(item.id)
+      setAdvice({ options: value.options, recommended: value.recommended, note: value.note })
+    } catch (reason) {
+      setAdviceError(String(reason))
+    } finally {
+      setAdviceBusy(false)
+    }
+  }
   const details = item.details
   const content = (() => {
     switch (item.kind) {
@@ -28,6 +44,19 @@ export function ReviewCard({ item, courses, busy, onDecision, onAmend }: ReviewC
   return <article className="review-card">
     <div className="review-card-heading"><div><span className="review-kind">{labelForKind(item.kind)}</span><h3>{item.title}</h3><p>{item.course || 'Workspace'} · {item.priority} priority</p></div><span className="review-status">Needs your decision</span></div>
     {content}
+    {item.kind !== 'action_approval' && <div className="review-advice">
+      {!advice && <button type="button" className="secondary-button review-advice-trigger" disabled={adviceBusy || busy} onClick={() => void askForAdvice()}>{adviceBusy ? 'Thinking…' : 'Help me decide'}</button>}
+      {adviceError && <p className="setup-error" role="alert">{adviceError}</p>}
+      {advice && <div className="review-advice-panel">
+        <header><strong>Suggested options</strong><button type="button" className="quiet-button" onClick={() => setAdvice(null)}>Hide</button></header>
+        {advice.options.map((option) => <div className={`review-advice-option ${option.decision === advice.recommended ? 'recommended' : ''}`} key={option.decision}>
+          <div><strong>{option.label}</strong>{option.decision === advice.recommended && <span className="review-advice-badge">Recommended</span>}<p>{option.rationale}</p></div>
+          <button type="button" className="primary-button" disabled={busy} onClick={() => onDecision(option.decision)}>Apply</button>
+        </div>)}
+        {advice.note && <p className="review-advice-note">{advice.note}</p>}
+        <p className="review-advice-foot">Suggestions come from your configured model. You still decide.</p>
+      </div>}
+    </div>}
     <details className="advanced-details"><summary>Advanced details</summary><pre>{JSON.stringify(details, null, 2)}</pre></details>
   </article>
 }

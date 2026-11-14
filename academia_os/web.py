@@ -195,6 +195,7 @@ class DashboardServer:
         self.google_connector: Any | None = None
         self.notion_connector: Any | None = None
         self.model_manager: Any | None = None
+        self.agent_sessions: Any | None = None
         server_class = _DashboardHTTPServerV6 if ":" in self.host else _DashboardHTTPServer
         self._httpd = server_class((self.host, port), _DashboardRequestHandler)
         self.allowed_origins = _allowed_origins(self.host, self.port)
@@ -248,6 +249,13 @@ class DashboardServer:
             config = load_config(self.profile)
             self.notion_connector = NotionConnector(runtime_directory(config) / "notion_connector.json")
         return self.notion_connector
+
+    def get_agent_session_store(self) -> Any:
+        if self.agent_sessions is None:
+            from .agent_sessions import AgentSessionStore
+            config = load_config(self.profile)
+            self.agent_sessions = AgentSessionStore(runtime_directory(config) / "agent_sessions")
+        return self.agent_sessions
 
     def get_model_manager(self) -> Any:
         if self.model_manager is None:
@@ -419,6 +427,12 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 self._handle_file_preview(origin)
             elif self.request_path == "/api/v1/file":
                 self._handle_file(origin, head_only=False)
+            elif self.request_path == "/api/v1/actions/pending":
+                self._handle_actions(origin, "pending")
+            elif self.request_path == "/api/v1/agent/sessions":
+                self._handle_agent_sessions(origin, "list")
+            elif self.request_path == "/api/v1/agent/sessions/load":
+                self._handle_agent_sessions(origin, "load")
             elif self.request_path == "/api/v1/chat/providers":
                 self._handle_chat_providers(origin)
             elif self.request_path == "/api/v1/account":
@@ -473,6 +487,27 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             return
         if self.request_path == "/api/v1/chat/cancel":
             self._handle_chat_cancel(origin)
+            return
+        if self.request_path == "/api/v1/import/preflight":
+            self._handle_import_preflight(origin)
+            return
+        if self.request_path == "/api/v1/review/advice":
+            self._handle_review_advice(origin)
+            return
+        if self.request_path == "/api/v1/actions/propose":
+            self._handle_actions(origin, "propose")
+            return
+        if self.request_path == "/api/v1/actions/execute":
+            self._handle_actions(origin, "execute")
+            return
+        if self.request_path == "/api/v1/actions/discard":
+            self._handle_actions(origin, "discard")
+            return
+        if self.request_path == "/api/v1/agent/sessions/save":
+            self._handle_agent_sessions(origin, "save")
+            return
+        if self.request_path == "/api/v1/agent/sessions/delete":
+            self._handle_agent_sessions(origin, "delete")
             return
         if self.request_path == "/api/v1/account/login":
             self._handle_account_action(origin, "login")
@@ -706,6 +741,121 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
         except (OSError, subprocess.TimeoutExpired, ValueError):
             self._send_json(200, {"available": False, "models": [], "default_model": None,
                                   "provider": "Codex CLI using ChatGPT sign-in"}, cors_origin=origin)
+
+    def _handle_import_preflight(self, origin: str | None) -> None:
+        from .config import load_config
+        from .import_preflight import PreflightError, preflight
+
+        try:
+            body = self._small_json_body(maximum=512 * 1024)
+            paths = body.get("paths")
+            destination = body.get("destination")
+            if not isinstance(paths, list) or not paths or any(not isinstance(item, str) for item in paths):
+                raise DashboardRequestError(400, "InvalidImport", "paths must be a non-empty list of local file paths")
+            if not isinstance(destination, str) or not destination.strip():
+                raise DashboardRequestError(400, "InvalidImport", "destination is required")
+            config = load_config(self.dashboard.profile)
+            root = Path(str(config["academic"]["root_directory"]))
+            self._send_json(200, preflight(paths, destination, root), cors_origin=origin)
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except PreflightError as exc:
+            self._send_api_error(DashboardRequestError(422, "InvalidImport", str(exc)), cors_origin=origin)
+        except (OSError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(500, "ImportError", f"the selection could not be inspected: {exc}"), cors_origin=origin)
+
+    def _handle_review_advice(self, origin: str | None) -> None:
+        from .review_advice import ReviewAdviceError, advise
+
+        try:
+            body = self._small_json_body()
+            review_id = body.get("review_id")
+            if not isinstance(review_id, str) or not review_id.strip():
+                raise DashboardRequestError(400, "InvalidReview", "review_id is required")
+            self._send_json(200, advise(review_id, profile=self.dashboard.profile), cors_origin=origin)
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except KeyError:
+            self._send_api_error(DashboardRequestError(404, "NotFound", "that review item is not open"), cors_origin=origin)
+        except ReviewAdviceError as exc:
+            self._send_api_error(DashboardRequestError(422, "AdviceUnavailable", str(exc)), cors_origin=origin)
+        except (OSError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(500, "AdviceError", f"decision help failed: {exc}"), cors_origin=origin)
+
+    def _handle_actions(self, origin: str | None, action: str) -> None:
+        from .action_catalog import ActionFrameworkError
+        from .action_service import ActionService
+
+        try:
+            service = ActionService(self.dashboard.profile)
+            if action == "pending":
+                self._send_json(200, {"actions": service.pending()}, cors_origin=origin)
+                return
+            body = self._small_json_body(maximum=256 * 1024)
+            if action == "propose":
+                action_type = body.get("action_type")
+                details = body.get("details")
+                if not isinstance(action_type, str) or not isinstance(details, dict):
+                    raise DashboardRequestError(400, "InvalidAction", "action_type and details are required")
+                result = service.propose(action_type, details, title=body.get("title") if isinstance(body.get("title"), str) else None)
+                self._send_json(200, result, cors_origin=origin)
+                return
+            proposal_id = body.get("proposal_id")
+            if not isinstance(proposal_id, str) or not proposal_id:
+                raise DashboardRequestError(400, "InvalidAction", "proposal_id is required")
+            if action == "execute":
+                self._send_json(200, service.execute_inline(proposal_id), cors_origin=origin)
+                return
+            self._send_json(200, service.discard(proposal_id), cors_origin=origin)
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except PermissionError as exc:
+            self._send_api_error(DashboardRequestError(403, "ReviewRequired", str(exc)), cors_origin=origin)
+        except KeyError as exc:
+            self._send_api_error(DashboardRequestError(404, "NotFound", str(exc)), cors_origin=origin)
+        except (ActionFrameworkError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(422, "ActionError", str(exc)), cors_origin=origin)
+        except OSError as exc:
+            self._send_api_error(DashboardRequestError(500, "ActionError", f"the action could not be completed: {exc}"), cors_origin=origin)
+
+    def _handle_agent_sessions(self, origin: str | None, action: str) -> None:
+        from .agent_sessions import AgentSessionError, summarize
+
+        store = self.dashboard.get_agent_session_store()
+        try:
+            if action == "list":
+                self._send_json(200, {"sessions": store.list()}, cors_origin=origin)
+                return
+            if action == "load":
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query, keep_blank_values=True)
+                session_id = (query.get("id") or [""])[0]
+                self._send_json(200, {"session": store.load(session_id)}, cors_origin=origin)
+                return
+            if action == "save":
+                body = self._small_json_body(maximum=4 * 1024 * 1024)
+                session = body.get("session")
+                if not isinstance(session, dict):
+                    raise DashboardRequestError(400, "InvalidSession", "session is required")
+                saved = store.save(session)
+                self._send_json(200, {"session": summarize(saved)}, cors_origin=origin)
+                return
+            if action == "delete":
+                body = self._small_json_body()
+                session_id = body.get("id")
+                if not isinstance(session_id, str):
+                    raise DashboardRequestError(400, "InvalidSession", "session id is required")
+                store.delete(session_id)
+                self._send_json(200, {"deleted": True}, cors_origin=origin)
+                return
+            raise DashboardRequestError(404, "NotFound", "unknown session action")
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except FileNotFoundError:
+            self._send_api_error(DashboardRequestError(404, "NotFound", "that conversation is not saved"), cors_origin=origin)
+        except AgentSessionError as exc:
+            self._send_api_error(DashboardRequestError(400, "InvalidSession", str(exc)), cors_origin=origin)
+        except (OSError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(500, "SessionError", f"the conversation could not be saved: {exc}"), cors_origin=origin)
 
     def _handle_account(self, origin: str | None) -> None:
         try:

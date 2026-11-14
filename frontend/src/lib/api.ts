@@ -288,6 +288,28 @@ async function postJson<T>(path: string, body: Record<string, unknown>): Promise
   return readJsonResponse<T>(response)
 }
 
+export type PendingAction = {
+  proposal_id: string
+  action_type: string
+  title: string
+  tier: 'auto' | 'inline' | 'review'
+  review_id?: string | null
+  preview: {
+    title?: string
+    summary?: string
+    changes?: Array<{ label: string; from: string | null; to: string | null }>
+  } | null
+  created_at: string
+}
+
+export type ActionExecution = {
+  proposal_id: string
+  action_type: string
+  status: string
+  tier: string
+  verification: Record<string, unknown>
+}
+
 export const api = {
   study: <T>(args: string[]) => command<T>("study", args),
   chat: <T>(payload: Record<string, unknown>) => isTauriEnvironment() ? invoke<string>('academia_chat', { payload }).then((raw) => JSON.parse(raw) as T) : browserChat(payload) as Promise<T>,
@@ -298,6 +320,35 @@ export const api = {
   accountLoginCancel: () => isTauriEnvironment() ? nativeAccountLoginCancel() : fetch('/api/v1/account/login/cancel', { method: 'POST' }).then(readJsonResponse<AccountStatus>),
   accountLogout: () => isTauriEnvironment() ? nativeAccountCommand<AccountStatus>(['logout']) : fetch('/api/v1/account/logout', { method: 'POST' }).then(readJsonResponse<AccountStatus>),
   googleConnectorStatus: () => isTauriEnvironment() ? command<GoogleConnectorStatus>('connectors', ['google', 'status']) : fetch('/api/v1/connectors/google').then(readJsonResponse<GoogleConnectorStatus>),
+  importPreflight: (paths: string[], destination: string) => postJson<{
+    destination: string
+    files: Array<{
+      path: string
+      name: string
+      status: 'ready' | 'missing'
+      reason?: string
+      size?: number
+      extension?: string
+      extractable?: boolean
+      ocr_may_be_needed?: boolean
+      image?: boolean
+      duplicate?: { name: string; path: string; identical: boolean; same_name: boolean } | null
+    }>
+    ready: number
+    duplicates: number
+  }>('/api/v1/import/preflight', { paths, destination }),
+  importPreflightDesktop: (paths: string[], destination: string) => command<{ files: Array<{ path: string; name: string; status: 'ready' | 'missing'; reason?: string; size?: number; extension?: string; extractable?: boolean; ocr_may_be_needed?: boolean; duplicate?: { name: string; path: string; identical: boolean; same_name: boolean } | null }>; ready: number; duplicates: number }>('import-preflight', ['--destination', destination, ...paths.flatMap((path) => ['--path', path]), '--json']),
+  reviewAdvice: (reviewId: string) => isTauriEnvironment() ? command<{ review_id: string; kind: string; options: Array<{ decision: string; label: string; rationale: string }>; recommended: string; note: string; model: string }>('review', ['advice', reviewId, '--json']) : postJson<{
+    review_id: string
+    kind: string
+    options: Array<{ decision: string; label: string; rationale: string }>
+    recommended: string
+    note: string
+    model: string
+  }>('/api/v1/review/advice', { review_id: reviewId }),
+  actionPending: () => isTauriEnvironment() ? command<{ actions: PendingAction[] }>('actions', ['pending', '--json']) : fetch('/api/v1/actions/pending').then(readJsonResponse<{ actions: PendingAction[] }>),
+  actionExecute: (proposalId: string) => isTauriEnvironment() ? command<ActionExecution>('actions', ['execute', proposalId, '--json']) : postJson<ActionExecution>('/api/v1/actions/execute', { proposal_id: proposalId }),
+  actionDiscard: (proposalId: string) => isTauriEnvironment() ? command<{ proposal_id: string; discarded: boolean }>('actions', ['discard', proposalId, '--json']) : postJson<{ proposal_id: string; discarded: boolean }>('/api/v1/actions/discard', { proposal_id: proposalId }),
   modelConnections: () => isTauriEnvironment() ? command<ModelConnectionsPayload>('models', ['list']) : fetch('/api/v1/models').then(readJsonResponse<ModelConnectionsPayload>),
   notionStatus: () => isTauriEnvironment() ? command<NotionStatus>('connectors', ['notion', 'status']) : fetch('/api/v1/connectors/notion').then(readJsonResponse<NotionStatus>),
   connectNotion: (token: string) => isTauriEnvironment() ? invoke<string>('academia_notion_setup', { payload: { token } }).then((raw) => JSON.parse(raw) as NotionStatus) : postJson<NotionStatus>('/api/v1/connectors/notion/setup', { token }),

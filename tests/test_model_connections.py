@@ -127,3 +127,53 @@ def test_bad_key_fails_closed_and_does_not_persist(tmp_path: Path) -> None:
         assert credentials.values == {}
     finally:
         server.close()
+
+
+def test_catalog_lists_added_api_providers(tmp_path: Path) -> None:
+    manager = ModelConnectionManager(tmp_path / "model_connections.json", credentials=MemoryCredentials())  # type: ignore[arg-type]
+    catalog = {entry["id"]: entry for entry in manager.catalog()}
+    for provider_id in ("xai", "opencode-zen", "opencode-go", "together", "cerebras", "moonshot", "zai"):
+        assert provider_id in catalog
+        assert catalog[provider_id]["kind"] == "api"
+        assert catalog[provider_id]["default_base_url"].startswith("https://")
+    assert catalog["xai"]["default_base_url"] == "https://api.x.ai/v1"
+    assert catalog["opencode-zen"]["default_base_url"] == "https://opencode.ai/zen/v1"
+    assert catalog["opencode-go"]["default_base_url"] == "https://opencode.ai/zen/go/v1"
+
+
+def test_zen_models_exclude_other_protocols() -> None:
+    from academia_os.model_connections import _normalize_models
+
+    payload = {
+        "data": [
+            {"id": "glm-5", "name": "GLM 5", "type": "chat", "api": {"chat-completions": {"base_url": "https://opencode.ai/zen/v1"}}},
+            {"id": "gpt-5.2", "name": "GPT 5.2", "type": "chat", "api": {"responses": {"base_url": "https://opencode.ai/zen/v1/responses"}}},
+            {"id": "claude-opus-4-6", "name": "Claude Opus 4.6", "type": "chat", "api": {"messages": {"base_url": "https://opencode.ai/zen/v1/messages"}}},
+            {"id": "gemini-3-pro", "name": "Gemini 3 Pro", "type": "chat", "api": {"google": {"base_url": "https://opencode.ai/zen/v1/models/gemini-3-pro"}}},
+            {"id": "text-embedding-3", "name": "Embedding", "type": "embedding", "api": {}},
+            {"id": "kimi-k2.5", "name": "Kimi K2.5", "type": "chat", "api": {"chat-completions": {"base_url": "https://opencode.ai/zen/v1"}}},
+        ]
+    }
+    models = _normalize_models("opencode-zen", payload)
+    assert [item["id"] for item in models] == ["glm-5", "kimi-k2.5"]
+
+
+def test_opencode_go_keeps_translated_models_and_sends_session_header() -> None:
+    from academia_os.model_connections import _normalize_models, _opencode_headers
+
+    payload = {
+        "data": [
+            {"id": "glm-5.3", "name": "GLM 5.3", "type": "chat", "api": {"chat-completions": {}}},
+            {"id": "grok-4.7", "name": "Grok 4.7", "type": "chat", "api": {"responses": {}}},
+            {"id": "claude-haiku-5-5", "name": "Claude Haiku 5.5", "type": "chat", "api": {"messages": {}}},
+            {"id": "embed-1", "name": "Embedding", "type": "embedding", "api": {}},
+        ]
+    }
+    assert [item["id"] for item in _normalize_models("opencode-go", payload)] == [
+        "claude-haiku-5-5",
+        "glm-5.3",
+        "grok-4.7",
+    ]
+    assert _opencode_headers("opencode-go", "abc") == {"x-opencode-session": "abc"}
+    assert _opencode_headers("opencode-zen") == {}
+    assert _opencode_headers("openai") == {}

@@ -12,6 +12,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -20,6 +21,7 @@ KEYCHAIN_SERVICE = "academia-os-model-credentials"
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MODEL_LIMIT = 500
 ROLES = ("default", "fast", "deep", "vision", "image")
+USER_AGENT = "AcademiaOS/1.0 (academic study assistant)"
 
 CATALOG: tuple[dict[str, Any], ...] = (
     {
@@ -86,6 +88,69 @@ CATALOG: tuple[dict[str, Any], ...] = (
         "docs": "Create an API key in the Mistral console.",
     },
     {
+        "id": "xai",
+        "name": "xAI (Grok)",
+        "kind": "api",
+        "default_base_url": "https://api.x.ai/v1",
+        "auth": "bearer",
+        "models_path": "/models",
+        "docs": "Create an API key at console.x.ai.",
+    },
+    {
+        "id": "opencode-zen",
+        "name": "OpenCode Zen",
+        "kind": "api",
+        "default_base_url": "https://opencode.ai/zen/v1",
+        "auth": "bearer",
+        "models_path": "/models",
+        "docs": "One key for many models, billed by OpenCode. Only chat-compatible models are listed.",
+    },
+    {
+        "id": "opencode-go",
+        "name": "OpenCode Go",
+        "kind": "api",
+        "default_base_url": "https://opencode.ai/zen/go/v1",
+        "auth": "bearer",
+        "models_path": "/models",
+        "docs": "Subscription key from the OpenCode console. Academia identifies itself and sends the required session header.",
+    },
+    {
+        "id": "together",
+        "name": "Together AI",
+        "kind": "api",
+        "default_base_url": "https://api.together.xyz/v1",
+        "auth": "bearer",
+        "models_path": "/models",
+        "docs": "Create an API key in the Together dashboard.",
+    },
+    {
+        "id": "cerebras",
+        "name": "Cerebras",
+        "kind": "api",
+        "default_base_url": "https://api.cerebras.ai/v1",
+        "auth": "bearer",
+        "models_path": "/models",
+        "docs": "Create an API key in cloud.cerebras.ai.",
+    },
+    {
+        "id": "moonshot",
+        "name": "Moonshot (Kimi)",
+        "kind": "api",
+        "default_base_url": "https://api.moonshot.ai/v1",
+        "auth": "bearer",
+        "models_path": "/models",
+        "docs": "Create an API key at platform.moonshot.ai.",
+    },
+    {
+        "id": "zai",
+        "name": "Z.ai (GLM)",
+        "kind": "api",
+        "default_base_url": "https://api.z.ai/api/paas/v4",
+        "auth": "bearer",
+        "models_path": "/models",
+        "docs": "Create an API key in the Z.ai console.",
+    },
+    {
         "id": "ollama",
         "name": "Ollama (local)",
         "kind": "local",
@@ -144,7 +209,7 @@ def _safe_url(value: str) -> str:
 
 
 def _http(url: str, *, headers: Mapping[str, str], timeout: float = 20.0) -> tuple[int, dict[str, str], bytes]:
-    request = urllib.request.Request(_safe_url(url), method="GET", headers=dict(headers))
+    request = urllib.request.Request(_safe_url(url), method="GET", headers={"User-Agent": USER_AGENT, **dict(headers)})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = response.read(MAX_RESPONSE_BYTES + 1)
@@ -187,6 +252,31 @@ def _model_capabilities(provider_id: str, raw: Mapping[str, Any]) -> list[str]:
     return capabilities
 
 
+def _zen_chat_model(raw: Mapping[str, Any]) -> bool:
+    """Keep only OpenCode Zen models served over OpenAI-compatible chat.
+
+    Zen lists GPT, Claude, and Gemini models that require the Responses or
+    Messages protocols. This client speaks chat completions, so those entries
+    are omitted instead of failing at request time.
+    """
+
+    kind = raw.get("type")
+    if isinstance(kind, str) and kind != "chat":
+        return False
+    api = raw.get("api")
+    if isinstance(api, dict) and "chat-completions" not in api:
+        return False
+    return True
+
+
+def _opencode_headers(provider_id: str, session_id: str | None = None) -> dict[str, str]:
+    """OpenCode Go requires an identifying session header on each request."""
+
+    if provider_id != "opencode-go":
+        return {}
+    return {"x-opencode-session": session_id or uuid.uuid4().hex}
+
+
 def _normalize_models(provider_id: str, value: Mapping[str, Any]) -> list[dict[str, Any]]:
     raw_items: list[Any]
     if provider_id == "ollama":
@@ -200,6 +290,12 @@ def _normalize_models(provider_id: str, value: Mapping[str, Any]) -> list[dict[s
     for raw in raw_items:
         if not isinstance(raw, dict):
             continue
+        if provider_id == "opencode-zen" and not _zen_chat_model(raw):
+            continue
+        if provider_id == "opencode-go":
+            kind = raw.get("type")
+            if isinstance(kind, str) and kind != "chat":
+                continue
         if provider_id == "gemini":
             model_id = raw.get("name")
             if isinstance(model_id, str) and model_id.startswith("models/"):
@@ -241,6 +337,7 @@ def _fetch_models(provider: Mapping[str, Any], base_url: str, api_key: str) -> l
         headers["anthropic-version"] = "2023-06-01"
     elif auth == "x-goog-api-key":
         headers["x-goog-api-key"] = api_key
+    headers.update(_opencode_headers(str(provider["id"])))
     value = _request(url, headers)
     models = _normalize_models(str(provider["id"]), value)
     if not models:

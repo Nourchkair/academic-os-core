@@ -16,7 +16,6 @@ import type { ActivityEvent, Course, CourseworkHistoryRecord, CourseworkKind, Li
 const nav = [
   { id: 'home', label: 'Home', icon: '⌂' },
   { id: 'review', label: 'Review', icon: '⚖' },
-  { id: 'chat', label: 'Study chat', icon: 'study-chat' },
   { id: 'tasks', label: 'Tasks', icon: '✓' },
   { id: 'activity', label: 'Activity', icon: '◷' },
 ] as const
@@ -169,6 +168,8 @@ function App() {
   const [booting, setBooting] = useState(!cachedStartup)
   const [migrationBusy, setMigrationBusy] = useState(false)
   const [actionMode, setActionMode] = useState<ActionMode | null>(null)
+  const [droppedFiles, setDroppedFiles] = useState<File[]>([])
+  const [dropSequence, setDropSequence] = useState(0)
   const [actionCourseId, setActionCourseId] = useState<string | undefined>()
   const [courseOpenRequest, setCourseOpenRequest] = useState<{ id: string; courseId: string } | null>(null)
   const chatNavRef = useRef<HTMLDetailsElement>(null)
@@ -310,8 +311,11 @@ function App() {
     } catch (reason) {
       if (sequence !== refreshSequence.current) return
       if (allowDuringMigration) throw reason
+      // A failed read is not proof that setup is missing. Only the explicit
+      // workspace checks above may start onboarding; anything else is a
+      // transient local error the student can retry.
       if (reason instanceof BridgeUnavailableError) setError(reason.message)
-      else await beginOnboarding()
+      else setError(`Academia could not read its local workspace state. Retry in a moment. ${reason instanceof Error ? reason.message : String(reason)}`)
     } finally {
       if (sequence === refreshSequence.current) {
         setBooting(false)
@@ -475,9 +479,23 @@ function App() {
   }
   const semesters = status ? Array.from(new Set([status.workspace.semester, ...status.workspace.available_semesters])) : []
   const openActionPanel = (mode: ActionMode, courseId?: string) => { setActionMode(mode); setActionCourseId(courseId); setError(null) }
-  const closeActionPanel = () => { if (!migrationBusy) setActionMode(null) }
+  const closeActionPanel = () => { if (!migrationBusy) { setActionMode(null); setDroppedFiles([]) } }
 
-  return <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'chat' ? 'chat-mode' : ''}`}>
+  const handleGlobalDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (view === 'chat') return
+    const files = Array.from(event.dataTransfer?.files ?? [])
+    if (!files.length) return
+    event.preventDefault()
+    setDroppedFiles(files)
+    setDropSequence((value) => value + 1)
+    setActionMode('import')
+  }
+
+  return <div
+    className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'chat' ? 'chat-mode' : ''}`}
+    onDragOver={(event) => { if (event.dataTransfer?.types.includes('Files')) event.preventDefault() }}
+    onDrop={handleGlobalDrop}
+  >
     {view !== 'chat' && <aside className="sidebar" aria-label="Application sidebar">
       <div className="sidebar-heading">
         <button className="brand" onClick={() => {
@@ -496,7 +514,7 @@ function App() {
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M9 4.5v15M15 9l-3 3 3 3" /></svg>
         </button>}
       </div>
-      <nav aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={`nav-item ${view === item.id || (item.id === 'home' && view === 'courses') ? 'active' : ''}`} onClick={() => navigate(item.id)} disabled={migrationBusy} data-tooltip={sidebarCollapsed ? item.label : undefined} data-tooltip-side={sidebarCollapsed ? 'right' : undefined}><span className="nav-icon">{item.id === 'chat' ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.2a8 8 0 0 1-8 8H5l1.4-3.1A8 8 0 1 1 20 11.2Z" /><path d="M8.5 9.5h7m-7 3h5" /></svg> : item.icon}</span><span className="nav-label">{item.label}</span></button>)}</nav>
+      <nav aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={`nav-item ${view === item.id || (item.id === 'home' && view === 'courses') ? 'active' : ''}`} onClick={() => navigate(item.id)} disabled={migrationBusy} data-tooltip={sidebarCollapsed ? item.label : undefined} data-tooltip-side={sidebarCollapsed ? 'right' : undefined}><span className="nav-icon">{item.icon}</span><span className="nav-label">{item.label}</span></button>)}</nav>
       <div className="sidebar-bottom">
         <button className={`profile-button ${view === 'settings' ? 'active' : ''}`} onClick={() => navigate('settings')} disabled={migrationBusy} aria-label="Open profile and settings" data-tooltip="Settings" data-tooltip-side="right">
           <span className="profile-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.2" /><path d="M5.5 19c.6-3.1 2.9-4.8 6.5-4.8s5.9 1.7 6.5 4.8" /></svg></span>
@@ -506,17 +524,21 @@ function App() {
       </div>
     </aside>}
     <main className="main-content">
-      {view === 'chat' && <header className="topbar topbar-study-chat"><details className="chat-nav-dropdown" ref={chatNavRef}><summary aria-label="Open navigation menu"><span aria-hidden="true">☰</span><strong>Menu</strong><span className="chat-menu-caret" aria-hidden="true">⌄</span></summary><div className="chat-nav-menu" role="menu" aria-label="Main navigation">{chatMenuItems.map((item) => <button key={item.view} role="menuitem" data-tooltip={item.label} data-tooltip-side="right" onClick={() => setView(item.view)}><span aria-hidden="true">{item.icon}</span>{item.label}</button>)}</div></details></header>}
+      
+      {view !== 'chat' && <div className="top-actions-pills">
+        <button className="top-pill" type="button" onClick={() => { setDroppedFiles([]); setActionMode('import') }} disabled={migrationBusy} aria-label="Import material"><span aria-hidden="true">＋</span><span>Import</span></button>
+        <button className="top-pill top-pill-agent" type="button" onClick={() => navigate('chat')} disabled={migrationBusy} aria-label="Open Agent"><span aria-hidden="true">✦</span><span>Open Agent</span></button>
+      </div>}
       {error && <p className="dashboard-inline-error" role="alert">{error}</p>}
       {view === 'home' && <HomeView status={status} courses={courses} tasks={tasks} activity={activity} inbox={inbox} semester={selectedSemester || status?.workspace.semester || ''} semesters={semesters} loading={semesterLoading} onSemesterChange={changeSemester} onOpenCourse={openCourse} onOpenIntake={() => openActionPanel('import')} onNavigate={navigate} />}
       {view === 'review' && <ReviewView items={reviews} courses={courses} activity={activity} busy={reviewBusy} error={reviewError} focusId={reviewFocusId} onFocusConsumed={() => setReviewFocusId(null)} onDecision={decideReview} onExecute={executeReview} onAmend={amendReview} />}
       {view === 'courses' && <CoursesView semesters={semesters} semester={selectedSemester || status?.workspace.semester || ''} courses={courses} items={libraryItems} inbox={inbox} loading={semesterLoading} onSemesterChange={changeSemester} onOpenActions={openActionPanel} onHistoryChanged={() => refresh()} studyResumeRequest={studyResumeRequest} onStudyResumeConsumed={clearStudyResumeRequest} onOpenStudyConversation={openStudyConversation} onStartStudyChat={startStudyChat} courseOpenRequest={courseOpenRequest} onCourseOpenConsumed={clearCourseOpenRequest} onBackHome={() => setView('home')} />}
-      <div className={`chat-route-shell ${view === 'chat' ? 'active' : ''}`} aria-hidden={view !== 'chat'}><DashboardChat courses={courses} items={libraryItems} semester={selectedSemester || status?.workspace.semester || ''} onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} onProposalCreated={() => void refreshReviews()} reviewRevision={reviewRevision} onResumeStudySession={resumeStudySession} studyChatRequest={studyChatRequest} onStudyChatRequestConsumed={clearStudyChatRequest} /></div>
+      <div className={`chat-route-shell ${view === 'chat' ? 'active' : ''}`} aria-hidden={view !== 'chat'}><DashboardChat courses={courses} items={libraryItems} semester={selectedSemester || status?.workspace.semester || ''} activity={activity}  onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} onProposalCreated={() => void refreshReviews()} reviewRevision={reviewRevision} onResumeStudySession={resumeStudySession} studyChatRequest={studyChatRequest} onStudyChatRequestConsumed={clearStudyChatRequest} onGoHome={() => setView('home')} /></div>
       {view === 'tasks' && <Tasks tasks={tasks} courses={courses} semester={selectedSemester || status?.workspace.semester || ''} timezone={status?.workspace.timezone} stateError={taskStateError} onNavigate={navigate} onChanged={() => refresh()} />}
       {view === 'activity' && <ActivityView activity={activity} processing={inbox} onNavigate={navigate} />}
       {view === 'settings' && status && <SettingsView status={status} onSaved={() => refresh()} onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} />}
     </main>
-    {actionMode && status && <ActionPanel key={`${actionMode}:${actionCourseId || 'general'}`} mode={actionMode} status={status} courses={courses} semester={selectedSemester || status.workspace.semester} initialCourseId={actionCourseId} onModeChange={setActionMode} onClose={closeActionPanel} onImported={async () => { await refresh(true) }} onMigrated={async () => { await refresh(true) }} onBusyChange={setMigrationBusy} />}
+    {actionMode && status && <ActionPanel key={`${actionMode}:${actionCourseId || 'general'}:${dropSequence}`} mode={actionMode} status={status} courses={courses} semester={selectedSemester || status.workspace.semester} initialCourseId={actionCourseId} initialFiles={droppedFiles} onModeChange={setActionMode} onClose={closeActionPanel} onImported={async () => { await refresh(true) }} onMigrated={async () => { await refresh(true) }} onBusyChange={setMigrationBusy} />}
     <AppTooltipLayer />
   </div>
 }

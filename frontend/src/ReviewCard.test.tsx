@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ReviewCard } from './ReviewCard'
+import { api } from './lib/api'
 import type { Course, ReviewItem } from './types'
+
+vi.mock('./lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./lib/api')>()
+  return { ...actual, api: { ...actual.api, reviewAdvice: vi.fn() } }
+})
 
 const item: ReviewItem = {
   id: 'review-1',
@@ -127,5 +133,33 @@ describe('ReviewCard', () => {
       due_date: '2026-10-01',
       due_time: '09:00',
     })
+  })
+})
+
+describe('ReviewCard decision help', () => {
+  it('renders suggested options and applies the chosen decision', async () => {
+    vi.mocked(api.reviewAdvice).mockResolvedValue({
+      review_id: 'review-1',
+      kind: 'deadline_conflict',
+      options: [
+        { decision: 'keep_current', label: 'Keep the saved due date', rationale: 'Matches the original syllabus.' },
+        { decision: 'use_new', label: 'Use the updated due date', rationale: 'The addendum moves it.' },
+      ],
+      recommended: 'keep_current',
+      note: 'Confirm with the instructor if unsure.',
+      model: 'test-model',
+    })
+    const onDecision = vi.fn().mockResolvedValue(undefined)
+    render(<ReviewCard item={item} courses={[]} busy={false} onDecision={onDecision} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Help me decide' }))
+    await waitFor(() => expect(api.reviewAdvice).toHaveBeenCalledWith('review-1'))
+    expect(await screen.findByText('Keep the saved due date')).toBeInTheDocument()
+    expect(screen.getByText('Recommended')).toBeInTheDocument()
+    expect(screen.getByText('Confirm with the instructor if unsure.')).toBeInTheDocument()
+
+    const applyButtons = screen.getAllByRole('button', { name: 'Apply' })
+    fireEvent.click(applyButtons[1])
+    expect(onDecision).toHaveBeenCalledWith('use_new')
   })
 })

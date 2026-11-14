@@ -18,6 +18,7 @@ export function APIModelProvidersCard() {
   const [account, setAccount] = useState<AccountStatus | null>(null)
   const [showChatGPT, setShowChatGPT] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [query, setQuery] = useState('')
   const [selectedProvider, setSelectedProvider] = useState<ModelProviderCatalogEntry | null>(null)
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
@@ -49,8 +50,16 @@ export function APIModelProvidersCard() {
 
   const catalog = payload?.catalog ?? []
   const providers = payload?.providers ?? []
-  const apiRows = catalog.filter((entry) => entry.kind === 'api' && entry.id !== 'custom')
+  const apiRows = catalog.filter((entry) => entry.kind === 'api' && entry.id !== 'custom' && entry.id !== 'opencode-go')
+  const goEntry = catalog.find((entry) => entry.id === 'opencode-go') ?? null
   const localRows = catalog.filter((entry) => entry.kind === 'local')
+  const search = query.trim().toLowerCase()
+  const matches = (entry: ModelProviderCatalogEntry) => !search || entry.name.toLowerCase().includes(search)
+  const visibleApiRows = apiRows.filter(matches)
+  const visibleLocalRows = localRows.filter(matches)
+  const showChatGPTPicker = !search || 'chatgpt subscription'.includes(search)
+  const showGoPicker = Boolean(goEntry) && (!search || 'opencode go subscription'.includes(search))
+  const showCustomPicker = !search || 'custom openai-compatible'.includes(search)
   const modelOptions = useMemo(() => providers
     .filter((provider) => provider.enabled && provider.status === 'connected')
     .flatMap((provider) => provider.models.map((model) => ({ value: `${provider.id}/${model.id}`, label: `${provider.name} · ${model.name}` }))), [providers])
@@ -172,11 +181,13 @@ export function APIModelProvidersCard() {
 
     {pickerOpen && <div className="connection-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPickerOpen(false) }}>
       <section className="connection-dialog" role="dialog" aria-modal="true" aria-labelledby="provider-picker-title">
-        <header><div><h3 id="provider-picker-title">Connect a provider</h3><p>Choose a provider to add.</p></div><button type="button" className="quiet-button" onClick={() => setPickerOpen(false)} aria-label="Close provider picker">×</button></header>
-        <div className="provider-picker-group"><span>Subscription</span><button type="button" className="provider-picker-row" aria-label="Connect ChatGPT" onClick={() => { setShowChatGPT(true); setPickerOpen(false) }}><span className="provider-mark">◎</span><span><strong>ChatGPT</strong><small>Subscription</small></span></button></div>
-        <div className="provider-picker-group"><span>API</span>{apiRows.map((entry) => <button type="button" className="provider-picker-row" aria-label={`Connect ${entry.name}`} key={entry.id} onClick={() => chooseProvider(entry)}><span className="provider-mark">{entry.name.slice(0, 1)}</span><span><strong>{entry.name}</strong><small>API key</small></span></button>)}</div>
-        <div className="provider-picker-group"><span>Local</span>{localRows.map((entry) => <button type="button" className="provider-picker-row" aria-label={`Connect ${entry.name}`} key={entry.id} onClick={() => chooseProvider(entry)}><span className="provider-mark">{entry.name.slice(0, 1)}</span><span><strong>{entry.name}</strong><small>No API key</small></span></button>)}</div>
-        <button type="button" className="provider-picker-row custom" onClick={() => { const custom = catalog.find((entry) => entry.id === 'custom'); if (custom) chooseProvider(custom) }}><span className="provider-plus">＋</span><span><strong>Add custom provider</strong><small>OpenAI-compatible endpoint</small></span></button>
+        <header><div><h3 id="provider-picker-title">Connect a provider</h3><p>Choose a provider to add.</p></div><button type="button" className="quiet-button" onClick={() => { setPickerOpen(false); setQuery('') }} aria-label="Close provider picker">×</button></header>
+        <input className="provider-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search providers" aria-label="Search providers" autoFocus />
+        {showChatGPTPicker && <div className="provider-picker-group"><span>Subscription</span><button type="button" className="provider-picker-row" aria-label="Connect ChatGPT" onClick={() => { setShowChatGPT(true); setPickerOpen(false); setQuery('') }}><span className="provider-mark">◎</span><span><strong>ChatGPT</strong><small>Subscription</small></span></button>{showGoPicker && goEntry && <button type="button" className="provider-picker-row" aria-label="Connect OpenCode Go" onClick={() => chooseProvider(goEntry)}><span className="provider-mark">O</span><span><strong>OpenCode Go</strong><small>Subscription · API key</small></span></button>}</div>}
+        {visibleApiRows.length > 0 && <div className="provider-picker-group"><span>API</span>{visibleApiRows.map((entry) => <button type="button" className="provider-picker-row" aria-label={`Connect ${entry.name}`} key={entry.id} onClick={() => chooseProvider(entry)}><span className="provider-mark">{entry.name.slice(0, 1)}</span><span><strong>{entry.name}</strong><small>API key</small></span></button>)}</div>}
+        {visibleLocalRows.length > 0 && <div className="provider-picker-group"><span>Local</span>{visibleLocalRows.map((entry) => <button type="button" className="provider-picker-row" aria-label={`Connect ${entry.name}`} key={entry.id} onClick={() => chooseProvider(entry)}><span className="provider-mark">{entry.name.slice(0, 1)}</span><span><strong>{entry.name}</strong><small>No API key</small></span></button>)}</div>}
+        {showCustomPicker && <button type="button" className="provider-picker-row custom" onClick={() => { const custom = catalog.find((entry) => entry.id === 'custom'); if (custom) chooseProvider(custom) }}><span className="provider-plus">＋</span><span><strong>Add custom provider</strong><small>OpenAI-compatible endpoint</small></span></button>}
+        {!showChatGPTPicker && !showGoPicker && !visibleApiRows.length && !visibleLocalRows.length && !showCustomPicker && <p className="provider-picker-empty">No provider matches “{query.trim()}”. Add it as a custom OpenAI-compatible endpoint instead.</p>}
       </section>
     </div>}
 

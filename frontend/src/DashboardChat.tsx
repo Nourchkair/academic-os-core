@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import { api, ChatCancelledError, type ChatStreamEvent } from './lib/api'
+import { api, ChatCancelledError, type ChatStreamEvent, type PendingAction } from './lib/api'
 import { ChatProposals } from './ChatProposals'
-import { deleteChatConversation, listChatConversations, saveChatConversation, stripChatAttachmentPreviews, type ChatConversation, type ChatMessage, type ChatProposal, type StudyChatRequest } from './lib/chat-history'
+import { deleteChatConversation, listChatConversations, loadChatConversation, saveChatConversation, stripChatAttachmentPreviews, type ChatConversation, type ChatConversationSummary, type ChatMessage, type ChatProposal, type ChatTraceStep, type StudyChatRequest } from './lib/chat-history'
 import { ChatStudyStudio, type ChatStudyRequest, type ModeId } from './ChatStudyStudio'
-import type { Course, CourseworkHistoryRecord, LibraryItem, ReviewItem, Task } from './types'
+import type { ActivityEvent, Course, CourseworkHistoryRecord, LibraryItem, ReviewItem, Task } from './types'
 import 'katex/dist/katex.min.css'
 import './dashboard-chat.css'
 
@@ -36,7 +36,7 @@ type ChatProviders = {
   codex?: { installed: boolean; effective_model?: string | null; models?: { id: string; name: string }[]; notice?: string | null }
 }
 type Attachment = { name: string; type: string; data: string; preview: string; size: number }
-type ChatResult = { message: string; model: string | null; effort: string; speed: string; notice: string | null; proposal_mode?: boolean; proposals?: ChatProposal[] }
+type ChatResult = { message: string; model: string | null; effort: string; speed: string; notice: string | null; proposal_mode?: boolean; proposals?: ChatProposal[]; trace?: ChatTraceStep[] }
 type StreamProgress = { id: string; tool: string; label: string; state: 'running' | 'done' }
 type StreamState = { content: string; progress: StreamProgress[]; proposals: ChatProposal[] }
 type StudySourceContext = {
@@ -221,7 +221,7 @@ function proposalStatusLabel(item: ReviewItem) {
   return 'Waiting for your review'
 }
 
-export function DashboardChat({ courses, items, semester, onOpenReview, onProposalCreated, reviewRevision, onResumeStudySession, studyChatRequest, onStudyChatRequestConsumed }: { courses: Course[]; items: LibraryItem[]; semester: string; onOpenReview: (reviewId: string) => void; onProposalCreated: () => void; reviewRevision: number; onResumeStudySession: (courseId: string, sessionId: string) => void; studyChatRequest: StudyChatRequest | null; onStudyChatRequestConsumed: () => void }) {
+export function DashboardChat({ courses, items, semester, activity, onOpenReview, onProposalCreated, reviewRevision, onResumeStudySession, studyChatRequest, onStudyChatRequestConsumed, onGoHome }: { courses: Course[]; items: LibraryItem[]; semester: string; activity: ActivityEvent[]; onOpenReview: (reviewId: string) => void; onProposalCreated: () => void; reviewRevision: number; onResumeStudySession: (courseId: string, sessionId: string) => void; studyChatRequest: StudyChatRequest | null; onStudyChatRequestConsumed: () => void; onGoHome: () => void }) {
   const [providers, setProviders] = useState<ChatProviders | null>(null)
   const [provider, setProvider] = useState(() => localStorage.getItem('academia.chat.provider') || 'codex')
   const [messages, setMessages] = useState<Message[]>([])
@@ -275,13 +275,21 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState('')
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([])
-  const [conversationHistory, setConversationHistory] = useState<ChatConversation[]>([])
+  const [conversationHistory, setConversationHistory] = useState<ChatConversationSummary[]>([])
   const [conversationHistoryLoading, setConversationHistoryLoading] = useState(true)
   const [conversationHistoryError, setConversationHistoryError] = useState('')
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [openPicker, setOpenPicker] = useState<string | null>(null)
-  const [sourcesOpen, setSourcesOpen] = useState(true)
-  const [studioOpen, setStudioOpen] = useState(true)
+  const [railOpen, setRailOpen] = useState(false)
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [panelTab, setPanelTab] = useState<'context' | 'study' | 'actions' | 'activity'>('context')
+  const [pendingActions, setPendingActions] = useState<PendingAction[]>([])
+  const [sessionGrants, setSessionGrants] = useState<string[]>([])
+  const [mentions, setMentions] = useState<string[]>([])
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const sessionGrantsRef = useRef<string[]>([])
+  const [actionBusy, setActionBusy] = useState('')
+  const [actionNotice, setActionNotice] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
   const messagesRef = useRef<Message[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -307,7 +315,17 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
   }
   const persistConversation = async (conversationMessages: Message[], id = activeConversationId || crypto.randomUUID()) => {
     const updated = makeConversationSnapshot(conversationMessages, id)
-    setConversationHistory((current) => [updated, ...current.filter((conversation) => conversation.id !== id)].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)))
+    const summary: ChatConversationSummary = {
+      id: updated.id,
+      title: updated.title,
+      courseId: updated.courseId,
+      courseLabel: updated.courseLabel,
+      messageCount: updated.messages.length,
+      preview: (updated.messages[updated.messages.length - 1]?.content || '').slice(0, 280),
+      createdAt: updated.updatedAt,
+      updatedAt: updated.updatedAt,
+    }
+    setConversationHistory((current) => [summary, ...current.filter((conversation) => conversation.id !== id)].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)))
     setActiveConversationId(id)
     try {
       await saveChatConversation(updated)
@@ -345,7 +363,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
     active.controller.abort()
     if (active.runId) void api.chatCancel(active.runId).catch(() => undefined)
   }
-  const toggleProposalGrant = (grant: 'task' | 'import' | 'calendar') => {
+  const toggleProposalGrant = (grant: 'task' | 'import' | 'calendar' | 'actions') => {
     setProposalGrants((current) => {
       const next = current.includes(grant) ? current.filter((item) => item !== grant) : [...current, grant]
       localStorage.setItem('academia.chat.proposalGrants', JSON.stringify(next))
@@ -360,7 +378,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
     })
   }
   const refreshProposalStatuses = async (current: Message[] = messagesRef.current) => {
-    const reviewIds = [...new Set(current.flatMap((message) => message.proposals?.map((proposal) => proposal.review_id) ?? []))]
+    const reviewIds = [...new Set(current.flatMap((message) => message.proposals?.map((proposal) => proposal.review_id).filter((value): value is string => Boolean(value)) ?? []))]
     if (!reviewIds.length) return
     const results = await Promise.all(reviewIds.map((reviewId) => api.reviewShow(reviewId).catch(() => null)))
     const byId = new Map(results.filter((item): item is ReviewItem => Boolean(item)).map((item) => [item.id, item]))
@@ -369,7 +387,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
       ? {
           ...message,
           proposals: message.proposals.map((proposal) => {
-            const item = byId.get(proposal.review_id)
+            const item = proposal.review_id ? byId.get(proposal.review_id) : undefined
             if (!item) return proposal
             const proposalDetails = item.details?.proposal_details
             const details = proposalDetails && typeof proposalDetails === 'object' && !Array.isArray(proposalDetails) ? proposalDetails as Record<string, unknown> : null
@@ -439,11 +457,12 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
   }, [courseId, courses, readableItems, sourcePickerFilter])
 
   const providerCatalog = providers?.chat ?? providers
-  const providerOptions = providerCatalog?.providers ?? []
+  const providerOptions = (providerCatalog?.providers ?? []).filter((entry) => entry.id !== 'claude')
   const activeProvider = providerOptions.find((entry) => entry.id === provider)
   const apiProvider = provider.startsWith('api:')
   const modelOptions = activeProvider?.models ?? []
   const defaultModel = activeProvider?.default_model ?? ''
+  const currentModel = model && modelOptions.some((entry) => entry.id === model) ? model : defaultModel
   const isAvailable = Boolean(activeProvider?.available)
   const statusLabel = `${activeProvider?.name ?? provider} · ${isAvailable ? 'connected' : 'not connected'}`
   const thinkingOptions = effortOptions
@@ -458,8 +477,9 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
   useEffect(() => { void api.chatProviders<ChatProviders>().then(setProviders).catch((reason) => setError(String(reason))) }, [])
   useEffect(() => {
     if (!apiProvider || !proposalMode) return
-    setProposalMode(false)
-    localStorage.setItem('academia.chat.proposals', 'false')
+    // API providers can propose catalog actions only.
+    setProposalGrants(['actions'])
+    localStorage.setItem('academia.chat.proposalGrants', JSON.stringify(['actions']))
   }, [apiProvider, proposalMode])
   useEffect(() => {
     let current = true
@@ -589,7 +609,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
     const text = draft.trim()
     if ((!text && !attachments.length) || busy || studyGenerationInProgress) return
     const pendingAttachments = [...attachments]
-    const userMessage: Message = { role: 'user', content: text || `Please review ${pendingAttachments.map((file) => file.name).join(', ')}.` }
+    const userMessage: Message = { role: 'user', content: text || `Please review ${pendingAttachments.map((file) => file.name).join(', ')}.`, ...(mentions.length ? { mentions: [...mentions] } : {}) }
     let nextMessages = [...messages, userMessage]
     setMessages(nextMessages)
     setDraft('')
@@ -690,7 +710,8 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
           }
           setPendingChatStudy(null)
           setStudyGenerationInProgress(true)
-          setStudioOpen(true)
+          setPanelOpen(true)
+          setPanelTab('study')
           setChatStudyRequest(request)
           await saveAssistantReply(`Got it. I’m creating a ${title} about ${nextDraft.topic} from the ${checkedClassSources.length} checked ${course.code} source${checkedClassSources.length === 1 ? '' : 's'}. It will be saved in this class’s Studio library.`)
           return
@@ -788,8 +809,9 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
         boundedMessages.unshift(message)
         historyLength += message.content.length
       }
-      const chatPayload = { provider, messages: boundedMessages.map(({ role, content }) => ({ role, content })), model: model || defaultModel || null, effort, speed, attachments: uploaded.map((attachment) => ({ name: attachment.name, type: attachment.type, data: attachment.data })), course_context: courseContext, proposal_mode: proposalMode, course_id: courseId || null, semester: semester || null, granted_proposal_tools: proposalMode ? proposalGrants : [], web_search: webSearch, connector_grants: [...googleGrants, ...(notionGrant ? ['notion'] : [])] }
+      const chatPayload = { provider, messages: boundedMessages.map(({ role, content }) => ({ role, content })), model: currentModel || null, effort, speed, attachments: uploaded.map((attachment) => ({ name: attachment.name, type: attachment.type, data: attachment.data })), course_context: courseContext, proposal_mode: proposalMode, course_id: courseId || null, semester: semester || null, granted_proposal_tools: proposalMode ? proposalGrants : [], web_search: webSearch, connector_grants: [...googleGrants, ...(notionGrant ? ['notion'] : [])] }
       let result: ChatResult
+      let capturedProgress: StreamProgress[] = []
       if (proposalMode) {
         const controller = new AbortController()
         streamRef.current = { controller, runId: null }
@@ -879,19 +901,23 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
           }
           throw reason
         }
+        capturedProgress = streamingRef.current?.progress ?? []
         flushDeltas()
         streamRef.current = null
         clearStreaming()
       } else {
         result = await api.chat<ChatResult>(chatPayload)
       }
-      const assistantMessage: Message = { role: 'assistant' as const, content: result.message, ...(result.proposals?.length ? { proposals: result.proposals } : {}) }
+      const runTrace = result.trace?.length ? result.trace : capturedProgress.map((step) => ({ tool: step.label, ok: step.state === 'done' }))
+      const assistantMessage: Message = { role: 'assistant' as const, content: result.message, at: new Date().toISOString(), ...(result.proposals?.length ? { proposals: result.proposals } : {}), ...(runTrace.length ? { trace: runTrace } : {}) }
       const completedMessages = [...nextMessages, assistantMessage]
       setMessages(completedMessages)
       await persistConversation(completedMessages)
       if (result.proposals?.length) onProposalCreated()
       if (result.proposals?.length) void refreshProposalStatuses(completedMessages)
+      void autoApplyGranted(completedMessages)
       setChatAttachments(uploaded)
+      setMentions([])
       setLastRetrievedSourceIds([...new Set(retrievedSourceIds)])
       if (result.notice) setError(result.notice)
     } catch (reason) {
@@ -1007,10 +1033,20 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
     if (!messages.length) return
     void persistConversation(messages)
   }
-  const resumeConversation = (conversation: ChatConversation) => {
+  const resumeConversation = async (conversationId: string) => {
     if (busy || studyGenerationInProgress) return
+    let conversation: ChatConversation
+    try {
+      conversation = await loadChatConversation(conversationId)
+      setConversationHistoryError('')
+    } catch (reason) {
+      setConversationHistoryError(`That conversation could not be opened. ${String(reason)}`)
+      return
+    }
     setPendingChatStudy(null)
     setChatStudyRequest(null)
+    sessionGrantsRef.current = []
+    setSessionGrants([])
     archiveCurrentConversation()
     setActiveConversationId(conversation.id)
     messagesRef.current = conversation.messages
@@ -1025,6 +1061,7 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
     setError('')
     setLastRetrievedSourceIds([])
     setHistoryOpen(false)
+    setRailOpen(false)
   }
   const removeConversation = async (id: string) => {
     try {
@@ -1037,6 +1074,8 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
   }
   const startNewChat = () => {
     if (busy || studyGenerationInProgress) return
+    sessionGrantsRef.current = []
+    setSessionGrants([])
     archiveCurrentConversation()
     setActiveConversationId(null)
     setMessages([])
@@ -1055,8 +1094,8 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
     handledStudyChatRequest.current = studyChatRequest.id
     if (studyChatRequest.action === 'open') {
       const conversation = conversationHistory.find((entry) => entry.id === studyChatRequest.conversationId)
-      if (conversation) resumeConversation(conversation)
-      else setError('That saved conversation is no longer available in this browser profile.')
+      if (conversation) void resumeConversation(conversation.id)
+      else setError('That saved conversation is no longer available in this workspace.')
       onStudyChatRequestConsumed()
       return
     }
@@ -1074,114 +1113,255 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
     onStudyChatRequestConsumed()
   }, [busy, conversationHistory, conversationHistoryLoading, courses, onStudyChatRequestConsumed, resumeConversation, startNewChat, studyChatRequest, studyGenerationInProgress])
 
+  const markProposal = (proposalId: string, patch: Record<string, unknown>) => {
+    setMessages((current) => current.map((message) => message.proposals?.length
+      ? { ...message, proposals: message.proposals.map((proposal) => proposal.proposal_id === proposalId ? { ...proposal, ...patch } : proposal) }
+      : message))
+  }
+  const applyProposal = async (proposalId: string) => {
+    try {
+      const result = await api.actionExecute(proposalId)
+      markProposal(proposalId, {
+        status: 'resolved',
+        action_status: result.status,
+        status_label: result.status === 'verified' ? 'Applied and verified' : `Status: ${result.status}`,
+      })
+      setActionNotice(result.status === 'verified' ? 'Applied and verified.' : `Action status: ${result.status}`)
+      await refreshActions()
+      onProposalCreated()
+    } catch (reason) {
+      setError(`The action could not be applied. ${String(reason)}`)
+    }
+  }
+  const allowInlineProposal = (proposalId: string) => { void applyProposal(proposalId) }
+  const allowAllProposals = (proposalIds: string[]) => { void (async () => { for (const id of proposalIds) await applyProposal(id) })() }
+  const allowForChat = (proposalId: string, actionType: string | null) => {
+    if (actionType && !sessionGrantsRef.current.includes(actionType)) {
+      const next = [...sessionGrantsRef.current, actionType]
+      sessionGrantsRef.current = next
+      setSessionGrants(next)
+    }
+    void applyProposal(proposalId)
+  }
+  const refuseProposal = async (proposalId: string) => {
+    try {
+      await api.actionDiscard(proposalId)
+      markProposal(proposalId, { status: 'rejected', action_status: 'rejected', status_label: 'Refused' })
+      await refreshActions()
+    } catch (reason) {
+      setError(`The proposal could not be refused. ${String(reason)}`)
+    }
+  }
+  const autoApplyGranted = async (list: Message[]) => {
+    const grants = sessionGrantsRef.current
+    if (!grants.length) return
+    const targets = list.flatMap((message) => (message.proposals ?? []).filter((proposal) => proposal.tier === 'inline'
+      && proposal.proposal_id
+      && proposal.action_type
+      && grants.includes(proposal.action_type)
+      && proposal.status !== 'resolved'
+      && proposal.status !== 'rejected'))
+    for (const proposal of targets) {
+      await applyProposal(proposal.proposal_id as string)
+    }
+  }
+  useEffect(() => { sessionGrantsRef.current = sessionGrants }, [sessionGrants])
+  useEffect(() => {
+    setWebSearch(mentions.includes('web'))
+    setGoogleGrants([
+      ...(mentions.includes('gmail') ? ['gmail'] : []),
+      ...(mentions.includes('calendar') ? ['calendar'] : []),
+    ])
+    setNotionGrant(mentions.includes('notion'))
+    const wantsActions = mentions.includes('actions')
+    setProposalMode(wantsActions)
+    if (wantsActions) setProposalGrants(['actions'])
+  }, [mentions])
+
+  const refreshActions = async () => {
+    try {
+      const value = await api.actionPending()
+      setPendingActions(value.actions)
+    } catch (reason) {
+      setActionNotice(`Pending actions could not be loaded. ${String(reason)}`)
+    }
+  }
+  const allowAction = async (proposalId: string) => {
+    setActionBusy(proposalId)
+    setActionNotice('')
+    try {
+      const result = await api.actionExecute(proposalId)
+      setActionNotice(result.status === 'verified' ? 'Applied and verified.' : `Action status: ${result.status}`)
+      await refreshActions()
+      onProposalCreated()
+    } catch (reason) {
+      setActionNotice(`The action could not be applied. ${String(reason)}`)
+    } finally {
+      setActionBusy('')
+    }
+  }
+  const discardAction = async (proposalId: string) => {
+    setActionBusy(proposalId)
+    setActionNotice('')
+    try {
+      await api.actionDiscard(proposalId)
+      setActionNotice('Declined.')
+      await refreshActions()
+    } catch (reason) {
+      setActionNotice(`The action could not be declined. ${String(reason)}`)
+    } finally {
+      setActionBusy('')
+    }
+  }
+  useEffect(() => { void refreshActions() }, [])
+
+  const mentionLabels: Record<string, string> = { web: 'Web', gmail: 'Gmail', calendar: 'Calendar', notion: 'Notion', actions: 'Actions' }
+  const mentionOptions = [
+    { id: 'web', label: 'Web', hint: 'Search public pages and cite them', available: true },
+    { id: 'gmail', label: 'Gmail', hint: 'Recent messages as reference', available: googleAvailable },
+    { id: 'calendar', label: 'Calendar', hint: 'Upcoming events as reference', available: googleAvailable },
+    { id: 'notion', label: 'Notion', hint: 'Pages shared with the integration', available: notionAvailable },
+    { id: 'actions', label: 'Actions', hint: 'Let the agent propose workspace changes', available: true },
+  ]
+  const handleDraftChange = (value: string) => {
+    setDraft(value)
+    const match = /(?:^|\s)@([a-z]*)$/i.exec(value)
+    setMentionQuery(match ? match[1].toLowerCase() : null)
+  }
+  const chooseMention = (id: string) => {
+    setMentions((current) => current.includes(id) ? current : [...current, id])
+    setDraft((current) => current.replace(/@[a-z]*$/i, '').replace(/\s+$/, ''))
+    setMentionQuery(null)
+  }
+
+  const contextPanel = <>
+            <header className="chat-panel-heading"><div><p className="eyebrow">Context</p><h3>Sources</h3></div><div className="chat-panel-actions"><button className="chat-source-bulk-toggle" type="button" onClick={toggleAllVisibleSources} disabled={!filteredItems.length} aria-label={`${allVisibleSourcesSelected ? 'Uncheck' : 'Check'} all ${sourceFilter ? 'matching ' : ''}sources`} data-tooltip={`${allVisibleSourcesSelected ? 'Uncheck' : 'Check'} all ${sourceFilter ? 'matching ' : ''}sources`} data-tooltip-side="bottom"><span>{allVisibleSourcesSelected ? 'Uncheck all' : 'Check all'}</span><small>{availableSourceCount} available</small></button><button className="chat-panel-collapse" onClick={() => setPanelOpen(false)} aria-label="Collapse panel" data-tooltip="Collapse sources" data-tooltip-side="bottom">‹</button></div></header>
+            <label className="chat-source-search"><span aria-hidden="true">⌕</span><input ref={sourceFilterRef} value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} placeholder={course ? `Find ${course.code} sources` : 'Find class sources'} aria-label="Search Academia sources" /></label>
+              {draft.trim() && <section className="chat-source-plan" aria-live="polite"><header><strong>Full-text source search</strong><span>{selectedItems.length} selected</span></header><p>Every selected source’s extractable text is searched. Relevant passages with page locations are supplied to the chat, and any extraction limits are reported.</p></section>}
+            <div className="chat-source-groups">
+              {sourceGroups.map(([groupId, group]) => {
+                const checkedCount = group.items.filter((item) => selectedSourceIdSet.has(item.id)).length
+                return <section className={`chat-source-group ${groupId === courseId ? 'current' : ''}`} key={groupId}>
+                  <header><strong>{group.name}</strong><span>{groupId === courseId ? `${checkedCount} available` : checkedCount ? `${checkedCount} added` : `${group.items.length} sources`}</span></header>
+                  {group.items.map((item) => {
+                    const isAvailable = selectedSourceIdSet.has(item.id)
+                    const wasRetrieved = lastRetrievedSourceIdSet.has(item.id)
+                    return <label className={`chat-source-row ${isAvailable ? 'selected' : ''} ${wasRetrieved ? 'retrieved' : ''}`} key={item.id}>
+                    <input type="checkbox" checked={isAvailable} onChange={() => toggleSource(item.id)} aria-label={`${isAvailable ? item.course_id === courseId ? 'Exclude' : 'Remove' : 'Add'} ${item.name} ${isAvailable && item.course_id === courseId ? 'from' : 'in'} this chat`} />
+                    <span className="chat-source-file-icon" aria-hidden="true">{item.extension.replace('.', '').slice(0, 3).toUpperCase()}</span>
+                    <span className="chat-source-copy"><strong>{item.name}</strong><small>{wasRetrieved ? 'Searched for latest reply · ' : ''}{item.category.replaceAll('_', ' ')}{item.intake_status === 'inbox' ? ' · Intake' : ''} · {item.extension.toUpperCase()}</small></span>
+                  </label>})}
+                </section>
+              })}
+              {!sourceGroups.length && <div className="chat-sources-empty"><span>▤</span><strong>{course ? 'No readable sources in this class yet' : 'No readable sources here yet'}</strong><p>Import course material, or choose a class with indexed PDFs, notes, or documents.</p></div>}
+            </div>
+            {(chatAttachments.length > 0 || attachments.length > 0) && <section className="chat-local-files"><p className="eyebrow">Attached files</p>{chatAttachments.map((file, index) => <div className="chat-local-file" key={`sent-${file.name}-${index}`}><span>▤</span><span title={file.name}>{file.name}<small>Used in this chat</small></span><button aria-label={`Remove ${file.name} from future messages`} onClick={() => setChatAttachments((current) => current.filter((_, position) => position !== index))}>×</button></div>)}{attachments.map((file, index) => <div className="chat-local-file pending" key={`pending-${file.name}-${index}`}><span>▧</span><span title={file.name}>{file.name}<small>Ready to attach</small></span><button aria-label={`Remove ${file.name}`} onClick={() => setAttachments((current) => current.filter((_, position) => position !== index))}>×</button></div>)}</section>}
+      
+  </>
+
+
+  useEffect(() => {
+    if (!railOpen && !panelOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setRailOpen(false); setPanelOpen(false) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [railOpen, panelOpen])
+
   return <div className="page-stack chat-page">
-    <section className={`chat-workspace ${!sourcesOpen ? 'sources-collapsed' : ''} ${!studioOpen ? 'studio-collapsed' : ''}`} aria-label="Study chat workspace">
-      {sourcesOpen ? <aside className="chat-sources-panel" aria-label="Sources in this chat">
-        <header className="chat-panel-heading"><div><p className="eyebrow">Context</p><h3>Sources</h3></div><div className="chat-panel-actions"><button className="chat-source-bulk-toggle" type="button" onClick={toggleAllVisibleSources} disabled={!filteredItems.length} aria-label={`${allVisibleSourcesSelected ? 'Uncheck' : 'Check'} all ${sourceFilter ? 'matching ' : ''}sources`} data-tooltip={`${allVisibleSourcesSelected ? 'Uncheck' : 'Check'} all ${sourceFilter ? 'matching ' : ''}sources`} data-tooltip-side="bottom"><span>{allVisibleSourcesSelected ? 'Uncheck all' : 'Check all'}</span><small>{availableSourceCount} available</small></button><button className="chat-panel-collapse" onClick={() => setSourcesOpen(false)} aria-label="Collapse sources panel" data-tooltip="Collapse sources" data-tooltip-side="bottom">‹</button></div></header>
-        <label className="chat-source-search"><span aria-hidden="true">⌕</span><input ref={sourceFilterRef} value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} placeholder={course ? `Find ${course.code} sources` : 'Find class sources'} aria-label="Search Academia sources" /></label>
-          {draft.trim() && <section className="chat-source-plan" aria-live="polite"><header><strong>Full-text source search</strong><span>{selectedItems.length} selected</span></header><p>Every selected source’s extractable text is searched. Relevant passages with page locations are supplied to the chat, and any extraction limits are reported.</p></section>}
-        <div className="chat-source-groups">
-          {sourceGroups.map(([groupId, group]) => {
-            const checkedCount = group.items.filter((item) => selectedSourceIdSet.has(item.id)).length
-            return <section className={`chat-source-group ${groupId === courseId ? 'current' : ''}`} key={groupId}>
-              <header><strong>{group.name}</strong><span>{groupId === courseId ? `${checkedCount} available` : checkedCount ? `${checkedCount} added` : `${group.items.length} sources`}</span></header>
-              {group.items.map((item) => {
-                const isAvailable = selectedSourceIdSet.has(item.id)
-                const wasRetrieved = lastRetrievedSourceIdSet.has(item.id)
-                return <label className={`chat-source-row ${isAvailable ? 'selected' : ''} ${wasRetrieved ? 'retrieved' : ''}`} key={item.id}>
-                <input type="checkbox" checked={isAvailable} onChange={() => toggleSource(item.id)} aria-label={`${isAvailable ? item.course_id === courseId ? 'Exclude' : 'Remove' : 'Add'} ${item.name} ${isAvailable && item.course_id === courseId ? 'from' : 'in'} this chat`} />
-                <span className="chat-source-file-icon" aria-hidden="true">{item.extension.replace('.', '').slice(0, 3).toUpperCase()}</span>
-                <span className="chat-source-copy"><strong>{item.name}</strong><small>{wasRetrieved ? 'Searched for latest reply · ' : ''}{item.category.replaceAll('_', ' ')}{item.intake_status === 'inbox' ? ' · Intake' : ''} · {item.extension.toUpperCase()}</small></span>
-              </label>})}
-            </section>
-          })}
-          {!sourceGroups.length && <div className="chat-sources-empty"><span>▤</span><strong>{course ? 'No readable sources in this class yet' : 'No readable sources here yet'}</strong><p>Import course material, or choose a class with indexed PDFs, notes, or documents.</p></div>}
-        </div>
-        {(chatAttachments.length > 0 || attachments.length > 0) && <section className="chat-local-files"><p className="eyebrow">Attached files</p>{chatAttachments.map((file, index) => <div className="chat-local-file" key={`sent-${file.name}-${index}`}><span>▤</span><span title={file.name}>{file.name}<small>Used in this chat</small></span><button aria-label={`Remove ${file.name} from future messages`} onClick={() => setChatAttachments((current) => current.filter((_, position) => position !== index))}>×</button></div>)}{attachments.map((file, index) => <div className="chat-local-file pending" key={`pending-${file.name}-${index}`}><span>▧</span><span title={file.name}>{file.name}<small>Ready to attach</small></span><button aria-label={`Remove ${file.name}`} onClick={() => setAttachments((current) => current.filter((_, position) => position !== index))}>×</button></div>)}</section>}
-      </aside> : <aside className="chat-sources-panel chat-collapsed-rail sources-collapsed-rail" aria-label="Sources panel collapsed"><button className="chat-rail-toggle" type="button" onClick={() => setSourcesOpen(true)} aria-label="Expand sources panel" data-tooltip="Sources" data-tooltip-side="right">›</button></aside>}
+    <section className="agent-workspace" aria-label="Academia agent">
 
       <section className="chat-main" aria-label="Conversation">
-        <header className="chat-conversation-heading"><div className="chat-heading-start"><div className="chat-heading-title"><p className="eyebrow">Conversation</p></div></div><div className="chat-heading-end"><strong>{course ? `${course.code} · ${course.name}` : 'General study chat'}</strong><button className="chat-history-button" onClick={() => void openHistory()} disabled={busy || studyGenerationInProgress} aria-label="Open study history"><svg className="chat-action-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3.4 7.2A7 7 0 1 1 3 11"/><path d="M3 3.8v3.8h3.8M10 6.5V10l2.5 1.5"/></svg><span>History</span></button><button className="chat-new-session" onClick={startNewChat} disabled={busy || studyGenerationInProgress} aria-label="Start a new study chat"><svg className="chat-action-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M11.8 3.2H5.5A1.5 1.5 0 0 0 4 4.7v10.8A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5V9.2"/><path d="m9 12.8.5-2.6L15.7 4a1.6 1.6 0 0 1 2.3 2.3l-6.2 6.2-2.8.3Z"/></svg><span>New chat</span></button></div></header>
+        <header className="chat-conversation-heading"><div className="chat-heading-start"><button className="agent-icon-button" type="button" onClick={() => { setRailOpen(true); setPanelOpen(false) }} aria-label="Show conversation history" title="History"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="3.5" y="4.5" width="13" height="11" rx="2" /><path d="M7.5 4.5v11" /></svg></button><ChatPicker id="course" icon="▣" value={courseId} placeholder="All Academia" ariaLabel="Scope" options={[{ value: '', label: 'All Academia' }, ...courses.map((entry) => ({ value: entry.id, label: entry.name.startsWith(entry.code) ? entry.name : `${entry.code} · ${entry.name}` }))]} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={selectCourse} /></div><div className="chat-heading-end"><button className="agent-icon-button" type="button" onClick={() => { setPanelOpen(true); setRailOpen(false) }} aria-label="Show panel" title="Panel"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="3.5" y="4.5" width="13" height="11" rx="2" /><path d="M12.5 4.5v11" /></svg></button></div></header>
         <div className="chat-messages" ref={listRef} aria-live="polite">
-          {messages.length === 0 ? <div className="chat-welcome"><p className="eyebrow">{course ? `Your ${course.code} study space` : 'Ready when you are'}</p><h3>{course ? `What’s next in ${course.code}?` : 'What are you studying?'}</h3><p>{course ? 'Pick a goal based on this class, or ask about an idea that still feels unclear.' : 'Choose a class to get study suggestions based on its course context, or start a general study chat.'}</p><div className="chat-suggestions">{course ? suggestions.map((suggestion) => <button key={suggestion.label} onClick={() => setDraft(suggestion.prompt)}>{suggestion.label} <span>↗</span></button>) : <span className="chat-suggestions-empty">Select a class in the composer for tailored study prompts.</span>}</div></div> : messages.map((message, index) => <article className={`chat-message ${message.role}`} key={index}><span className="chat-avatar">{message.role === 'user' ? 'You' : 'A'}</span><div className="chat-message-content"><small>{message.role === 'user' ? 'You' : 'Academia study assistant'}</small>{message.attachments?.length ? <div className="chat-message-attachments">{message.attachments.map((attachment, attachmentIndex) => attachment.preview ? <figure className="chat-message-image" key={`${attachment.name}-${attachmentIndex}`}><img src={attachment.preview} alt={`Attached image: ${attachment.name}`} /><figcaption>{attachment.name}</figcaption></figure> : <div className="chat-message-file" key={`${attachment.name}-${attachmentIndex}`}><span aria-hidden="true">▤</span><span><strong>{attachment.name}</strong><small>{attachment.type.startsWith('image/') ? 'Image attachment · reattach to view' : attachment.type === 'application/pdf' ? 'PDF document' : 'Attached document'}</small></span></div>)}</div> : null}<div className="chat-rich-text"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={chatMarkdownComponents}>{message.content}</ReactMarkdown></div>{message.proposals?.length ? <ChatProposals proposals={message.proposals} onOpenReview={onOpenReview} /> : null}</div></article>)}
+          {messages.length === 0 ? <div className="chat-welcome"><p className="eyebrow">{course ? `Your ${course.code} study space` : 'Academia AI'}</p><h3>{course ? `What’s next in ${course.code}?` : 'What do you need?'}</h3><p>{course ? 'Pick a goal based on this class, or ask about an idea that still feels unclear.' : 'Choose a scope above to ground answers in a class, or ask across everything in your workspace.'}</p><div className="chat-suggestions">{course ? suggestions.map((suggestion) => <button key={suggestion.label} onClick={() => setDraft(suggestion.prompt)}>{suggestion.label} <span>↗</span></button>) : <span className="chat-suggestions-empty">Choose a scope above for prompts grounded in that class.</span>}</div></div> : messages.map((message, index) => <article className={`chat-message ${message.role}`} key={index}><span className="chat-avatar">{message.role === 'user' ? 'You' : 'A'}</span><div className="chat-message-content"><small>{message.role === 'user' ? 'You' : 'Academia study assistant'}</small>{message.mentions?.length ? <div className="chat-message-mentions">{message.mentions.map((mention) => <span key={mention}>{mentionLabels[mention] ?? mention}</span>)}</div> : null}{message.attachments?.length ? <div className="chat-message-attachments">{message.attachments.map((attachment, attachmentIndex) => attachment.preview ? <figure className="chat-message-image" key={`${attachment.name}-${attachmentIndex}`}><img src={attachment.preview} alt={`Attached image: ${attachment.name}`} /><figcaption>{attachment.name}</figcaption></figure> : <div className="chat-message-file" key={`${attachment.name}-${attachmentIndex}`}><span aria-hidden="true">▤</span><span><strong>{attachment.name}</strong><small>{attachment.type.startsWith('image/') ? 'Image attachment · reattach to view' : attachment.type === 'application/pdf' ? 'PDF document' : 'Attached document'}</small></span></div>)}</div> : null}<div className="chat-rich-text">{message.role === 'assistant' && message.trace?.length ? <ChatTrace trace={message.trace} /> : null}<ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={chatMarkdownComponents}>{message.content}</ReactMarkdown></div>{message.proposals?.length ? <ChatProposals proposals={message.proposals} onOpenReview={onOpenReview} onAllow={allowInlineProposal} onAllowForChat={allowForChat} onRefuse={(proposalId) => void refuseProposal(proposalId)} onAllowAll={allowAllProposals} /> : null}{message.role === 'assistant' && <ChatMessageFooter content={message.content} at={message.at} />}</div></article>)}
+          {(busy || studyGenerationInProgress) && !streaming && <div className="chat-thinking" role="status" aria-live="polite"><span className="chat-avatar">A</span><span className="chat-thinking-copy"><ElapsedTimer label={studyGenerationInProgress ? 'Creating source-grounded study material' : selectedItems.length ? 'Reading selected sources' : 'Thinking'} /><span className="chat-loading-dots" aria-hidden="true"><span /><span /><span /></span></span></div>}
           {streaming && <article className="chat-message assistant streaming">
             <span className="chat-avatar">A</span>
             <div className="chat-message-content">
               <small>Academia study assistant · working</small>
               {streaming.progress.length > 0 && <ul className="chat-progress" aria-label="Assistant progress">{streaming.progress.map((item) => <li className={item.state} key={item.id}><span className="chat-progress-mark" aria-hidden="true">{item.state === 'done' ? '✓' : '·'}</span>{item.label}</li>)}</ul>}
               <div className="chat-rich-text">{streaming.content ? <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={chatMarkdownComponents}>{streaming.content}</ReactMarkdown> : <span className="chat-stream-placeholder">{streaming.progress.length ? 'Working through the proposal…' : 'Starting the proposal run…'}</span>}</div>
-              {streaming.proposals.length > 0 && <ChatProposals proposals={streaming.proposals} onOpenReview={onOpenReview} />}
+              {streaming.proposals.length > 0 && <ChatProposals proposals={streaming.proposals} onOpenReview={onOpenReview} onAllow={allowInlineProposal} onAllowForChat={allowForChat} onRefuse={(proposalId) => void refuseProposal(proposalId)} onAllowAll={allowAllProposals} />}
             </div>
           </article>}
-          {(busy || studyGenerationInProgress) && !streaming && <div className="chat-thinking" role="status" aria-live="polite"><span className="chat-avatar">A</span><span className="chat-thinking-copy">{studyGenerationInProgress ? 'Creating source-grounded study material in Studio' : selectedItems.length ? 'Reading selected sources and thinking through your question' : 'Thinking through your question'}<span className="chat-loading-dots" aria-hidden="true"><span /><span /><span /></span></span></div>}
+          
         </div>
         <div className="chat-composer-wrap">
           {error && <p className="chat-error" role="alert">{error}</p>}
-          {apiProvider && <div className="chat-proposal-mode-note" role="note"><span>API provider mode is on. Study chat uses the selected provider and API billing.</span><small>Proposal mode, Codex web search, and Codex reasoning controls are available only with the ChatGPT/Codex subscription.</small></div>}
-          {proposalMode && <div className="chat-proposal-mode-note" role="note">
-            <span>Proposal mode is on. Grant only what the assistant may prepare:</span>
-            <label><input type="checkbox" checked={proposalGrants.includes('task')} onChange={() => toggleProposalGrant('task')} /> Tasks</label>
-            <label><input type="checkbox" checked={proposalGrants.includes('import')} onChange={() => toggleProposalGrant('import')} /> Imports</label>
-            {googleAvailable && <label><input type="checkbox" checked={proposalGrants.includes('calendar')} onChange={() => toggleProposalGrant('calendar')} /> Google Calendar proposals</label>}
-            <small>{proposalGrants.length ? 'It cannot approve, execute, send email, or change Google Calendar directly. Calendar proposals still require a separate Review decision.' : 'Select at least one proposal tool before sending.'}</small>
-          </div>}
-          {notionGrant && <div className="chat-proposal-mode-note" role="note"><span>Notion context is on for this message: shared Notion pages and excerpts are sent to the selected AI provider as external reference.</span><small>Academia can only read pages shared with the Notion integration; it cannot edit Notion.</small></div>}
-          {googleGrants.length > 0 && <div className="chat-proposal-mode-note" role="note">
-            <span>Google context is on for this message: {googleGrants.includes('gmail') ? 'recent Gmail messages' : ''}{googleGrants.length === 2 ? ' and ' : ''}{googleGrants.includes('calendar') ? 'upcoming Calendar events' : ''}.</span>
-            <small>That data is sent to the selected AI provider as external reference. Academia will not send mail or change your calendar.</small>
-          </div>}
+
           {showAttachMenu && <div className="chat-attach-menu" role="menu" aria-label="Add to this chat">
             <button role="menuitem" onClick={() => { setShowAttachMenu(false); fileInputRef.current?.click() }}><span>↑</span><span><strong>Add a file to this chat</strong><small>Images, PDF, DOCX, PPTX, and text · 12 MB each</small></span></button>
             <button role="menuitem" onClick={() => { setShowAttachMenu(false); setShowSourcePicker(true) }}><span>▤</span><span><strong>Add Academia sources</strong><small>Choose materials from any class</small></span></button>
           </div>}
+          {mentionQuery !== null && <div className="chat-mentions">
+            <div className="chat-mention-menu" role="listbox" aria-label="Add context">
+              {mentionOptions.filter((option) => option.available && (!mentionQuery || option.id.startsWith(mentionQuery) || option.label.toLowerCase().includes(mentionQuery))).map((option) => <button type="button" role="option" key={option.id} onClick={() => chooseMention(option.id)}><strong>@{option.id}</strong><small>{option.hint}</small></button>)}
+            </div>
+          </div>}
           <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void send() }}>
             {(attachments.length > 0 || chatAttachments.length > 0 || selectedItems.some((item) => item.course_id !== courseId)) && <div className="chat-composer-attachments">{chatAttachments.map((file, index) => <span key={`kept-${file.name}-${index}`}>{file.type.startsWith('image/') ? '▧' : '▤'} {file.name} · in chat</span>)}{attachments.map((file, index) => <span key={`${file.name}-${index}`}>{file.type.startsWith('image/') ? '▧' : '▤'} {file.name}</span>)}{selectedItems.filter((item) => item.course_id !== courseId).map((item) => <span className="chat-source-chip" key={item.id} title={`${courses.find((entry) => entry.id === item.course_id)?.code ?? item.semester} · ${item.name}`}>▤ {item.name}<button type="button" aria-label={`Remove ${item.name} from chat`} onClick={() => toggleSource(item.id)}>×</button></span>)}</div>}
-            <textarea ref={textareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} onPaste={pasteFiles} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} placeholder="Ask anything about your classes…" rows={2} maxLength={12000} aria-label="Your message. Paste an image or document to attach it." />
+            <textarea ref={textareaRef} value={draft} onChange={(event) => handleDraftChange(event.target.value)} onPaste={pasteFiles} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} placeholder="Ask anything about your classes…" rows={2} maxLength={12000} aria-label="Your message. Paste an image or document to attach it." />
             <div className="chat-composer-toolbar">
               <div className="chat-composer-context">
                 <div className="chat-attach-anchor"><button className="chat-attach-button" type="button" aria-label="Attach a file or Academia source" aria-expanded={showAttachMenu} onClick={() => setShowAttachMenu((open) => !open)}>＋</button></div>
                 <input ref={fileInputRef} className="chat-file-input" type="file" accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,.docx,.pptx,.txt,.text,.md,.markdown,.csv,.json,.yaml,.yml" multiple onChange={(event) => { chooseFiles(event.target.files); event.target.value = '' }} />
                 <span className={`chat-status-dot ${isAvailable ? 'available' : 'unavailable'}`} role="img" aria-label={statusLabel} data-tooltip={statusLabel} data-tooltip-side="top" />
-                <ChatPicker id="course" icon="▣" value={courseId} placeholder="Course context" ariaLabel="Course context" options={[{ value: '', label: 'General study chat' }, ...courses.map((entry) => ({ value: entry.id, label: `${entry.code} · ${entry.name}` }))]} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={selectCourse} />
+                
               </div>
               <div className="chat-composer-controls">
-                <ChatPicker id="provider" label="AI" value={provider} ariaLabel="AI provider" options={providerOptions.map((entry) => ({ value: entry.id, label: entry.name, disabled: !entry.available, reason: entry.reason }))} disabled={!providerOptions.length} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { setProvider(value); localStorage.setItem('academia.chat.provider', value) }} />
-                <ChatPicker id="model" label="Model" value={model || defaultModel} placeholder="Provider default" ariaLabel="Model" options={modelOptions.map((entry) => ({ value: entry.id, label: entry.name }))} disabled={!modelOptions.length} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { setModel(value); localStorage.setItem(`academia.chat.model.${provider}`, value); if (provider === 'codex') localStorage.setItem('academia.chat.model', value) }} />
+                <ModelPicker
+                  providers={providerOptions}
+                  provider={provider}
+                  model={currentModel}
+                  activeName={activeProvider?.name ?? provider}
+                  open={openPicker === 'model'}
+                  setOpen={(next) => setOpenPicker(next ? 'model' : null)}
+                  onProvider={(value) => { setProvider(value); localStorage.setItem('academia.chat.provider', value) }}
+                  onModel={(value) => { setModel(value); localStorage.setItem(`academia.chat.model.${provider}`, value); if (provider === 'codex') localStorage.setItem('academia.chat.model', value); setOpenPicker(null) }}
+                />
                 <ChatPicker id="effort" label="Thinking" value={effort} ariaLabel="Thinking effort" options={thinkingOptions.map(([value, label]) => ({ value, label }))} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={(value) => { setEffort(value); localStorage.setItem(`academia.chat.effort.${provider}`, value); localStorage.setItem('academia.chat.effort', value) }} />
-                {notionAvailable && <button className={`chat-proposal-toggle ${notionGrant ? 'active' : ''}`} type="button" aria-label={notionGrant ? 'Notion context enabled' : 'Enable Notion context'} aria-pressed={notionGrant} disabled={busy || studyGenerationInProgress} data-tooltip={notionGrant ? 'Notion context is on · shared page text is sent to the selected AI provider for this message' : 'Use shared Notion pages as external context for this message'} data-tooltip-side="top" onClick={() => { const next = !notionGrant; setNotionGrant(next); localStorage.setItem('academia.chat.notionGrant', String(next)) }}>
+
+              </div>
+              <div className="chat-composer-toggles">
+              {notionAvailable && <button className={`chat-proposal-toggle ${notionGrant ? 'active' : ''}`} type="button" aria-label={notionGrant ? 'Notion context enabled' : 'Enable Notion context'} aria-pressed={notionGrant} disabled={busy || studyGenerationInProgress} data-tooltip={notionGrant ? 'Notion context is on · shared page text is sent to the selected AI provider for this message' : 'Use shared Notion pages as external context for this message'} data-tooltip-side="top" onClick={() => { const next = !notionGrant; setNotionGrant(next); localStorage.setItem('academia.chat.notionGrant', String(next)) }}>
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M6 4.5h8l4 4v11H6z" />
+                  <path d="M14 4.5v4h4M9 12h6M9 15h6" />
+                </svg>
+              </button>}
+              {googleAvailable && <>
+                <button className={`chat-proposal-toggle ${googleGrants.includes('gmail') ? 'active' : ''}`} type="button" aria-label={googleGrants.includes('gmail') ? 'Gmail context enabled' : 'Enable Gmail context'} aria-pressed={googleGrants.includes('gmail')} disabled={busy || studyGenerationInProgress} data-tooltip={googleGrants.includes('gmail') ? 'Gmail context is on · recent message metadata and snippets are sent to the selected AI provider for this message' : 'Use recent Gmail messages as external context for this message'} data-tooltip-side="top" onClick={() => toggleGoogleGrant('gmail')}>
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path d="M6 4.5h8l4 4v11H6z" />
-                    <path d="M14 4.5v4h4M9 12h6M9 15h6" />
-                  </svg>
-                </button>}
-                {googleAvailable && <>
-                  <button className={`chat-proposal-toggle ${googleGrants.includes('gmail') ? 'active' : ''}`} type="button" aria-label={googleGrants.includes('gmail') ? 'Gmail context enabled' : 'Enable Gmail context'} aria-pressed={googleGrants.includes('gmail')} disabled={busy || studyGenerationInProgress} data-tooltip={googleGrants.includes('gmail') ? 'Gmail context is on · recent message metadata and snippets are sent to the selected AI provider for this message' : 'Use recent Gmail messages as external context for this message'} data-tooltip-side="top" onClick={() => toggleGoogleGrant('gmail')}>
-                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <rect x="3.5" y="5.5" width="17" height="13" rx="2" />
-                      <path d="m4.5 7 7.5 6 7.5-6" />
-                    </svg>
-                  </button>
-                  <button className={`chat-proposal-toggle ${googleGrants.includes('calendar') ? 'active' : ''}`} type="button" aria-label={googleGrants.includes('calendar') ? 'Calendar context enabled' : 'Enable Calendar context'} aria-pressed={googleGrants.includes('calendar')} disabled={busy || studyGenerationInProgress} data-tooltip={googleGrants.includes('calendar') ? 'Calendar context is on · upcoming events are sent to the selected AI provider for this message' : 'Use upcoming Calendar events as external context for this message'} data-tooltip-side="top" onClick={() => toggleGoogleGrant('calendar')}>
-                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <rect x="4" y="5.5" width="16" height="14" rx="2" />
-                      <path d="M8 3.5v4M16 3.5v4M4 10h16" />
-                    </svg>
-                  </button>
-                </>}
-                <button className={`chat-search-toggle ${webSearch ? 'active' : ''}`} type="button" aria-label={webSearch ? 'Web search enabled' : 'Enable web search'} aria-pressed={webSearch} disabled={busy || studyGenerationInProgress || provider !== 'codex'} data-tooltip={webSearch ? 'Web search is on · Codex can use live web results; sources stay external and must be cited' : 'Enable web search · Codex may look up live web results for this chat'} data-tooltip-side="top" onClick={() => { const next = !webSearch; setWebSearch(next); localStorage.setItem('academia.chat.webSearch', String(next)) }}>
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <circle cx="12" cy="12" r="8.5" />
-                    <path d="M3.5 12h17M12 3.5c2.4 2.5 3.6 5.3 3.6 8.5s-1.2 6-3.6 8.5c-2.4-2.5-3.6-5.3-3.6-8.5S9.6 6 12 3.5Z" />
+                    <rect x="3.5" y="5.5" width="17" height="13" rx="2" />
+                    <path d="m4.5 7 7.5 6 7.5-6" />
                   </svg>
                 </button>
-                <button className={`chat-proposal-toggle ${proposalMode ? 'active' : ''}`} type="button" aria-label={proposalMode ? 'Action proposals enabled' : 'Enable action proposals'} aria-pressed={proposalMode} disabled={busy || studyGenerationInProgress || apiProvider} data-tooltip={proposalMode ? 'Proposal mode is on · the assistant can create Review items but cannot approve or execute them' : 'Enable action proposals · the assistant can prepare exact task or import changes for Review'} data-tooltip-side="top" onClick={() => { const next = !proposalMode; setProposalMode(next); localStorage.setItem('academia.chat.proposals', String(next)) }}>
+                <button className={`chat-proposal-toggle ${googleGrants.includes('calendar') ? 'active' : ''}`} type="button" aria-label={googleGrants.includes('calendar') ? 'Calendar context enabled' : 'Enable Calendar context'} aria-pressed={googleGrants.includes('calendar')} disabled={busy || studyGenerationInProgress} data-tooltip={googleGrants.includes('calendar') ? 'Calendar context is on · upcoming events are sent to the selected AI provider for this message' : 'Use upcoming Calendar events as external context for this message'} data-tooltip-side="top" onClick={() => toggleGoogleGrant('calendar')}>
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path d="M7 3.5h7l3 3v14H7z" />
-                    <path d="M14 3.5v3h3" />
-                    <path d="M9.5 12.5h5M9.5 15.5h5" />
+                    <rect x="4" y="5.5" width="16" height="14" rx="2" />
+                    <path d="M8 3.5v4M16 3.5v4M4 10h16" />
                   </svg>
                 </button>
-                {provider === 'codex' && <button className={`chat-speed-toggle ${speed === 'fast' ? 'active' : ''}`} type="button" aria-label={`${speed === 'fast' ? 'Fast' : 'Standard'} response speed`} aria-pressed={speed === 'fast'} data-tooltip={speed === 'fast' ? 'Fast response mode · shorter waits, but it may use your ChatGPT subscription allowance faster' : 'Standard response mode · normal processing speed'} data-tooltip-side="top" onClick={() => { const nextSpeed = speed === 'fast' ? 'standard' : 'fast'; setSpeed(nextSpeed); localStorage.setItem('academia.chat.speed', nextSpeed) }}>
+              </>}
+              <button className={`chat-search-toggle ${webSearch ? 'active' : ''}`} type="button" aria-label={webSearch ? 'Web search enabled' : 'Enable web search'} aria-pressed={webSearch} disabled={busy || studyGenerationInProgress || provider !== 'codex'} data-tooltip={webSearch ? 'Web search is on · Codex can use live web results; sources stay external and must be cited' : 'Enable web search · Codex may look up live web results for this chat'} data-tooltip-side="top" onClick={() => { const next = !webSearch; setWebSearch(next); localStorage.setItem('academia.chat.webSearch', String(next)) }}>
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <circle cx="12" cy="12" r="8.5" />
+                  <path d="M3.5 12h17M12 3.5c2.4 2.5 3.6 5.3 3.6 8.5s-1.2 6-3.6 8.5c-2.4-2.5-3.6-5.3-3.6-8.5S9.6 6 12 3.5Z" />
+                </svg>
+              </button>
+              <button className={`chat-proposal-toggle ${proposalMode ? 'active' : ''}`} type="button" aria-label={proposalMode ? 'Action proposals enabled' : 'Enable action proposals'} aria-pressed={proposalMode} disabled={busy || studyGenerationInProgress} data-tooltip={proposalMode ? 'Proposal mode is on · the assistant can create Review items but cannot approve or execute them' : 'Enable action proposals · the assistant can prepare exact task or import changes for Review'} data-tooltip-side="top" onClick={() => { const next = !proposalMode; setProposalMode(next); localStorage.setItem('academia.chat.proposals', String(next)) }}>
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M7 3.5h7l3 3v14H7z" />
+                  <path d="M14 3.5v3h3" />
+                  <path d="M9.5 12.5h5M9.5 15.5h5" />
+                </svg>
+              </button>
+
+              </div>
+              <div className="chat-composer-actions">
+                  {provider === 'codex' && <button className={`chat-speed-toggle ${speed === 'fast' ? 'active' : ''}`} type="button" aria-label={`${speed === 'fast' ? 'Fast' : 'Standard'} response speed`} aria-pressed={speed === 'fast'} data-tooltip={speed === 'fast' ? 'Fast response mode · shorter waits, but it may use your ChatGPT subscription allowance faster' : 'Standard response mode · normal processing speed'} data-tooltip-side="top" onClick={() => { const nextSpeed = speed === 'fast' ? 'standard' : 'fast'; setSpeed(nextSpeed); localStorage.setItem('academia.chat.speed', nextSpeed) }}>
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                     <path className="chat-speed-gauge" d="M5.05 18.95a9.8 9.8 0 1 1 13.9 0l-2.12-2.12a6.8 6.8 0 1 0-9.66 0l-2.12 2.12Z" />
                     <path className="chat-speed-needle" d="m12 13 4.4-4.4" />
@@ -1193,24 +1373,71 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
               </div>
             </div>
           </form>
-          <div className="chat-composer-foot"><span>Paste an image or document · Enter to send · Shift + Enter for a new line</span><span>{course ? `${selectedItems.filter((item) => item.course_id === courseId).length} class sources available${selectedItems.some((item) => item.course_id !== courseId) ? ` · ${selectedItems.filter((item) => item.course_id !== courseId).length} additional` : ''}${academicContextLoading ? ' · loading course context…' : ''}${lastRetrievedSourceIds.length ? ` · ${lastRetrievedSourceIds.length} retrieved last reply` : ''}` : selectedItems.length ? `${selectedItems.length} sources added` : 'Select a class to use its sources automatically'}</span></div>
+          <div className="chat-composer-foot"><span>Paste an image or document · Enter to send · Shift + Enter for a new line</span><span>{course ? `${selectedItems.filter((item) => item.course_id === courseId).length} class sources available${selectedItems.some((item) => item.course_id !== courseId) ? ` · ${selectedItems.filter((item) => item.course_id !== courseId).length} additional` : ''}${academicContextLoading ? ' · loading course context…' : ''}${lastRetrievedSourceIds.length ? ` · ${lastRetrievedSourceIds.length} retrieved last reply` : ''}` : selectedItems.length ? `${selectedItems.length} sources added` : 'Choose a scope to use its sources automatically'}</span></div>
         </div>
       </section>
 
-      <ChatStudyStudio courses={courses} course={course} items={readableItems} selectedSourceIds={selectedItems.map((item) => item.id)} semester={semester} provider={provider} model={model || defaultModel || undefined} isVisible={studioOpen} onCollapse={() => setStudioOpen(false)} chatRequest={chatStudyRequest} onChatRequestComplete={onChatStudyRequestComplete} />
-      {!studioOpen && <aside className="chat-study-panel chat-collapsed-rail studio-collapsed-rail" aria-label="Study modes panel collapsed"><button className="chat-rail-toggle" type="button" onClick={() => setStudioOpen(true)} aria-label="Expand study modes panel" data-tooltip="Studio" data-tooltip-side="left">‹</button></aside>}
+      {(railOpen || panelOpen) && <div className="agent-drawer-backdrop" role="presentation" onClick={() => { setRailOpen(false); setPanelOpen(false) }} />}
+      {railOpen && <aside className="agent-drawer agent-drawer-left agent-history" aria-label="Conversation history" role="dialog" aria-modal="false">
+        <header className="agent-history-heading"><div><p className="eyebrow">Academia AI</p><h3>History</h3></div><button className="chat-panel-collapse" type="button" onClick={() => setRailOpen(false)} aria-label="Collapse history">‹</button></header>
+        <button className="agent-home-button" type="button" onClick={onGoHome}><span aria-hidden="true">⌂</span> Home</button>
+        <button className="agent-new-chat" type="button" onClick={startNewChat} disabled={busy || studyGenerationInProgress}><span aria-hidden="true">＋</span> New chat</button>
+        <div className="agent-history-list">
+          {conversationHistory.map((conversation) => <button key={conversation.id} type="button" className={`agent-history-row ${conversation.id === activeConversationId ? 'active' : ''}`} onClick={() => void resumeConversation(conversation.id)} disabled={busy || studyGenerationInProgress}>
+            <span>{conversation.title || 'Untitled chat'}</span>
+            <small>{conversation.courseLabel || 'All classes'}{conversation.updatedAt ? ` · ${new Date(conversation.updatedAt).toLocaleDateString()}` : ''}</small>
+          </button>)}
+          {!conversationHistory.length && <p className="agent-history-empty">{conversationHistoryLoading ? 'Loading conversations…' : 'No conversations yet.'}</p>}
+          {conversationHistoryError && <p className="agent-history-error" role="alert">{conversationHistoryError}</p>}
+        </div>
+        <button className="agent-history-more" type="button" onClick={() => void openHistory()} disabled={busy || studyGenerationInProgress}>Saved practice sessions</button>
+      
+      </aside>}
+      {panelOpen && <aside className="agent-drawer agent-drawer-right agent-panel" aria-label="Agent panel" role="dialog" aria-modal="false">
+          <div className="agent-panel-tabs" role="tablist" aria-label="Agent panel sections">
+            <button type="button" role="tab" aria-selected={panelTab === 'context'} className={panelTab === 'context' ? 'active' : ''} onClick={() => setPanelTab('context')}>Context</button>
+            <button type="button" role="tab" aria-selected={panelTab === 'study'} className={panelTab === 'study' ? 'active' : ''} onClick={() => setPanelTab('study')}>Study</button>
+            <button type="button" role="tab" aria-selected={panelTab === 'actions'} className={panelTab === 'actions' ? 'active' : ''} onClick={() => setPanelTab('actions')}>Actions{pendingActions.length ? ` (${pendingActions.length})` : ''}</button>
+          <button type="button" role="tab" aria-selected={panelTab === 'activity'} className={panelTab === 'activity' ? 'active' : ''} onClick={() => setPanelTab('activity')}>Activity</button>
+            <button className="chat-panel-collapse" type="button" onClick={() => setPanelOpen(false)} aria-label="Collapse panel">›</button>
+          </div>
+          <div className="agent-panel-body">
+            {panelTab === 'context' && contextPanel}
+            {panelTab === 'study' && <ChatStudyStudio courses={courses} course={course} items={readableItems} selectedSourceIds={selectedItems.map((item) => item.id)} semester={semester} provider={provider} model={currentModel || undefined} isVisible onCollapse={() => setPanelOpen(false)} chatRequest={chatStudyRequest} onChatRequestComplete={onChatStudyRequestComplete} />}
+            {panelTab === 'actions' && <div className="agent-actions">
+            {actionNotice && <p className="agent-actions-notice" role="status">{actionNotice}</p>}
+            {pendingActions.length ? pendingActions.map((action) => <article className="agent-action-card" key={action.proposal_id}>
+              <header><strong>{action.title}</strong><span className={`agent-action-tier ${action.tier}`}>{action.tier}</span></header>
+              {action.preview?.summary && <p>{action.preview.summary}</p>}
+              {(action.preview?.changes ?? []).map((change, index) => <div className="agent-action-change" key={`${action.proposal_id}-${index}`}>
+                <span>{change.label}</span>
+                <code>{change.from ?? '—'} → {change.to ?? '—'}</code>
+              </div>)}
+              <div className="agent-action-buttons">
+                {action.tier === 'review' && action.review_id
+                  ? <button className="primary-button" type="button" onClick={() => { setPanelOpen(false); onOpenReview(action.review_id as string) }}>Open Review</button>
+                  : <button className="primary-button" type="button" disabled={Boolean(actionBusy)} onClick={() => void allowAction(action.proposal_id)}>{actionBusy === action.proposal_id ? 'Applying…' : 'Allow'}</button>}
+                <button className="quiet-button" type="button" disabled={Boolean(actionBusy)} onClick={() => void discardAction(action.proposal_id)}>Decline</button>
+              </div>
+            </article>) : <p className="agent-history-empty">No pending actions.</p>}
+          </div>}
+          {panelTab === 'activity' && <div className="agent-activity">
+              {activity.length ? activity.slice(0, 40).map((entry) => <div className="agent-activity-row" key={entry.id}><span className="agent-activity-dot" aria-hidden="true" /><div><strong>{entry.title}</strong><small>{new Date(entry.created_at).toLocaleString()}</small></div></div>) : <p className="agent-history-empty">No activity recorded yet.</p>}
+            </div>}
+          </div>
+        </aside>}
+
     </section>
     {showSourcePicker && <div className="chat-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowSourcePicker(false) }}><section className="chat-dialog chat-source-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="chat-source-picker-title"><header><div><p className="eyebrow">Add to this chat</p><h3 id="chat-source-picker-title">Choose Academia sources</h3><p>{course ? `Browse materials outside ${course.code}. They’ll be attached only to this chat.` : 'Choose material from any class to add to this chat.'}</p></div><button className="chat-dialog-close" onClick={() => setShowSourcePicker(false)} aria-label="Close source picker">×</button></header><label className="chat-source-search"><span aria-hidden="true">⌕</span><input value={sourcePickerFilter} onChange={(event) => setSourcePickerFilter(event.target.value)} placeholder="Search other classes and sources" aria-label="Search sources to add" /></label><div className="chat-picker-source-groups">{pickerGroups.map(([groupId, group]) => <section className="chat-source-group" key={groupId}><header><strong>{group.name}</strong><span>{group.items.filter((item) => sourceIds.includes(item.id)).length} added</span></header>{group.items.map((item) => <label className={`chat-source-row ${sourceIds.includes(item.id) ? 'selected' : ''}`} key={item.id}><input type="checkbox" checked={sourceIds.includes(item.id)} onChange={() => toggleSource(item.id)} aria-label={`${sourceIds.includes(item.id) ? 'Remove' : 'Add'} ${item.name} ${sourceIds.includes(item.id) ? 'from' : 'to'} this chat`} /><span className="chat-source-file-icon" aria-hidden="true">{item.extension.replace('.', '').slice(0, 3).toUpperCase()}</span><span className="chat-source-copy"><strong>{item.name}</strong><small>{item.category.replaceAll('_', ' ')}{item.intake_status === 'inbox' ? ' · Intake' : ''} · {item.extension.toUpperCase()}</small></span></label>)}</section>)}{!pickerGroups.length && <div className="chat-sources-empty"><strong>No sources found</strong><p>Try another search or import material into a class first.</p></div>}</div><footer><span>{selectedItems.filter((item) => item.course_id !== courseId).length} additional source{selectedItems.filter((item) => item.course_id !== courseId).length === 1 ? '' : 's'} attached</span><button className="primary-button" onClick={() => setShowSourcePicker(false)}>Done</button></footer></section></div>}
     {historyOpen && <div className="chat-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setHistoryOpen(false) }}><section className="chat-dialog chat-history-dialog" role="dialog" aria-modal="true" aria-labelledby="chat-history-title">
-      <header><div><p className="eyebrow">Pick up where you left off</p><h3 id="chat-history-title">Chat & study history</h3><p>Conversations are saved in this browser on this device and stay until you delete them or clear browser data. Saved practice sessions remain in the class workspace. File contents and image previews are not retained; reattach original files to use them again.</p></div><button className="chat-dialog-close" onClick={() => setHistoryOpen(false)} aria-label="Close chat and study history">×</button></header>
+      <header><div><p className="eyebrow">Pick up where you left off</p><h3 id="chat-history-title">Chat & study history</h3><p>Conversations are saved in your local workspace and stay until you delete them. Saved practice sessions remain in the class workspace. File contents and image previews are not retained; reattach original files to use them again.</p></div><button className="chat-dialog-close" onClick={() => setHistoryOpen(false)} aria-label="Close chat and study history">×</button></header>
       <div className="chat-history-content">
         {messages.length > 0 && <><p className="chat-history-section-label">Current conversation</p><div className="chat-history-list"><button className="chat-history-row chat-conversation-row" onClick={() => setHistoryOpen(false)}><span className="chat-history-icon">◌</span><span><strong>{messages.find((message) => message.role === 'user')?.content.replace(/\s+/g, ' ').slice(0, 72) || 'Study conversation'}</strong><small>{course ? `${course.code} · ${course.name}` : 'General study chat'} · {messages.length} messages</small></span><b>Current</b></button></div></>}
-        {conversationHistoryLoading && <p className="chat-history-session-note" role="status">Loading saved conversations from this device…</p>}
+        {conversationHistoryLoading && <p className="chat-history-session-note" role="status">Loading saved conversations…</p>}
         {conversationHistoryError && <p className="chat-error" role="alert">{conversationHistoryError}</p>}
-        {conversationHistory.filter((conversation) => conversation.id !== activeConversationId).length > 0 && <><p className="chat-history-section-label">Saved conversations</p><div className="chat-history-list">{conversationHistory.filter((conversation) => conversation.id !== activeConversationId).map((conversation) => <div className="chat-history-entry" key={conversation.id}><button className="chat-history-row chat-conversation-row" onClick={() => resumeConversation(conversation)} disabled={busy}><span className="chat-history-icon">◌</span><span><strong>{conversation.title}</strong><small>{conversation.courseLabel} · {conversation.messages.length} messages · {new Date(conversation.updatedAt).toLocaleString()}</small></span><b>Open →</b></button><button className="chat-history-delete" onClick={() => void removeConversation(conversation.id)} aria-label={`Delete ${conversation.title}`} data-tooltip="Delete saved conversation" data-tooltip-side="left">×</button></div>)}</div></>}
         {(historyLoading || historyError || historyEntries.length > 0 || conversationHistory.length > 0) && <p className="chat-history-section-label">Saved practice sessions</p>}
         {historyLoading ? <p className="chat-history-session-note" role="status">Checking saved study sessions…</p> : historyError ? <p className="chat-error" role="alert">{historyError}</p> : historyEntries.length ? <div className="chat-history-list">{historyEntries.map(({ course: entryCourse, session }) => <button className="chat-history-row" key={`${entryCourse.id}:${session.id}`} onClick={() => { setHistoryOpen(false); onResumeStudySession(entryCourse.id, session.id) }}><span className="chat-history-icon">◷</span><span><strong>{session.title}</strong><small>{entryCourse.code} · {session.status === 'active' ? 'In progress' : 'Completed'}{session.created_at ? ` · ${new Date(session.created_at).toLocaleDateString()}` : ''}</small></span><b>{session.status === 'active' ? 'Resume →' : 'Review →'}</b></button>)}</div> : conversationHistory.length > 0 && <p className="chat-history-session-note">No saved practice sessions found for these classes yet.</p>}
-        {!conversationHistoryLoading && !conversationHistoryError && !conversationHistory.length && !messages.length && !historyLoading && !historyError && !historyEntries.length && <div className="chat-history-empty"><span>◷</span><strong>No chat history yet</strong><p>Your conversations will be saved here on this device after you chat. Structured study sessions are saved separately by class.</p></div>}
+        {!conversationHistoryLoading && !conversationHistoryError && !conversationHistory.length && !messages.length && !historyLoading && !historyError && !historyEntries.length && <div className="chat-history-empty"><span>◷</span><strong>No chat history yet</strong><p>Your conversations will be saved in your workspace after you chat. Structured study sessions are saved separately by class.</p></div>}
       </div>
       <footer><button className="secondary-button" onClick={startNewChat} disabled={busy}>Start a new study chat</button><button className="primary-button" onClick={() => setHistoryOpen(false)}>Done</button></footer>
     </section></div>}
@@ -1218,6 +1445,43 @@ export function DashboardChat({ courses, items, semester, onOpenReview, onPropos
 }
 
 type PickerOption = { value: string; label: string; disabled?: boolean; reason?: string }
+function ModelPicker({
+  providers, provider, model, activeName, open, setOpen, onProvider, onModel,
+}: {
+  providers: ChatProviderInfo[]
+  provider: string
+  model: string
+  activeName: string
+  open: boolean
+  setOpen: (value: boolean) => void
+  onProvider: (value: string) => void
+  onModel: (value: string) => void
+}) {
+  const active = providers.find((entry) => entry.id === provider)
+  const models = active?.models ?? []
+  const modelLabel = models.find((entry) => entry.id === model)?.name || model || 'Provider default'
+  return <div className={`chat-picker chat-picker-model ${open ? 'open' : ''}`}>
+    <button className="chat-picker-trigger chat-model-trigger" type="button" aria-label={`Model: ${activeName} · ${modelLabel}`} aria-haspopup="listbox" aria-expanded={open} title={`${activeName} · ${modelLabel}`} onClick={() => setOpen(!open)}>
+      <span className="chat-model-provider">{activeName}</span>
+      <span className="chat-model-sep" aria-hidden="true">/</span>
+      <strong>{modelLabel}</strong>
+      <span className="chat-picker-caret" aria-hidden="true">⌄</span>
+    </button>
+    {open && <div className="chat-picker-menu chat-model-menu" role="listbox" aria-label="Provider and model">
+      <p className="chat-picker-group-label">Provider</p>
+      {providers.map((entry) => <button key={entry.id} type="button" role="option" aria-selected={entry.id === provider} aria-disabled={entry.available ? undefined : true} title={entry.reason || entry.notice} className={entry.id === provider ? 'selected' : ''} onClick={() => { if (entry.available) onProvider(entry.id) }}>
+        <span>{entry.name}</span>
+        {entry.id === provider && <span className="chat-picker-check" aria-hidden="true">✓</span>}
+      </button>)}
+      <p className="chat-picker-group-label">Model</p>
+      {models.length ? models.map((entry) => <button key={entry.id} type="button" role="option" aria-selected={entry.id === model} className={entry.id === model ? 'selected' : ''} onClick={() => onModel(entry.id)}>
+        <span>{entry.name}</span>
+        {entry.id === model && <span className="chat-picker-check" aria-hidden="true">✓</span>}
+      </button>) : <p className="chat-picker-empty">Choose a connected provider to see its models.</p>}
+    </div>}
+  </div>
+}
+
 function ChatPicker({ id, label, icon, value, placeholder = '', ariaLabel, title, options, disabled = false, openPicker, setOpenPicker, onChange }: {
   id: string
   label?: string
@@ -1234,11 +1498,12 @@ function ChatPicker({ id, label, icon, value, placeholder = '', ariaLabel, title
 }) {
   const open = openPicker === id
   const selected = options.find((option) => option.value === value)
-  return <div className={`chat-picker ${id === 'course' ? 'chat-course-picker' : ''} ${open ? 'open' : ''}`} title={title}>
-    <button className={`chat-picker-trigger ${label ? 'has-label' : 'course-trigger'}`} type="button" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} disabled={disabled} onClick={() => setOpenPicker(open ? null : id)}>
+  const displayLabel = selected?.label || placeholder || value
+  return <div className={`chat-picker chat-picker-${id} ${id === 'course' ? 'chat-course-picker' : ''} ${open ? 'open' : ''}`} title={title}>
+    <button className={`chat-picker-trigger ${label ? 'has-label' : 'course-trigger'}`} type="button" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} disabled={disabled} title={label ? `${label}: ${displayLabel}` : displayLabel} onClick={() => setOpenPicker(open ? null : id)}>
       {icon && <span className="chat-picker-icon" aria-hidden="true">{icon}</span>}
       {label && <span className="chat-picker-label">{label}</span>}
-      <strong>{selected?.label || placeholder || value}</strong>
+      <strong>{displayLabel}</strong>
       <span className="chat-picker-caret" aria-hidden="true">⌄</span>
     </button>
     {open && <div className="chat-picker-menu" role="listbox" aria-label={ariaLabel}>{options.map((option) => <button key={option.value || '__empty'} type="button" role="option" aria-selected={value === option.value} aria-disabled={option.disabled || undefined} title={option.reason} disabled={option.disabled} className={value === option.value ? 'selected' : ''} onClick={() => { onChange(option.value); setOpenPicker(null) }}><span>{option.label}{option.reason && <small className="chat-picker-option-reason">{option.reason}</small>}</span>{value === option.value && <span className="chat-picker-check" aria-hidden="true">✓</span>}</button>)}</div>}
@@ -1284,4 +1549,62 @@ function normalizeAttachmentFile(file: File): File | null {
   const name = namedExtension === extension ? file.name : `${file.name || 'pasted-file'}${extension}`
   if (file.type === format.mime && file.name === name) return file
   return new File([file], name, { type: format.mime, lastModified: file.lastModified })
+}
+
+function ElapsedTimer({ label }: { label: string }) {
+  const [seconds, setSeconds] = useState(0)
+  useEffect(() => {
+    const timer = window.setInterval(() => setSeconds((value) => value + 1), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+  return <span className="chat-elapsed">{label}{seconds >= 1 ? ` · ${seconds}s` : ''}</span>
+}
+
+function friendlyTool(tool: string) {
+  const name = tool.includes('.') ? tool.split('.').pop() || tool : tool
+  return name.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function formatDuration(ms?: number | null) {
+  if (ms === undefined || ms === null) return ''
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+function ChatTrace({ trace }: { trace: ChatTraceStep[] }) {
+  const [open, setOpen] = useState(false)
+  const failed = trace.filter((step) => !step.ok).length
+  const names = [...new Set(trace.map((step) => friendlyTool(step.tool)))]
+  return <div className={`chat-trace ${open ? 'open' : ''}`}>
+    <button type="button" className="chat-trace-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+      <span className="chat-trace-caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
+      <span>Used {trace.length} tool{trace.length === 1 ? '' : 's'}{failed ? ` · ${failed} failed` : ''}</span>
+      <small>{names.slice(0, 3).join(', ')}{names.length > 3 ? ` +${names.length - 3}` : ''}</small>
+    </button>
+    {open && <ul className="chat-trace-list">
+      {trace.map((step, index) => <li key={`${step.tool}-${index}`} className={step.ok ? '' : 'failed'}>
+        <span className="chat-trace-dot" aria-hidden="true" />
+        <strong>{friendlyTool(step.tool)}</strong>
+        <code>{step.tool}</code>
+        <time>{step.ok ? formatDuration(step.ms) || 'done' : 'failed'}</time>
+      </li>)}
+    </ul>}
+  </div>
+}
+
+function ChatMessageFooter({ content, at }: { content: string; at?: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      setCopied(false)
+    }
+  }
+  return <div className="chat-message-foot">
+    <button type="button" className="chat-copy" onClick={() => void copy()} aria-label="Copy message">{copied ? 'Copied' : 'Copy'}</button>
+    {at && <time className="chat-message-time" dateTime={at}>{new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
+  </div>
 }

@@ -10,10 +10,11 @@ type ImportViewProps = {
   courses: Course[]
   semester?: string
   initialCourseId?: string
+  initialFiles?: File[]
   onImported: () => Promise<void>
 }
 
-export function ImportView({ status, courses, semester, initialCourseId, onImported }: ImportViewProps) {
+export function ImportView({ status, courses, semester, initialCourseId, initialFiles, onImported }: ImportViewProps) {
   const [paths, setPaths] = useState<string[]>([])
   const [browserFiles, setBrowserFiles] = useState<File[]>([])
   const [destination, setDestination] = useState(() => courses.some((course) => course.id === initialCourseId) ? initialCourseId as string : 'general')
@@ -24,8 +25,16 @@ export function ImportView({ status, courses, semester, initialCourseId, onImpor
   const [results, setResults] = useState<ImportResult[]>([])
   const [syllabusPreview, setSyllabusPreview] = useState<ExtractionPreview | null>(null)
   const [verifiedCurrent, setVerifiedCurrent] = useState(false)
+  const [preflight, setPreflight] = useState<Array<{ key: string; name: string; size?: number; extractable?: boolean; ocr?: boolean; duplicate?: { identical: boolean; name: string } | null; missing?: string }>>([])
+  const [skipped, setSkipped] = useState<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const tauriEnvironment = isTauriEnvironment()
+  const receivedInitialFiles = useRef(false)
+  useEffect(() => {
+    if (receivedInitialFiles.current || !initialFiles?.length) return
+    receivedInitialFiles.current = true
+    addBrowserFiles(initialFiles)
+  }, [initialFiles])
 
   const addBrowserFiles = (selected: File[]) => {
     if (!selected.length) {
@@ -50,6 +59,7 @@ export function ImportView({ status, courses, semester, initialCourseId, onImpor
     setBrowserFiles([])
     setSyllabusPreview(null)
     setVerifiedCurrent(false)
+    setSkipped([])
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -73,6 +83,40 @@ export function ImportView({ status, courses, semester, initialCourseId, onImpor
   const targetSemester = semester || status.workspace.semester
   const destinationPath = selectedCourse ? `${selectedCourse.path}/00_INBOX` : `${status.workspace.academic_root}/${targetSemester}/00_INBOX`
   const requiresReview = uncertain || !selectedCourse
+  useEffect(() => {
+    let active = true
+    if (!paths.length) {
+      if (!browserFiles.length) setPreflight([])
+      return () => { active = false }
+    }
+    const request = isTauriEnvironment() ? api.importPreflightDesktop(paths, destinationPath) : api.importPreflight(paths, destinationPath)
+    void request.then((value) => {
+      if (!active) return
+      setPreflight(value.files.map((file) => ({
+        key: file.path,
+        name: file.name,
+        size: file.size,
+        extractable: file.extractable,
+        ocr: file.ocr_may_be_needed,
+        duplicate: file.duplicate ? { identical: file.duplicate.identical, name: file.duplicate.name } : null,
+        missing: file.status === 'missing' ? file.reason : undefined,
+      })))
+    }).catch(() => {
+      if (active) setPreflight(paths.map((path) => ({ key: path, name: basename(path) })))
+    })
+    return () => { active = false }
+  }, [paths, destinationPath])
+  useEffect(() => {
+    if (paths.length) return
+    setPreflight(browserFiles.map((file) => ({
+      key: fileKey(file),
+      name: file.name,
+      size: file.size,
+      extractable: /\.(pdf|docx|pptx|txt|text|md|markdown|csv|json|yaml|yml)$/i.test(file.name),
+      ocr: /\.pdf$/i.test(file.name),
+      duplicate: null,
+    })))
+  }, [browserFiles, paths.length])
   const suggestions = useMemo(() => paths.map((path) => ({ path, course: suggestCourse(path, courses) })), [paths, courses])
   const selectedCount = paths.length + browserFiles.length
   // Browser File objects do not expose a safe local path. Only native Tauri paths
@@ -167,9 +211,9 @@ export function ImportView({ status, courses, semester, initialCourseId, onImpor
       setError(null)
       const imported: ImportResult[] = []
       if (tauriEnvironment) {
-        for (const path of paths) imported.push(await api.importFile(path, destinationPath, requiresReview))
+        for (const path of paths.filter((path) => !skipped.includes(path))) imported.push(await api.importFile(path, destinationPath, requiresReview))
       } else {
-        for (const file of browserFiles) imported.push(await api.uploadFile(file, destinationPath, requiresReview))
+        for (const file of browserFiles.filter((file) => !skipped.includes(fileKey(file)))) imported.push(await api.uploadFile(file, destinationPath, requiresReview))
       }
       setResults(imported)
       clearSelected()
@@ -181,27 +225,34 @@ export function ImportView({ status, courses, semester, initialCourseId, onImpor
     }
   }
 
+  const includedCount = selectedCount - skipped.length
   return <div className="page-stack">
     <section className="page-intro"><p className="eyebrow">Safe intake</p><h2>Import material</h2><p>Bring in school files without moving the originals. Choose a course when you know it; otherwise send the copy to general intake for an authorized external agent to process later.</p></section>
     <section className={`drop-zone ${dragging ? 'dragging' : ''}`} onDragOver={tauriEnvironment ? undefined : handleDragOver} onDragEnter={tauriEnvironment ? undefined : handleDragEnter} onDragLeave={tauriEnvironment ? undefined : handleDragLeave} onDrop={tauriEnvironment ? undefined : handleDrop}><div className="drop-icon">↓</div><h3>Drop files here</h3><p>PDFs, documents, slides, notes, or other local academic material.</p><button className="primary-button" onClick={() => void chooseFiles()}>Choose files</button>{!tauriEnvironment && <input ref={fileInputRef} className="browser-file-input" type="file" multiple onChange={handleBrowserFileChange} aria-label="Choose academic material from this computer" />}{!tauriEnvironment ? <small>Files remain on this computer and are passed to the local dashboard only.</small> : <small>Files are copied into the workspace. The original stays where it is.</small>}</section>
     {selectedCount > 0 && <section className="import-panel">
       <div className="section-heading"><div><p className="eyebrow">Selected material</p><h3>{selectedCount} file{selectedCount === 1 ? '' : 's'} ready</h3></div><button className="quiet-button" onClick={clearSelected}>Clear</button></div>
       <div className="selected-files">
-        {suggestions.map(({ path, course }) => (
-          <article className="selected-file" key={path}>
-            <div><strong>{basename(path)}</strong><small>{course ? `Likely match: ${course.code} · based on the filename` : 'Course not identified from the filename'}</small></div>
-            {course ? <button className="quiet-button" onClick={() => { setDestination(course.id); setUncertain(false) }}>Use suggestion</button> : null}
+        {preflight.map((row) => {
+          const included = !skipped.includes(row.key)
+          const facts = [
+            row.size ? formatBytes(row.size) : null,
+            row.missing ? null : row.extractable === false ? 'kept as-is, no text extraction' : 'text searchable',
+            row.ocr ? 'OCR may be needed' : null,
+          ].filter(Boolean).join(' · ')
+          return <article className={`selected-file ${included ? '' : 'excluded'} ${row.missing ? 'missing' : ''}`} key={row.key}>
+            <label className="check-row selected-file-check"><input type="checkbox" checked={included} aria-label={`Include ${row.name}`} onChange={() => setSkipped((current) => included ? [...current, row.key] : current.filter((key) => key !== row.key))} /></label>
+            <div>
+              <strong>{row.name}</strong>
+              <small>{row.missing || facts}</small>
+              {row.duplicate && <small className="import-duplicate">{row.duplicate.identical ? 'Identical copy already in this inbox — uncheck to skip it.' : `Same filename already in this inbox: ${row.duplicate.name}`}</small>}
+            </div>
           </article>
-        ))}
-        {browserFiles.map((file) => (
-          <article className="selected-file" key={fileKey(file)}>
-            <div><strong>{file.name}</strong><small>Browser file · remains on this computer and is passed to the local dashboard</small></div>
-          </article>
-        ))}
+        })}
+        {!preflight.length && <p className="account-note">Inspecting the selection…</p>}
       </div>
       <div className="import-options"><label className="setup-field"><span>Destination</span><select value={destination} onChange={(event) => { setDestination(event.target.value); setUncertain(event.target.value === 'general'); setSyllabusPreview(null) }}><option value="general">General intake — I’m not sure where this belongs</option>{courses.map((course) => <option value={course.id} key={course.id}>{course.code} · {course.name.split(' - ').slice(1).join(' - ') || course.name}</option>)}</select></label><label className="check-row"><input type="checkbox" checked={uncertain} onChange={(event) => setUncertain(event.target.checked)} /><span>Keep classification uncertain for an authorized external agent</span></label></div>
       {canPreviewSyllabus && <section className="extraction-preview"><p className="eyebrow">Controlled extraction</p><h3>Syllabus preview</h3>{!syllabusPreview ? <><p>Analyze this syllabus locally before adding anything. The original file will not be changed.</p><label className="check-row"><input type="checkbox" checked={verifiedCurrent} onChange={(event) => setVerifiedCurrent(event.target.checked)} /><span>I verified this is the current syllabus</span></label><button className="secondary-button" onClick={() => void previewSyllabus()} disabled={busy}>{busy ? 'Analyzing…' : 'Preview syllabus'}</button></> : <SyllabusSummary preview={syllabusPreview} onApply={() => void applySyllabus()} busy={busy} />}</section>}
-      <div className="import-actions"><button className="quiet-button" onClick={clearSelected}>Cancel</button><button className="primary-button" onClick={() => void importSelected()} disabled={busy}>{busy ? 'Copying…' : 'Copy into workspace'}</button></div>
+      <div className="import-actions"><button className="quiet-button" onClick={clearSelected}>Cancel</button><button className="primary-button" onClick={() => void importSelected()} disabled={busy}>{busy ? 'Copying…' : `Import ${includedCount} file${includedCount === 1 ? '' : 's'}`}</button></div>
     </section>}
     {results.length > 0 && <section className="success-panel"><strong>{results.length} file{results.length === 1 ? '' : 's'} copied safely.</strong><span>Originals remain in their original locations. {results.some((result) => result.review_item_id) ? 'The uncertain copies remain available for an authorized external agent.' : 'The copies are now in local intake.'}</span></section>}
     {error && <p className="setup-error" role="alert">{error}</p>}
@@ -216,6 +267,12 @@ function SyllabusSummary({ preview, onApply, busy }: { preview: ExtractionPrevie
 }
 
 function isSyllabusPath(path: string) { return /\.(pdf|md|markdown|txt)$/i.test(path) }
+function formatBytes(size: number) {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
 function basename(path: string) { return path.split(/[\\/]/).pop() || path }
 function fileKey(file: File) { return `${file.name}\u0000${file.size}\u0000${file.lastModified}` }
 function suggestCourse(path: string, courses: Course[]) {

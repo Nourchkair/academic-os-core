@@ -281,35 +281,23 @@ def test_workflow_reset_cli_is_local_idempotent_and_does_not_fabricate_integrati
     assert (root / ".academia" / "workflow_preferences.json").is_file()
 
 
-def test_dashboard_exposes_agent_setup_playbooks_and_editable_preferences_with_google_connector() -> None:
+def test_dashboard_keeps_workflow_commands_without_the_settings_playbook_ui() -> None:
     source = (FRONTEND / "SettingsView.tsx").read_text(encoding="utf-8")
     api_source = (FRONTEND / "lib" / "api.ts").read_text(encoding="utf-8")
     tauri = (FRONTEND.parent / "src-tauri" / "src" / "lib.rs").read_text(encoding="utf-8")
     assert "workflow" in SAFE_COMMANDS
     assert '"workflow"' in tauri
-    assert "Playbook guide" in source
-    assert "My playbook preferences" in source
-    assert "Save my playbook preferences" in source
-    assert "workflowPreferences" in source
-    assert "workflowSet" in source
-    assert "workflowReset" in source
-    assert "Reset to recommended defaults" in source
-    assert "Only resets Academia’s local preference record" in source
+    assert "Playbook guide" not in source
+    assert "Save my playbook preferences" not in source
+    assert "workflowPreferences" not in source
+    assert "workflowReset" not in source
     assert "workflowReset" in api_source
     assert "--replace-preferences" in api_source
     assert "JSON.stringify(preferences)" in api_source
-    assert "Agent Setup Playbook" in source
-    assert "api.playbooks" in source
+    assert "api.playbooks" not in source
     assert "ConnectionsHub" in source
     assert "GoogleConnectorCard" in (FRONTEND / "ConnectionsHub.tsx").read_text(encoding="utf-8")
     assert "Gmail and Google Calendar" in (FRONTEND / "ConnectionsHub.tsx").read_text(encoding="utf-8")
     assert "Connect Brightspace" not in source
     assert "automation definitely running" not in source
 
-
-def test_capability_labels_capitalize_words_after_underscore_conversion() -> None:
-    source = (FRONTEND / "SettingsView.tsx").read_text(encoding="utf-8")
-    assert "function capabilityLabel" in source
-    assert "replaceAll('_', ' ')" in source
-    assert "replace(/\\b\\w/g" in source
-    assert "toUpperCase()" in source

@@ -136,7 +136,67 @@ TASK_PROPOSAL_DESCRIPTOR = ToolDescriptor(
     verifiable=True,
 )
 
-WRITE_TOOL_DESCRIPTORS = [IMPORT_PROPOSAL_DESCRIPTOR, STUDY_CREATE_DESCRIPTOR, DOMAIN_CHANGE_DESCRIPTOR, TASK_PROPOSAL_DESCRIPTOR]
+ACTION_PROPOSAL_DESCRIPTOR = ToolDescriptor(
+    name="action.propose",
+    version=1,
+    description=(
+        "Propose one workspace change from the Academia action catalog and return its exact preview. "
+        "This never performs the change. Inline actions run only after the student presses Allow; "
+        "Review actions need a Review decision and a separate verified execute."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "action_type": {
+                "type": "string",
+                "enum": [
+                    "task_change",
+                    "grade_record",
+                    "file_restore",
+                    "course_create",
+                    "semester_create",
+                    "file_move",
+                    "file_trash",
+                    "configuration_change",
+                ],
+            },
+            "details": {"type": "object", "description": "Exact action fields, for example {\"path\": \"Fall 2026/Course/00_INBOX/file.pdf\"}."},
+            "title": {"type": "string", "maxLength": 200},
+        },
+        "required": ["action_type", "details"],
+        "additionalProperties": False,
+    },
+    permission=PermissionClass.WRITE_LOCAL,
+    side_effect=SideEffect.UPDATE,
+    disclosure=Disclosure.LOCAL_ONLY,
+    requires_approval=True,
+    idempotent=False,
+    previewable=True,
+    verifiable=True,
+)
+
+
+def propose_action(context: "read.ReadContext", arguments: dict[str, Any]) -> ToolResult:
+    """Create one catalog action proposal; it never executes the change."""
+
+    from ...action_service import ActionService
+
+    action_type = arguments.get("action_type")
+    details = arguments.get("details")
+    if not isinstance(action_type, str) or not action_type.strip():
+        raise AssistantError("action_type is required", code="invalid_action")
+    if not isinstance(details, dict):
+        raise AssistantError("details must be a JSON object", code="invalid_action")
+    title = arguments.get("title") if isinstance(arguments.get("title"), str) else None
+    service = ActionService(config=context.config)
+    try:
+        created = service.propose(action_type, details, title=title)
+    except (ValueError, PermissionError) as exc:
+        raise AssistantError(str(exc), code="invalid_action") from exc
+    return ToolResult(tool="action.propose", data=created)
+
+
+WRITE_TOOL_DESCRIPTORS = [IMPORT_PROPOSAL_DESCRIPTOR, STUDY_CREATE_DESCRIPTOR, DOMAIN_CHANGE_DESCRIPTOR, TASK_PROPOSAL_DESCRIPTOR, ACTION_PROPOSAL_DESCRIPTOR]
 
 
 def _state_stores(root: Path) -> tuple[ApprovalWorkflow, ReviewQueue]:

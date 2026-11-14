@@ -95,5 +95,12 @@
     "required": [
       "action"
     ]
+  },
+  {
+    "name": "academia_propose_action",
+    "required": [
+      "action_type",
+      "details"
+    ]
   }
 ]

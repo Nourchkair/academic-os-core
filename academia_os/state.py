@@ -93,12 +93,19 @@ class JsonStateStore:
         return self._read_unlocked(default)
 
     def _read_strict_unlocked(self, default: Any) -> Any:
-        if not self.path.exists():
-            return copy.deepcopy(default)
         try:
             raw = self.path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return copy.deepcopy(default)
         except OSError as exc:
-            raise StateCorruptionError(self.path, "state file could not be read") from exc
+            # An atomic replace by another local writer can briefly make the
+            # file unreadable. Retry once before calling the state corrupt.
+            try:
+                raw = self.path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                return copy.deepcopy(default)
+            except OSError:
+                raise StateCorruptionError(self.path, "state file could not be read") from exc
         try:
             value = json.loads(raw)
         except (ValueError, TypeError) as exc:

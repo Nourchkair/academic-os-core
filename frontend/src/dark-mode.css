@@ -582,3 +582,76 @@ a { color: #242424; }
   .chat-rail-toggle { background: #292929; border-color: #444; color: #d0d0d0; }
   .chat-rail-toggle:hover { background: #3a3a3a; border-color: #5d5d5d; color: #f0f0f0; }
 }
+
+@media (prefers-color-scheme: dark) {
+  .setup-error, .connection-error, .dashboard-inline-error {
+    background: #3a2624;
+    border-color: #6b3d38;
+    color: #f0b2aa;
+  }
+  .settings-success, .workflow-save-message {
+    background: #25352a;
+    border-color: #3c5e45;
+    color: #a6d8b1;
+  }
+  .connection-help-line, .account-note, .connection-type { color: var(--text-muted); }
+  .account-login a, .account-code a { color: var(--text-strong); }
+  .connection-dialog-backdrop { background: rgba(0, 0, 0, .68); }
+  .provider-connect-row, .provider-plus, .provider-state.connected, .mcp-tool em { color: var(--semantic-green); }
+  .provider-row.error { background: #33211f; }
+}
+
+@media (prefers-color-scheme: dark) {
+  /* Review cards: keep every comparison and evidence surface on-theme. */
+  .comparison-cell, .comparison-cell.emphasis,
+  .effect-list, .info-field,
+  .metadata-header, .metadata-row,
+  .candidate-review, .candidate-review:has(input:checked) {
+    background: var(--surface-raised);
+    border-color: var(--line);
+    color: var(--text-muted);
+  }
+  .comparison-cell span, .info-field span { color: var(--text-muted); }
+  .comparison-cell strong, .info-field strong, .effect-list strong,
+  .review-card-heading h3, .review-question,
+  .metadata-row, .candidate-review strong { color: var(--text-strong); }
+  .review-question { color: #d4d4d4; }
+  .review-kind, .review-card-heading p, .candidate-review small,
+  .evidence-line, .evidence-line b, .effect-list { color: var(--text-muted); }
+  .review-status, .structural-badge {
+    background: var(--surface-soft, #2c2c2c);
+    border: 1px solid var(--line);
+    color: var(--text-muted);
+  }
+  .metadata-table { border-color: var(--line); }
+  .metadata-row { border-top: 1px solid var(--line); }
+  .metadata-header { border-bottom: 1px solid var(--line); color: var(--text-muted); }
+  .candidate-review:has(input:checked) { border-color: #5c5c5c; }
+}
+
+@media (prefers-color-scheme: dark) {
+  /* The root element kept the light page colour because :root outranks html. */
+  :root { background: var(--app-bg); color: var(--text-strong); }
+  .review-count-badge { background: #2f2f2f; color: #d5d5d5; border: 1px solid var(--line); }
+  .task-row.done .task-check { background: #2f4a37; border-color: #4d7a5f; color: #d8f0de; }
+  .task-check { color: #d8f0de; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .course-material-empty, .course-selection-empty {
+    background: var(--surface-raised);
+    border: 1px dashed var(--line);
+    color: var(--text-muted);
+  }
+  .course-material-empty strong, .course-selection-empty h3 { color: var(--text-strong); }
+  .course-material-empty p, .course-selection-empty p { color: var(--text-muted); }
+}
+
+@media (prefers-color-scheme: dark) {
+  /* Import panel drop zone and its supporting copy */
+  .drop-zone { background: linear-gradient(145deg, #262626, #212121); border-color: #4a4a4a; }
+  .drop-zone p, .drop-zone small { color: #b0b0b0; }
+  .drop-zone h3 { color: #ededed; }
+  .action-panel-header h2, .action-panel-header p:last-child { color: var(--text-strong); }
+  .action-panel-header p:last-child { color: var(--text-muted); }
+}

@@ -33,7 +33,7 @@ The assistant host chooses when to call tools. MCP servers expose tools and data
 
 ## Local-first and provider boundaries
 
-- Academic files and structured state stay on the student's computer. Study chat history stays in browser IndexedDB on that device/profile.
+- Academic files and structured state stay on the student's computer. Agent conversations stay in `<install_directory>/agent_sessions/` on that computer, written by the local API.
 - Codex subscription-backed CLI requests receive only the current conversation, selected context/excerpts, and attached files submitted for that turn. The UI identifies the provider and describes the submitted context.
 - Local-model requests use explicitly configured loopback endpoints. Academia does not silently download a model or start a model server.
 - Codex credentials remain in the official CLI's local credential store. Academia does not read, copy, or store them. Do not put secrets in `profile.json`, workflow preferences, workspace files, app logs, the repository, or MCP tool output. Claude subscription credentials are not routed through Academia; use Claude Code directly as an external agent.

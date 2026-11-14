@@ -1,5 +1,12 @@
 [
   {
+    "disclosure": "hosted_model_eligible",
+    "name": "web.search",
+    "permission": "read_external",
+    "side_effect": "none",
+    "version": 1
+  },
+  {
     "disclosure": "local_only",
     "name": "workspace.summary",
     "permission": "read_local",

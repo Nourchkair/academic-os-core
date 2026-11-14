@@ -37,15 +37,39 @@ describe('ChatProposals', () => {
     expect(screen.getByText('File import proposal')).toBeInTheDocument()
     expect(screen.getByText('Read Week 5 · POL 2103 - Politics · due 2026-10-01')).toBeInTheDocument()
     expect(screen.getByText('Waiting for your review')).toBeInTheDocument()
-    expect(screen.getByText('Completed and verified')).toBeInTheDocument()
-    expect(screen.getAllByText('Approval and execution happen only in Review.')).toHaveLength(2)
+    expect(screen.getByText('Applied and verified')).toBeInTheDocument()
+    expect(screen.getAllByText('Approval and execution happen only in Review.')).toHaveLength(1)
+  })
+
+  it('offers allow, allow-for-chat, and refuse on an inline proposal', () => {
+    const onAllow = vi.fn()
+    const onAllowForChat = vi.fn()
+    const onRefuse = vi.fn()
+    const inline: ChatProposal[] = [{
+      kind: 'action',
+      title: 'Record a coursework grade',
+      summary: 'Update First Essay in POL 2103.',
+      effects: ['Grade: — → 82%'],
+      review_id: null,
+      proposal_id: 'proposal-9',
+      tier: 'inline',
+      action_type: 'grade_record',
+      status_label: 'Waiting for Allow',
+    }]
+    render(<ChatProposals proposals={inline} onOpenReview={vi.fn()} onAllow={onAllow} onAllowForChat={onAllowForChat} onRefuse={onRefuse} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }))
+    expect(onAllow).toHaveBeenCalledWith('proposal-9')
+    fireEvent.click(screen.getByRole('button', { name: 'Allow for this chat' }))
+    expect(onAllowForChat).toHaveBeenCalledWith('proposal-9', 'grade_record')
+    fireEvent.click(screen.getByRole('button', { name: 'Refuse' }))
+    expect(onRefuse).toHaveBeenCalledWith('proposal-9')
   })
 
   it('opens the exact linked Review item', () => {
     const onOpenReview = vi.fn()
     render(<ChatProposals proposals={proposals} onOpenReview={onOpenReview} />)
 
-    expect(screen.getByText('No further action needed')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Review this action' }))
     expect(onOpenReview).toHaveBeenCalledWith('review-1')
   })

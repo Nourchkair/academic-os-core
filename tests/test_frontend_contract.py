@@ -78,28 +78,18 @@ def test_onboarding_does_not_present_browser_or_agent_configuration() -> None:
     assert "function Agents" not in source
 
 
-def test_settings_exposes_agent_setup_playbooks_and_the_google_connector() -> None:
+def test_settings_exposes_connections_without_agent_setup_playbooks() -> None:
     source = (FRONTEND / "SettingsView.tsx").read_text(encoding="utf-8")
-    assert "Agent setup playbooks" in source
-    assert "EnhanceSetup" in source
-    assert "Ask your AI agent" in source
-    assert "Copy prompt" in source
-    assert "navigator.clipboard.writeText" in source
-    assert "api.playbooks" in source
-    assert "Agent Setup Playbook" in source
-    assert "PlaybookPanel" in source
-    assert "playbook-panel-backdrop" in source
-    assert 'role="dialog"' in source
-    assert "workflow-card-toggle" not in source
-    assert "workflow-editor" not in source
-    assert "Save my playbook preferences" in source
-    assert "This does not configure an external service" in source
+    assert "Agent setup playbooks" not in source
+    assert "EnhanceSetup" not in source
+    assert "PlaybookPanel" not in source
+    assert "api.playbooks" not in source
+    assert "workflowPreferences" not in source
     assert "ConnectionsHub" in source
     assert "GoogleConnectorCard" in (FRONTEND / "ConnectionsHub.tsx").read_text(encoding="utf-8")
     assert "Gmail and Google Calendar" in (FRONTEND / "ConnectionsHub.tsx").read_text(encoding="utf-8")
     assert "Connect Brightspace" not in source
     assert "Automation enabled" not in source
-
 
 def test_tasks_surface_does_not_render_the_task_definition_explanation_block() -> None:
     source = (FRONTEND / "App.tsx").read_text(encoding="utf-8")
