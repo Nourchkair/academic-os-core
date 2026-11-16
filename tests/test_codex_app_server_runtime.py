@@ -166,3 +166,57 @@ def test_runtime_enables_live_web_search_only_when_granted(tmp_path: Path, monke
     )
     assert 'web_search="live"' in granted._command()
     assert 'web_search="disabled"' not in granted._command()
+
+
+def test_developer_instructions_authorize_only_granted_external_tools() -> None:
+    from academia_os.assistant.providers.codex_app_server import _developer_instructions
+
+    text = _developer_instructions(
+        "proposal_only",
+        ("propose_import",),
+        (("fd71d1b5-e02b-47d1-bda0-c7b402cbb8ce", "repl"),),
+    )
+
+    assert "academia_mcp_call" in text
+    assert "academia_import_download" in text
+    assert "fd71d1b5-e02b-47d1-bda0-c7b402cbb8ce" in text
+    assert "explicitly granted" in text
+    assert "Never ask the student to name tools" in text
+    assert "academia server" in text
+
+
+def test_developer_instructions_forbid_external_routes_without_grants() -> None:
+    from academia_os.assistant.providers.codex_app_server import _developer_instructions
+
+    text = _developer_instructions("read_only", None, ())
+
+    assert "academia_mcp_call" not in text
+    assert "browser" in text
+
+
+def test_codex_home_auto_approves_only_the_isolated_academia_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime = make_runtime(tmp_path, monkeypatch)
+    home = tmp_path / "codex-home"
+    home.mkdir()
+    (home / "auth.json").write_text("{}", encoding="utf-8")
+
+    runtime._write_codex_home(home)
+
+    config = (home / "config.toml").read_text(encoding="utf-8")
+    assert '[mcp_servers.academia]' in config
+    assert 'default_tools_approval_mode = "approve"' in config
+
+
+def test_mcp_command_enables_download_intake_only_with_grants(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime = make_runtime(tmp_path, monkeypatch)
+    assert "--download-intake" not in runtime._resolved_mcp_command()
+
+    granted = CodexAppServerRuntime(
+        academic_root=runtime.academic_root,
+        profile_path=runtime.profile_path,
+        mcp_command=["/usr/bin/true"],
+        mcp_grants=(("connection-1", "repl"),),
+    )
+    command = granted._resolved_mcp_command()
+    assert "--download-intake" in command
+    assert "--mcp-grant" in command

@@ -62,6 +62,7 @@ def capability_report() -> dict[str, Any]:
             {"id": "create_non_destructive_index", "label": "Create or rebuild non-destructive local indexes", "mode": "direct"},
             {"id": "study", "label": "Create cited study sets, run practice, record student answers and review progress through academia study", "mode": "shared_cli_api"},
             {"id": "read_activity_changes", "label": "Read append-only Activity changes with a cursor", "mode": "direct"},
+            {"id": "import_browser_download", "label": "Download a source through a granted browser and import it into a recognized inbox", "mode": "explicit_student_request_staging_only"},
             {"id": "record_user_confirmed_coursework", "label": "Record and update user-confirmed assignment and project history", "mode": "user_confirmed_workspace_record"},
             {"id": "manage_user_tasks", "label": "Create, update, complete, or reopen personal tasks in SEMESTER_TASKS.md", "mode": "user_confirmed_workspace_record"},
         ],
@@ -89,13 +90,24 @@ def capability_report() -> dict[str, Any]:
             "mode": "copy_and_background_extract",
             "description": "academia import and the local MCP import tool copy a student-confirmed file into a recognized direct workspace inbox and automatically extract supported local text formats in a background worker; originals are preserved and PDFs without extractable text are reported as needing OCR.",
         },
+        "download_intake": {
+            "status": "available",
+            "mode": "browser_download_staging_then_verified_inbox_copy",
+            "description": "When the chat agent has a granted browser tool, it downloads a student-requested file and posts the bytes to a one-time localhost intake URL, which stores them in a private Academia staging folder. The import tool then copies that file into a recognized semester or course 00_INBOX, records provenance, starts supported local extraction, removes the staged copy, and appends Activity. The intake tools are exposed only for that grant-scoped chat run; arbitrary local paths and unauthenticated uploads are rejected.",
+        },
         "mcp": {
             "status": "available",
             "transport": "local_stdio",
-            "read_tools": ["status", "capabilities", "courses", "today", "tasks", "agent_context", "attention", "review_item", "activity_changes", "library", "read_library_item", "processing_status", "import_targets"],
+            "read_tools": ["status", "capabilities", "courses", "today", "tasks", "agent_context", "attention", "review_item", "activity_changes", "library", "read_library_item", "search_passages", "study_overview", "study_exam_scope", "grade_history", "processing_status", "processing_detail", "import_targets"],
             "write_tools": ["review_decide", "review_execute", "import_file"],
             "proposal_tools": ["propose_import", "propose_task", "propose_calendar", "propose_action"],
             "external_connectors": "optional_google_calendar_proposal_requires_local_google_authorization",
+            "trusted_actions": {
+                "status": "opt_in",
+                "flag": "--allow-action",
+                "categories": ["tasks", "history", "study", "imports", "downloads", "files", "calendar", "structure"],
+                "description": "Trusted action categories auto-apply without creating a Review item. The server hides Review decision/execution tools in trusted mode so an agent cannot approve its own proposals. Activity records agent:mcp.",
+            },
         },
         "watched_folders": {
             "status": "available",
@@ -185,11 +197,20 @@ def _source_digest(source: Path) -> str:
         raise ValueError(str(exc)) from exc
 
 
-def _find_duplicate(destination_inbox: Path, digest: str) -> Path | None:
+def _find_duplicate(destination_inbox: Path, digest: str, size: int) -> Path | None:
+    """Find an identical destination file without reading files of other sizes.
+
+    Hashing every existing inbox file made imports wait on large or iCloud-backed
+    sources that could never be duplicates. A matching SHA-256 implies a matching
+    size, so different-size candidates are skipped before any read.
+    """
+
     for candidate in sorted(destination_inbox.iterdir()):
         if candidate.is_symlink() or not candidate.is_file() or candidate.name.startswith("."):
             continue
         try:
+            if candidate.stat().st_size != size:
+                continue
             if _source_digest(candidate) == digest:
                 return candidate
         except (OSError, ValueError):
@@ -246,7 +267,7 @@ def import_file(
     acquisition_store = JsonStateStore(Path(workspace_root).expanduser().resolve() / ".academia" / "acquisition.json")
     acquisition_store.read_strict({"schema_version": 1, "records": {}})
     digest = _source_digest(source)
-    duplicate = _find_duplicate(destination_inbox, digest)
+    duplicate = _find_duplicate(destination_inbox, digest, source.stat().st_size)
     if duplicate is not None:
         return {
             "source_type": "browser_upload" if source_label is not None and source_label.startswith("browser-upload:") else "manual_file",

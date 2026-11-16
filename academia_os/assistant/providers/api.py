@@ -1,12 +1,14 @@
 """HTTP model providers used by the provider-neutral assistant runtime.
 
-These adapters are intentionally non-streaming in this slice. They support the
-same read-only tool contract as the Codex provider; proposal tools remain
-Codex-only until each provider's tool-call path has the same Review coverage.
+The OpenAI-compatible adapter can stream one answer through ``stream``; the
+Anthropic and Gemini adapters use the same non-streaming ``complete`` path.
+Every adapter supports the same read-only tool contract as the Codex provider.
+Streaming exposes no tools yet, so the caller decides when a turn may stream.
 """
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,6 +20,37 @@ from .base import CancelToken, ProviderRequest, ProviderResponse, ProviderToolCa
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 DEFAULT_TIMEOUT = 180.0
 USER_AGENT = "AcademiaOS/1.0 (academic study assistant)"
+_TOOL_NAME_INVALID = re.compile(r"[^A-Za-z0-9_-]")
+
+
+def _tool_name_map(tools: Any) -> dict[str, str]:
+    """Map Academia tool names to provider-safe names and back.
+
+    OpenAI-compatible and Anthropic APIs reject dots in function names, while
+    Academia's stable tool ids use dots (``mcp.call``, ``task.list``).
+    """
+
+    names: dict[str, str] = {}
+    used: set[str] = set()
+    for tool in tools or ():
+        if not isinstance(tool, dict) or not isinstance(tool.get("name"), str):
+            continue
+        original = tool["name"]
+        base = _TOOL_NAME_INVALID.sub("_", original)[:64] or "tool"
+        candidate = base
+        index = 2
+        while candidate in used:
+            suffix = f"_{index}"
+            candidate = f"{base[:64 - len(suffix)]}{suffix}"
+            index += 1
+        used.add(candidate)
+        names[original] = candidate
+    return names
+
+
+def _reverse_names(names: Mapping[str, str]) -> dict[str, str]:
+    return {safe: original for original, safe in names.items()}
+
 
 
 class ApiProviderError(RuntimeError):
@@ -80,7 +113,8 @@ def _post(url: str, headers: Mapping[str, str], body: Mapping[str, Any], *, time
     return value
 
 
-def _openai_messages(request: ProviderRequest) -> list[dict[str, Any]]:
+def _openai_messages(request: ProviderRequest, names: Mapping[str, str] | None = None) -> list[dict[str, Any]]:
+    mapping = names or {}
     messages: list[dict[str, Any]] = []
     if request.context:
         messages.append({"role": "system", "content": request.context})
@@ -101,7 +135,7 @@ def _openai_messages(request: ProviderRequest) -> list[dict[str, Any]]:
                     "id": str(call.get("id") or call.get("call_id") or f"call-{index}"),
                     "type": "function",
                     "function": {
-                        "name": str(call.get("name") or ""),
+                        "name": mapping.get(str(call.get("name") or ""), str(call.get("name") or "")),
                         "arguments": json.dumps(call.get("arguments") or {}, ensure_ascii=False),
                     },
                 } for index, call in enumerate(tool_calls) if isinstance(call, dict)]
@@ -111,11 +145,12 @@ def _openai_messages(request: ProviderRequest) -> list[dict[str, Any]]:
     return messages
 
 
-def _openai_tools(request: ProviderRequest) -> list[dict[str, Any]]:
+def _openai_tools(request: ProviderRequest, names: Mapping[str, str] | None = None) -> list[dict[str, Any]]:
+    mapping = names or {}
     return [{
         "type": "function",
         "function": {
-            "name": tool["name"],
+            "name": mapping.get(tool["name"], tool["name"]),
             "description": tool.get("description", ""),
             "parameters": tool.get("input_schema") or {"type": "object", "properties": {}},
         },
@@ -132,7 +167,7 @@ class OpenAICompatibleProvider:
         self.session_id = session_id
 
     def capabilities(self) -> dict[str, Any]:
-        return {"streaming": False, "tools": True, "images": True}
+        return {"streaming": True, "tools": True, "images": True}
 
     def complete(self, request: ProviderRequest, *, cancel: CancelToken | None = None) -> ProviderResponse:
         if cancel is not None and cancel.cancelled:
@@ -140,8 +175,10 @@ class OpenAICompatibleProvider:
         url = f"{self.base_url}/chat/completions"
         if self.id.endswith(":ollama") and not self.base_url.endswith("/v1"):
             url = f"{self.base_url}/v1/chat/completions"
-        body: dict[str, Any] = {"model": self.model, "messages": _openai_messages(request)}
-        tools = _openai_tools(request)
+        name_map = _tool_name_map(request.tools)
+        reverse_names = _reverse_names(name_map)
+        body: dict[str, Any] = {"model": self.model, "messages": _openai_messages(request, name_map)}
+        tools = _openai_tools(request, name_map)
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
@@ -168,7 +205,7 @@ class OpenAICompatibleProvider:
                 parsed = json.loads(arguments) if isinstance(arguments, str) and arguments else {}
             except json.JSONDecodeError as exc:
                 raise ApiProviderError("provider returned invalid tool arguments") from exc
-            calls.append(ProviderToolCall(name=name, arguments=parsed if isinstance(parsed, dict) else {}, call_id=str(raw.get("id") or "")))
+            calls.append(ProviderToolCall(name=reverse_names.get(name, name), arguments=parsed if isinstance(parsed, dict) else {}, call_id=str(raw.get("id") or "")))
         return ProviderResponse(
             text=text,
             tool_calls=tuple(calls),
@@ -183,9 +220,12 @@ class OpenAICompatibleProvider:
 
         from .streaming import iter_sse_events, reasoning_delta, text_delta
 
+        if cancel is not None and cancel.cancelled:
+            return
         url = f"{self.base_url}/chat/completions"
-        body: dict[str, Any] = {"model": self.model, "messages": _openai_messages(request), "stream": True}
-        tools = _openai_tools(request)
+        name_map = _tool_name_map(request.tools)
+        body: dict[str, Any] = {"model": self.model, "messages": _openai_messages(request, name_map), "stream": True}
+        tools = _openai_tools(request, name_map)
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
@@ -215,7 +255,8 @@ class OpenAICompatibleProvider:
             raise ApiProviderError(f"provider could not be reached: {exc}") from exc
 
 
-def _anthropic_messages(request: ProviderRequest) -> list[dict[str, Any]]:
+def _anthropic_messages(request: ProviderRequest, names: Mapping[str, str] | None = None) -> list[dict[str, Any]]:
+    mapping = names or {}
     messages: list[dict[str, Any]] = []
     for message in request.messages:
         role = message.get("role")
@@ -242,7 +283,7 @@ def _anthropic_messages(request: ProviderRequest) -> list[dict[str, Any]]:
                 blocks.append({
                     "type": "tool_use",
                     "id": str(call.get("id") or call.get("call_id") or f"call-{index}"),
-                    "name": str(call.get("name") or ""),
+                    "name": mapping.get(str(call.get("name") or ""), str(call.get("name") or "")),
                     "input": call.get("arguments") if isinstance(call.get("arguments"), dict) else {},
                 })
             messages.append({"role": "assistant", "content": blocks or text})
@@ -265,15 +306,17 @@ class AnthropicProvider:
     def complete(self, request: ProviderRequest, *, cancel: CancelToken | None = None) -> ProviderResponse:
         if cancel is not None and cancel.cancelled:
             return ProviderResponse(finish_reason="cancelled")
+        name_map = _tool_name_map(request.tools)
+        reverse_names = _reverse_names(name_map)
         body: dict[str, Any] = {
             "model": self.model,
             "max_tokens": 4096,
-            "messages": _anthropic_messages(request),
+            "messages": _anthropic_messages(request, name_map),
         }
         if request.context:
             body["system"] = request.context
         tools = [{
-            "name": tool["name"],
+            "name": name_map.get(tool["name"], tool["name"]),
             "description": tool.get("description", ""),
             "input_schema": tool.get("input_schema") or {"type": "object", "properties": {}},
         } for tool in request.tools if isinstance(tool, dict) and isinstance(tool.get("name"), str)]
@@ -295,7 +338,7 @@ class AnthropicProvider:
                 text_parts.append(block["text"])
             elif block.get("type") == "tool_use" and isinstance(block.get("name"), str):
                 calls.append(ProviderToolCall(
-                    name=block["name"],
+                    name=reverse_names.get(block["name"], block["name"]),
                     arguments=block.get("input") if isinstance(block.get("input"), dict) else {},
                     call_id=str(block.get("id") or ""),
                 ))
@@ -307,15 +350,17 @@ class AnthropicProvider:
         )
 
 
-def _gemini_contents(request: ProviderRequest) -> list[dict[str, Any]]:
+def _gemini_contents(request: ProviderRequest, names: Mapping[str, str] | None = None) -> list[dict[str, Any]]:
+    mapping = names or {}
     contents: list[dict[str, Any]] = []
     for message in request.messages:
         role = message.get("role")
         if role == "tool":
+            tool_name = str(message.get("name") or "tool")
             contents.append({
                 "role": "user",
                 "parts": [{"functionResponse": {
-                    "name": str(message.get("name") or "tool"),
+                    "name": mapping.get(tool_name, tool_name),
                     "response": {"result": str(message.get("content") or "")},
                 }}],
             })
@@ -329,7 +374,7 @@ def _gemini_contents(request: ProviderRequest) -> list[dict[str, Any]]:
             for call in raw_calls:
                 if isinstance(call, dict) and isinstance(call.get("name"), str):
                     parts.append({"functionCall": {
-                        "name": call["name"],
+                        "name": mapping.get(call["name"], call["name"]),
                         "args": call.get("arguments") if isinstance(call.get("arguments"), dict) else {},
                     }})
             contents.append({"role": "model", "parts": parts or [{"text": ""}]})
@@ -352,14 +397,16 @@ class GeminiProvider:
     def complete(self, request: ProviderRequest, *, cancel: CancelToken | None = None) -> ProviderResponse:
         if cancel is not None and cancel.cancelled:
             return ProviderResponse(finish_reason="cancelled")
+        name_map = _tool_name_map(request.tools)
+        reverse_names = _reverse_names(name_map)
         body: dict[str, Any] = {
-            "contents": _gemini_contents(request),
+            "contents": _gemini_contents(request, name_map),
             "generationConfig": {"maxOutputTokens": 4096},
         }
         if request.context:
             body["systemInstruction"] = {"parts": [{"text": request.context}]}
         declarations = [{
-            "name": tool["name"],
+            "name": name_map.get(tool["name"], tool["name"]),
             "description": tool.get("description", ""),
             "parameters": tool.get("input_schema") or {"type": "object", "properties": {}},
         } for tool in request.tools if isinstance(tool, dict) and isinstance(tool.get("name"), str)]
@@ -388,7 +435,7 @@ class GeminiProvider:
                 function = part["functionCall"]
                 if isinstance(function.get("name"), str):
                     calls.append(ProviderToolCall(
-                        name=function["name"],
+                        name=reverse_names.get(function["name"], function["name"]),
                         arguments=function.get("args") if isinstance(function.get("args"), dict) else {},
                         call_id=None,
                     ))

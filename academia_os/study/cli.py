@@ -19,7 +19,7 @@ def capabilities() -> dict[str, Any]:
     return {'schema_version': 1, 'agent_first': True, 'dashboard_required': False,
             'generation_optional': True, 'kinds': list(KINDS),
             'commands': ['overview', 'preferences', 'configure', 'context', 'create', 'generate', 'revise', 'show', 'start', 'session', 'reveal', 'answer', 'flag',
-                         'annotate', 'exam-save', 'exam', 'plan', 'export', 'restore'],
+                         'annotate', 'exam-save', 'exam', 'plan', 'export', 'restore', 'progress'],
             'agent_loop': ['study context --course COURSE --source LIBRARY_ID --json',
                            'study create --course COURSE --source LIBRARY_ID --input - --json',
                            'study start --course COURSE --set SET_ID --json',
@@ -205,6 +205,9 @@ def dispatch(args: argparse.Namespace, profile: Path) -> Any:
         for course in snapshot['courses']:
             snapshot['tasks'] = apply_history_to_tasks(snapshot['tasks'], list_assignment_history(root, semester, course['id']), course_name=course['name'])
         return plan(config, snapshot, args.minutes, args.course_id)
+    if action == 'progress':
+        from .sources import read_progress
+        return read_progress(root, semester, args.course_id)
     service = StudyService(root, semester, args.course_id)
     actor = getattr(args, 'actor', 'user')
     if action == 'preferences':

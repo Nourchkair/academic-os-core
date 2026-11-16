@@ -81,6 +81,29 @@ def test_atomic_copy_failure_leaves_no_partial_destination(tmp_path: Path, monke
     assert source.read_text(encoding="utf-8") == "# Lecture\n"
 
 
+def test_duplicate_check_skips_files_with_a_different_size(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, inbox = make_import_workspace(tmp_path)
+    (inbox / "large.pdf").write_bytes(b"x" * 10_000)
+    same = inbox / "same.md"
+    same.write_bytes(b"# Lecture\n")
+    source = tmp_path / "lecture.md"
+    source.write_bytes(b"# Lecture\n")
+    seen: list[str] = []
+    original = acquisition._source_digest
+
+    def recording_digest(path: Path) -> str:
+        seen.append(path.name)
+        return original(path)
+
+    monkeypatch.setattr(acquisition, "_source_digest", recording_digest)
+    value = import_file(source, inbox, workspace_root=root)
+
+    assert value["duplicate"] is True
+    assert Path(value["destination"]) == same
+    assert "large.pdf" not in seen
+    assert "same.md" in seen
+
+
 def test_import_requires_workspace_root_and_valid_destination(tmp_path: Path) -> None:
     _, inbox = make_import_workspace(tmp_path)
     source = tmp_path / "lecture.md"

@@ -16,6 +16,44 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 TAURI = ROOT / "frontend" / "src-tauri"
+sys.path.insert(0, str(ROOT))
+
+
+def build_vision_helper(work_dir: Path) -> Path | None:
+    """Compile the macOS Vision OCR helper so packaged apps need no OCR install."""
+
+    if sys.platform != "darwin":
+        return None
+    compiler = shutil.which("swiftc")
+    if compiler is None:
+        print(
+            "warning: swiftc is unavailable; packaged OCR will require Tesseract without macOS Vision",
+            file=sys.stderr,
+        )
+        return None
+    from academia_os.macos_vision import HELPER_NAME, VISION_SWIFT_SOURCE
+
+    source = work_dir / f"{HELPER_NAME}.swift"
+    source.write_text(VISION_SWIFT_SOURCE, encoding="utf-8")
+    helper = work_dir / HELPER_NAME
+    compiled = subprocess.run(
+        [compiler, "-O", "-o", str(helper), str(source)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if compiled.returncode or not helper.is_file():
+        print(
+            f"warning: the macOS Vision helper did not compile: {compiled.stderr.strip()[-800:]}",
+            file=sys.stderr,
+        )
+        return None
+    probe = subprocess.run([str(helper)], capture_output=True, text=True, check=False)
+    if probe.returncode or probe.stdout.strip() != '{"images":[]}':
+        detail = probe.stderr.strip() or probe.stdout.strip() or f"exit code {probe.returncode}"
+        print(f"warning: the macOS Vision helper did not run correctly: {detail}", file=sys.stderr)
+        return None
+    return helper
 
 
 def google_oauth_client_config() -> dict[str, Any] | None:
@@ -116,6 +154,7 @@ def main() -> int:
         if google_client is not None:
             client_resource = stage_google_oauth_client(work, google_client)
             data_args.append((client_resource, "google_client"))
+        vision_helper = build_vision_helper(work)
         options = [
             str(ROOT / "scripts" / "academia_sidecar_entry.py"),
             "--name=academia",
@@ -129,9 +168,14 @@ def main() -> int:
             "--collect-submodules=installer",
             "--collect-submodules=adapters",
             "--hidden-import=zoneinfo",
+            "--collect-all=pypdfium2",
+            "--collect-all=pypdfium2_raw",
         ]
         for source, destination_name in data_args:
             options.append(f"--add-data={source}{os.pathsep}{destination_name}")
+        if vision_helper is not None:
+            # Binaries keep their executable bit; data files are not guaranteed to.
+            options.append(f"--add-binary={vision_helper}{os.pathsep}{Path('academia_os') / '_bin'}")
         import PyInstaller.__main__
 
         PyInstaller.__main__.run(options)

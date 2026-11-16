@@ -6,6 +6,25 @@ Academia OS is packaged as a native macOS app with a bundled `academia` runtime.
 
 `academia mcp serve` exposes tools over standard input/output. Read tools provide workspace status, capabilities, courses, tasks, bounded agent context, attention items, individual Review records, Activity changes, Library metadata, exact Library previews, and processing status. Narrow write tools support host-confirmed import into an exact inbox, executable-choice-validated Review decisions, and separate execution of already-approved supported actions. Proposal-only mode can additionally grant a Google Calendar tool that checks duplicates and creates a local Review proposal; the approved create/edit reaches Google only on a separate execution call, which verifies the event after writing. Imports preserve the original and start local extraction when supported. Study sets and practice are managed through the Study interface; MCP has no separate generated-document writer. The MCP server cannot independently verify that a host showed a confirmation dialog, so compatible hosts must confirm the exact proposal or execution with the student. Review Activity records identify the MCP caller as `agent:mcp`. Google Calendar access requires an explicitly granted proposal/execution path and a configured Google account. MCP does not control a browser, access a school portal, submit school work, send email, authenticate as the user, or read passwords/cookies.
 
+For source-grounded work, the MCP server also exposes full-text passage search, Study overview and exam scope, recorded grade history, and per-record processing detail. `academia_search_passages` returns page-addressed citations plus a coverage record; it does not paste every page into the model.
+
+## Trusted actions
+
+External hosts that should take routine actions without a Review item can opt in explicitly:
+
+```bash
+academia mcp serve \
+  --allow-action tasks \
+  --allow-action history \
+  --allow-action study \
+  --allow-action imports \
+  --allow-action downloads
+```
+
+Each category auto-applies only its own direct tools; the server writes Activity as `agent:mcp` and keeps the validation/verification path. In trusted mode the server hides `academia_review_decide` and `academia_review_execute` so an agent cannot approve or execute its own Review proposals. Structural categories are opt-in separately: `files`, `calendar`, and `structure`. Those still run through the action catalog, including previews, duplicate checks, hash verification, and trash/restore records. Without `--allow-action`, external hosts keep the existing read/proposal/Review behavior.
+
+Codex hosts that want to avoid a per-tool approval dialog for this local server can set `default_tools_approval_mode = "approve"` on the `mcp_servers.academia` entry. Do that only together with the explicit `--allow-action` categories you intend to trust; it applies to the Academia server's tools.
+
 The MCP server delegates through the same CLI/core used by the dashboard. It is not an AI model or an MCP client. Codex, Claude, or another compatible host supplies reasoning and may connect to additional MCP servers independently. The in-app assistant host that can coordinate external MCP servers is a separate product layer and is not implemented by this stdio server.
 
 For a packaged macOS app installed at `/Applications/Academia OS.app`, Tauri places the architecture-specific CLI sidecar in the app bundle. To find its exact filename:
@@ -19,7 +38,10 @@ For Codex, add the sidecar path it prints to `~/.codex/config.toml`:
 ```toml
 [mcp_servers.academia]
 command = "/Applications/Academia OS.app/Contents/MacOS/academia-aarch64-apple-darwin"
-args = ["mcp", "serve"]
+args = ["mcp", "serve", "--allow-action", "tasks", "--allow-action", "history", "--allow-action", "study", "--allow-action", "imports", "--allow-action", "downloads"]
+# Optional: skip the per-tool approval dialog for this isolated local server.
+# Only use this together with explicit --allow-action categories.
+default_tools_approval_mode = "approve"
 ```
 
 For Intel Macs, use the `academia-x86_64-apple-darwin` filename instead. Claude Code can register the same local stdio server:

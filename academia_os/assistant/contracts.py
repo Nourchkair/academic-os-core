@@ -250,8 +250,8 @@ class RunRequest:
     def __post_init__(self) -> None:
         if not self.messages:
             raise AssistantError("a run requires at least one message", code="invalid_run")
-        if not 1 <= self.max_iterations <= 32:
-            raise AssistantError("max_iterations must be between 1 and 32", code="invalid_run")
+        if not 1 <= self.max_iterations <= 64:
+            raise AssistantError("max_iterations must be between 1 and 64", code="invalid_run")
         if not 1 <= self.timeout_seconds <= 900:
             raise AssistantError("timeout_seconds must be between 1 and 900", code="invalid_run")
         if not isinstance(self.context, str) or len(self.context) > 240_000:

@@ -93,6 +93,25 @@ def main() -> int:
             print("Bundled Academia CLI returned a workspace path different from the disposable fixture.", file=sys.stderr)
             return 1
 
+        # OCR renders PDFs with the bundled PDFium build, so make sure the
+        # packaged binary can import it before publishing a release.
+        try:
+            renderer = subprocess.run(
+                [str(cli), "--profile", str(profile), "study", "capabilities", "--json"],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=60,
+            )
+        except subprocess.TimeoutExpired:
+            print("Bundled Academia CLI did not finish `study capabilities --json` within 60 seconds.", file=sys.stderr)
+            return 1
+        if renderer.returncode:
+            detail = renderer.stderr.strip() or renderer.stdout.strip() or f"exit code {renderer.returncode}"
+            print(f"Bundled Academia CLI could not load its PDF renderer: {detail}", file=sys.stderr)
+            return 1
+
         if os.environ.get("ACADEMIA_REQUIRE_GOOGLE_CLIENT") == "1":
             google = subprocess.run(
                 [str(cli), "--profile", str(profile), "connectors", "google", "status", "--json"],

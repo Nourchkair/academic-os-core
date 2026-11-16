@@ -575,7 +575,7 @@ function taskUpdateArgs(input: Partial<TaskInput>): string[] {
 function courseworkHistoryArgs(action: 'add' | 'update', courseId: string, semester: string, input: Partial<CourseworkHistoryInput>): string[] {  const args = [action, '--course', courseId, '--semester', semester]
   const pairs: Array<[keyof CourseworkHistoryInput, string]> = [
     ['kind', '--kind'], ['title', '--title'], ['status', '--status'], ['due_date', '--due-date'],
-    ['submitted_on', '--submitted-on'], ['grade', '--grade'], ['task_title', '--task-title'], ['notes', '--notes'],
+    ['submitted_on', '--submitted-on'], ['grade', '--grade'], ['score', '--score'], ['percentage', '--percentage'], ['letter_grade', '--letter-grade'], ['task_title', '--task-title'], ['notes', '--notes'],
   ]
   for (const [key, flag] of pairs) {
     const value = input[key]

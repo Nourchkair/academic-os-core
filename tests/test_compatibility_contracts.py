@@ -73,6 +73,7 @@ def test_agent_context_top_level_and_attention_shapes_are_stable(tmp_path: Path)
         "next_deadlines",
         "current_assignments",
         "assignment_history",
+        "grade_history",
         "study",
         "relevant_readings",
     }

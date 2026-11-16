@@ -217,7 +217,10 @@ export function ImportView({ status, courses, semester, initialCourseId, initial
       }
       setResults(imported)
       clearSelected()
-      await onImported()
+      // Release the import button as soon as the copy is committed; the
+      // dashboard-wide refresh continues in the background.
+      setBusy(false)
+      void onImported().catch(() => undefined)
     } catch (reason) {
       setError(`Nothing was moved. The import could not be completed: ${String(reason)}`)
     } finally {

@@ -655,3 +655,21 @@ a { color: #242424; }
   .action-panel-header h2, .action-panel-header p:last-child { color: var(--text-strong); }
   .action-panel-header p:last-child { color: var(--text-muted); }
 }
+
+@media (prefers-color-scheme: dark) {
+  /* Verification + settings surfaces that still carried light-only tokens. */
+  .verification-badge { border: 1px solid var(--line); }
+  .verification-badge.exact,
+  .verification-badge.probable,
+  .verification-badge.not-retrieved { background: #2c2c2c; color: #c8c8c8; }
+  .verification-badge.mismatch { background: #3a2926; border-color: #5d3d38; color: #e0afa6; }
+  .advanced-details { border-color: var(--line); }
+  .advanced-details summary, .advanced-card summary { color: var(--text-muted); }
+  .advanced-details pre, .advanced-card pre { background: #191919; color: #c8c8c8; }
+  .settings-preview { background: var(--surface-raised); border-color: var(--line); }
+  .settings-preview h3 { color: var(--text-strong); }
+  .approval-ready { background: #2a352c; color: #a8c7ad; }
+  .semester-picker-trigger, .semester-picker-menu { background: var(--surface); border-color: var(--line); color: var(--text-strong); }
+  .semester-picker-option:hover, .semester-picker-option:focus-visible, .semester-option-mark { background: var(--surface-raised); }
+  .task-toolbar, .task-user-editor { background: var(--surface); border-color: var(--line); }
+}

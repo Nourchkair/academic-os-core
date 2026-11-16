@@ -82,3 +82,33 @@ def test_state_is_plain_json_on_disk(tmp_path: Path) -> None:
     value = json.loads((directory / "session-0001.json").read_text(encoding="utf-8"))
     assert value["id"] == "session-0001"
     assert "preview" not in value["messages"][1]["attachments"][0]
+
+
+def test_pin_sorts_first_and_survives_resave(tmp_path: Path) -> None:
+    store = AgentSessionStore(tmp_path / "agent_sessions")
+    store.save(sample("session-0001", updatedAt="2026-11-10T10:00:00+00:00"))
+    store.save(sample("session-0002", updatedAt="2026-11-12T10:00:00+00:00"))
+
+    pinned = store.set_pinned("session-0001", True)
+    assert pinned["pinned"] is True
+    assert [item["id"] for item in store.list()] == ["session-0001", "session-0002"]
+
+    loaded = store.load("session-0001")
+    loaded["title"] = "Updated title"
+    saved = store.save(loaded)
+    assert saved["pinned"] is True
+    assert store.list()[0]["pinned"] is True
+
+    unpinned = store.set_pinned("session-0001", False)
+    assert unpinned["pinned"] is False
+    assert [item["id"] for item in store.list()] == ["session-0002", "session-0001"]
+
+
+def test_mcp_grants_are_saved_with_the_conversation(tmp_path: Path) -> None:
+    store = AgentSessionStore(tmp_path / "agent_sessions")
+    saved = store.save(sample(mcpGrants=[{"connection_id": "conn-aside", "tools": ["repl", "browser_profiles"]}]))
+    assert saved["mcpGrants"] == [{"connection_id": "conn-aside", "tools": ["repl", "browser_profiles"]}]
+
+    loaded = store.load("session-0001")
+    assert loaded["mcpGrants"][0]["connection_id"] == "conn-aside"
+    assert loaded["mcpGrants"][0]["tools"] == ["repl", "browser_profiles"]

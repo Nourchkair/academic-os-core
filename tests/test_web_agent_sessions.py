@@ -68,3 +68,17 @@ def test_agent_session_routes_reject_bad_input(tmp_path: Path) -> None:
 
         status, _, payload = post(web, "/api/v1/agent/sessions/delete", {})
         assert status == 400
+
+
+def test_agent_session_pin_route(tmp_path: Path) -> None:
+    with running_server(tmp_path) as web:
+        web.agent_sessions = AgentSessionStore(tmp_path / "agent_sessions")
+        post(web, "/api/v1/agent/sessions/save", {"session": session_payload()})
+
+        status, _, payload = post(web, "/api/v1/agent/sessions/pin", {"id": "session-web-0001", "pinned": True})
+        assert status == 200
+        assert json.loads(payload)["session"]["pinned"] is True
+        assert json.loads(request(web, "GET", "/api/v1/agent/sessions")[2])["sessions"][0]["pinned"] is True
+
+        status, _, payload = post(web, "/api/v1/agent/sessions/pin", {"id": "session-web-0001", "pinned": "yes"})
+        assert status == 400

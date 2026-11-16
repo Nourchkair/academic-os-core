@@ -14,6 +14,14 @@ executor that verifies its own result.
 An unknown action type defaults to `review`. `review` actions can never run
 through the inline shortcut: the API returns `403 ReviewRequired`.
 
+Trusted MCP mode (`academia mcp serve --allow-action ...`) can auto-approve and
+execute actions in the categories the student explicitly allowed at launch. It
+does not expose Review decision/execution tools, so the external agent cannot
+approve its own proposals. Activity records the caller as `agent:mcp`; file
+moves, trash/restore, calendar duplicates, settings, and course/semester
+creation still pass through the same validation, preview, and verification
+path.
+
 ## Local API
 
 ```text

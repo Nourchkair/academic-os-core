@@ -95,11 +95,33 @@ def _trace(value: Any) -> list[dict[str, Any]]:
         if not isinstance(tool, str) or not tool.strip():
             continue
         step = {"tool": tool[:120], "ok": bool(item.get("ok", True))}
+        detail = item.get("detail")
+        if isinstance(detail, str) and detail.strip():
+            step["detail"] = detail[:120]
         milliseconds = item.get("ms")
         if isinstance(milliseconds, int) and 0 <= milliseconds <= 3_600_000:
             step["ms"] = milliseconds
         steps.append(step)
     return steps
+
+
+def _mcp_grants(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    grants: list[dict[str, Any]] = []
+    for item in value[:8]:
+        if not isinstance(item, dict):
+            continue
+        connection_id = item.get("connection_id")
+        tools = item.get("tools")
+        if not isinstance(connection_id, str) or not connection_id.strip() or len(connection_id) > 120:
+            continue
+        if not isinstance(tools, list):
+            continue
+        cleaned = [tool for tool in tools if isinstance(tool, str) and tool.strip()][:24]
+        if cleaned:
+            grants.append({"connection_id": connection_id.strip(), "tools": cleaned})
+    return grants
 
 
 def _messages(value: Any) -> list[dict[str, Any]]:
@@ -158,6 +180,8 @@ def normalize_session(value: Mapping[str, Any]) -> dict[str, Any]:
         "excludedCourseSourceIds": _string_list(value.get("excludedCourseSourceIds")),
         "createdAt": _text(value.get("createdAt"), limit=60) or updated_at,
         "updatedAt": updated_at,
+        "pinned": bool(value.get("pinned", False)),
+        "mcpGrants": _mcp_grants(value.get("mcpGrants")),
     }
 
 
@@ -173,6 +197,7 @@ def summarize(session: Mapping[str, Any]) -> dict[str, Any]:
         "preview": preview,
         "createdAt": session["createdAt"],
         "updatedAt": session["updatedAt"],
+        "pinned": bool(session.get("pinned", False)),
     }
 
 
@@ -216,6 +241,7 @@ class AgentSessionStore:
             if session is not None:
                 sessions.append(session)
         sessions.sort(key=lambda item: str(item["updatedAt"]), reverse=True)
+        sessions.sort(key=lambda item: not bool(item.get("pinned", False)))
         return [summarize(session) for session in sessions]
 
     def _iter_files(self) -> Iterable[Path]:
@@ -234,14 +260,32 @@ class AgentSessionStore:
         return session
 
     def save(self, value: Mapping[str, Any]) -> dict[str, Any]:
-        session = normalize_session(value)
+        path = self._path(str(value.get("id") or ""))
+        existing = self._read_file(path) if path.is_file() else None
+        raw = dict(value)
+        if existing is not None and "pinned" not in raw:
+            raw["pinned"] = existing.get("pinned", False)
+        if existing is not None and "mcpGrants" not in raw:
+            raw["mcpGrants"] = existing.get("mcpGrants", [])
+        session = normalize_session(raw)
+        self._write_session(session)
+        self._prune(exclude=str(session["id"]))
+        return session
+
+    def _write_session(self, session: Mapping[str, Any]) -> None:
         directory = self._ensure_directory()
         path = self._path(str(session["id"]))
         temporary = directory / f".{session['id']}.{os.getpid()}.tmp"
         temporary.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(temporary, path)
-        self._prune(exclude=str(session["id"]))
-        return session
+
+    def set_pinned(self, session_id: str, pinned: bool) -> dict[str, Any]:
+        if not isinstance(pinned, bool):
+            raise AgentSessionError("pinned must be true or false")
+        session = self.load(session_id)
+        session["pinned"] = pinned
+        self._write_session(session)
+        return summarize(session)
 
     def _prune(self, *, exclude: str) -> None:
         sessions = self.list()

@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ChangeEvent as ReactChangeEvent, type ClipboardEvent as ReactClipboardEvent, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import { api, ChatCancelledError, type ChatStreamEvent, type PendingAction } from './lib/api'
+import { api, ChatCancelledError, fileUrl, isTauriEnvironment, type ChatStreamEvent, type PendingAction } from './lib/api'
 import { ChatProposals } from './ChatProposals'
-import { deleteChatConversation, listChatConversations, loadChatConversation, saveChatConversation, stripChatAttachmentPreviews, type ChatConversation, type ChatConversationSummary, type ChatMessage, type ChatProposal, type ChatTraceStep, type StudyChatRequest } from './lib/chat-history'
+import { deleteChatConversation, listChatConversations, loadChatConversation, pinChatConversation, saveChatConversation, stripChatAttachmentPreviews, type ChatConversation, type ChatConversationSummary, type ChatMessage, type ChatProposal, type ChatTraceStep, type StudyChatRequest } from './lib/chat-history'
 import { ChatStudyStudio, type ChatStudyRequest, type ModeId } from './ChatStudyStudio'
-import type { ActivityEvent, Course, CourseworkHistoryRecord, LibraryItem, ReviewItem, Task } from './types'
+import type { ActivityEvent, Course, CourseworkHistoryRecord, FilePreview, LibraryItem, MCPConnection, ReviewItem, Task } from './types'
 import 'katex/dist/katex.min.css'
 import './dashboard-chat.css'
+
+const DocumentReader = lazy(() => import('./DocumentReader').then((module) => ({ default: module.DocumentReader })))
 
 type Message = ChatMessage
 type ChatProviderInfo = {
@@ -45,6 +47,7 @@ type StudySourceContext = {
   warnings: string[]
   coverage?: { deep: boolean; selected_sources: number; scanned_sources: number; complete: boolean; pdf_pages_scanned: number; matching_chunks: number; returned_chunks: number }
 }
+type StudyProgress = { course_id?: string; status?: string; completed?: number; total?: number }
 type StudyOverview = {
   topics?: Array<{ topic: string; item_count?: number; needs_review?: boolean; attempt_count?: number; correct_count?: number; self_review_count?: number }>
   annotations?: Array<{ id: string; kind: string; topic?: string; note: string; quote?: string; citation?: { source_name?: string; locator?: string }; stale_source?: { source_id: string; reason: string } | null }>
@@ -196,13 +199,23 @@ function makeClassSuggestions(course: Course | undefined, context: CourseAcademi
   return [assessmentSuggestion, reviewSuggestion, explainSuggestion]
 }
 
-function toolProgressLabel(tool: string) {
+function toolProgressLabel(tool: string, detail = '') {
+  if (tool === 'mcp.call' || tool === 'academia_mcp_call') return detail ? `Using external app · ${detail}` : 'Using a granted external app tool'
+  if (tool === 'task.list' || tool === 'academia_tasks') return 'Checking tasks'
+  if (tool === 'library.list' || tool === 'academia_library') return 'Searching the class library'
+  if (tool === 'library.get' || tool === 'academia_read_library_item') return 'Reading a selected source'
+  if (tool === 'library.search_passages') return 'Searching source passages'
+  if (tool === 'course.list' || tool === 'course.get') return 'Checking courses'
+  if (tool === 'study.overview' || tool === 'study.exam_scope') return 'Checking study context'
+  if (tool === 'review.attention') return 'Checking Review'
+  if (tool === 'activity.changes') return 'Checking activity'
+  if (tool === 'web.search') return 'Searching the web'
   if (tool === 'academia_propose_task') return 'Preparing a personal-task proposal'
   if (tool === 'academia_propose_import') return 'Preparing a file-import proposal'
-  if (tool === 'academia_library') return 'Searching the class library'
-  if (tool === 'academia_read_library_item') return 'Reading a selected source'
+  if (tool === 'academia_download_intake' || tool === 'download.intake') return 'Preparing the download intake folder'
+  if (tool === 'academia_import_download' || tool === 'download.import') return 'Importing the downloaded file'
+  if (tool === 'academia_import_targets') return 'Checking import destinations'
   if (tool === 'academia_agent_context') return 'Checking academic context'
-  if (tool === 'academia_tasks') return 'Checking tasks'
   if (tool === 'academia_status') return 'Checking the workspace'
   if (tool === 'academia_external_context' || tool === 'academia_google_context') return 'Reading granted Gmail, Calendar, and Notion context'
   if (tool === 'academia_propose_calendar') return 'Checking duplicates and preparing a Calendar proposal'
@@ -221,7 +234,68 @@ function proposalStatusLabel(item: ReviewItem) {
   return 'Waiting for your review'
 }
 
-export function DashboardChat({ courses, items, semester, activity, onOpenReview, onProposalCreated, reviewRevision, onResumeStudySession, studyChatRequest, onStudyChatRequestConsumed, onGoHome }: { courses: Course[]; items: LibraryItem[]; semester: string; activity: ActivityEvent[]; onOpenReview: (reviewId: string) => void; onProposalCreated: () => void; reviewRevision: number; onResumeStudySession: (courseId: string, sessionId: string) => void; studyChatRequest: StudyChatRequest | null; onStudyChatRequestConsumed: () => void; onGoHome: () => void }) {
+const MCP_ALWAYS_ALLOW_KEY = 'academia.chat.mcpAlwaysAllow'
+
+function readMcpAlwaysAllowed(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(MCP_ALWAYS_ALLOW_KEY) || '[]')
+    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function writeMcpAlwaysAllowed(ids: string[]) {
+  localStorage.setItem(MCP_ALWAYS_ALLOW_KEY, JSON.stringify([...new Set(ids)]))
+}
+
+function mcpToolNames(connection: MCPConnection): string[] {
+  return (connection.tools ?? []).map((tool) => tool.name).filter(Boolean)
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function mentionPattern(label: string): RegExp {
+  return new RegExp(`(^|[\\s(])@${escapeRegExp(label)}(?=$|[\\s.,!?;:)])`, 'i')
+}
+
+function isBrowserConnection(connection: MCPConnection): boolean {
+  const tools = connection.tools ?? []
+  const names = new Set(tools.map((tool) => tool.name.toLowerCase()))
+  return names.has('repl')
+    || names.has('browser_profiles')
+    || tools.some((tool) => /browser|playwright|web ?page|browser tab/i.test(tool.description || ''))
+}
+
+function wantsLiveBrowserAction(text: string): boolean {
+  const action = /\b(download|browse|open|access|check|audit|compare|look ?up|search|visit|go to|log ?in|sign ?in|fetch|grab|pull|retrieve|get)\b/i
+  const external = /\b(brightspace|canvas|moodle|blackboard|d2l|browser|website|web ?page|portal|online account)\b|https?:\/\//i
+  return action.test(text) && external.test(text)
+}
+
+function findMcpConnection(text: string, connections: MCPConnection[]): MCPConnection | undefined {
+  const value = text.trim()
+  if (!value) return undefined
+  return connections.find((connection) => {
+    if (connection.status !== 'available' || !connection.tools.length) return false
+    const escaped = escapeRegExp(connection.name)
+    return new RegExp(`(^|[^a-z0-9])${escaped}(?:s|es)?([^a-z0-9]|$)`, 'i').test(value)
+  })
+}
+
+function formatSourceBytes(value: number): string {
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function sortConversationHistory(list: ChatConversationSummary[]): ChatConversationSummary[] {
+  return [...list].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt.localeCompare(a.updatedAt))
+}
+
+export function DashboardChat({ courses, items, libraryLoaded, active, onReload, semester, activity, onOpenReview, onProposalCreated, reviewRevision, onResumeStudySession, studyChatRequest, onStudyChatRequestConsumed, onGoHome }: { courses: Course[]; items: LibraryItem[]; libraryLoaded: boolean; active: boolean; onReload: () => void; semester: string; activity: ActivityEvent[]; onOpenReview: (reviewId: string) => void; onProposalCreated: () => void; reviewRevision: number; onResumeStudySession: (courseId: string, sessionId: string) => void; studyChatRequest: StudyChatRequest | null; onStudyChatRequestConsumed: () => void; onGoHome: () => void }) {
   const [providers, setProviders] = useState<ChatProviders | null>(null)
   const [provider, setProvider] = useState(() => localStorage.getItem('academia.chat.provider') || 'codex')
   const [messages, setMessages] = useState<Message[]>([])
@@ -265,12 +339,21 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
     }
   })
   const [streaming, setStreaming] = useState<StreamState | null>(null)
+  const [progressOpen, setProgressOpen] = useState(true)
+  const [indexing, setIndexing] = useState<{ completed: number; total: number } | null>(null)
+  const [mcpConnections, setMcpConnections] = useState<MCPConnection[]>([])
+  const [mcpGrants, setMcpGrants] = useState<Record<string, string[]>>({})
+  const [mcpPermission, setMcpPermission] = useState<{ connection: MCPConnection; text: string } | null>(null)
+  const mcpGrantsRef = useRef<Record<string, string[]>>({})
   const streamRef = useRef<{ controller: AbortController; runId: string | null } | null>(null)
   const streamingRef = useRef<StreamState | null>(null)
   const deltaBufferRef = useRef('')
   const deltaTimerRef = useRef<number | null>(null)
   const [showAttachMenu, setShowAttachMenu] = useState(false)
   const [showSourcePicker, setShowSourcePicker] = useState(false)
+  const [sourcePreview, setSourcePreview] = useState<{ item: LibraryItem; preview: FilePreview | null; loading: boolean; error: string } | null>(null)
+  const [importingSources, setImportingSources] = useState(false)
+  const [sourceNotice, setSourceNotice] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState('')
@@ -294,6 +377,7 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
   const messagesRef = useRef<Message[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sourceFilterRef = useRef<HTMLInputElement>(null)
+  const sourceFileInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const handledStudyChatRequest = useRef('')
 
@@ -311,6 +395,9 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
       sourceIds,
       excludedCourseSourceIds,
       updatedAt: new Date().toISOString(),
+      mcpGrants: Object.entries(mcpGrantsRef.current)
+        .filter(([, tools]) => tools.length > 0)
+        .map(([connection_id, tools]) => ({ connection_id, tools: [...tools] })),
     })
   }
   const persistConversation = async (conversationMessages: Message[], id = activeConversationId || crypto.randomUUID()) => {
@@ -324,8 +411,9 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
       preview: (updated.messages[updated.messages.length - 1]?.content || '').slice(0, 280),
       createdAt: updated.updatedAt,
       updatedAt: updated.updatedAt,
+      pinned: conversationHistory.find((conversation) => conversation.id === id)?.pinned ?? false,
     }
-    setConversationHistory((current) => [summary, ...current.filter((conversation) => conversation.id !== id)].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)))
+    setConversationHistory((current) => sortConversationHistory([summary, ...current.filter((conversation) => conversation.id !== id)]))
     setActiveConversationId(id)
     try {
       await saveChatConversation(updated)
@@ -418,6 +506,7 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
   const selectedSourceIdSet = useMemo(() => new Set(selectedItems.map((item) => item.id)), [selectedItems])
   const lastRetrievedSourceIdSet = useMemo(() => new Set(lastRetrievedSourceIds), [lastRetrievedSourceIds])
   const academicContextLoading = Boolean(courseId && academicContext?.courseId !== courseId)
+  const contextLoading = Boolean(courseId) && (!libraryLoaded || academicContextLoading)
   const filteredItems = useMemo(() => {
     const query = sourceFilter.trim().toLocaleLowerCase()
     return readableItems.filter((item) => {
@@ -440,6 +529,9 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
     }
     return [...groups.entries()].sort(([a], [b]) => a === courseId ? -1 : b === courseId ? 1 : groups.get(a)!.name.localeCompare(groups.get(b)!.name))
   }, [courseId, courses, filteredItems])
+  const sourcePreviewAssetUrl = sourcePreview?.preview && ['pdf', 'image'].includes(sourcePreview.preview.kind) && !isTauriEnvironment()
+    ? fileUrl(sourcePreview.item.path, sourcePreview.item.semester)
+    : undefined
   const pickerGroups = useMemo(() => {
     const query = sourcePickerFilter.trim().toLocaleLowerCase()
     const groups = new Map<string, { name: string; items: LibraryItem[] }>()
@@ -460,6 +552,14 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
   const providerOptions = (providerCatalog?.providers ?? []).filter((entry) => entry.id !== 'claude')
   const activeProvider = providerOptions.find((entry) => entry.id === provider)
   const apiProvider = provider.startsWith('api:')
+  const mcpGrantPayload = useMemo(
+    () => Object.entries(mcpGrants)
+      .filter(([, tools]) => tools.length > 0)
+      .map(([connection_id, tools]) => ({ connection_id, tools })),
+    [mcpGrants],
+  )
+  const hasMcp = mcpGrantPayload.length > 0
+  const effectiveProposalMode = proposalMode || hasMcp
   const modelOptions = activeProvider?.models ?? []
   const defaultModel = activeProvider?.default_model ?? ''
   const currentModel = model && modelOptions.some((entry) => entry.id === model) ? model : defaultModel
@@ -475,6 +575,34 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
   }, [provider])
 
   useEffect(() => { void api.chatProviders<ChatProviders>().then(setProviders).catch((reason) => setError(String(reason))) }, [])
+  useEffect(() => {
+    mcpGrantsRef.current = mcpGrants
+  }, [mcpGrants])
+  useEffect(() => {
+    if (!active) return
+    void api.mcpConnections().then((connections) => {
+      setMcpConnections(connections)
+      const always = readMcpAlwaysAllowed()
+      setMcpGrants((current) => {
+        const next = { ...current }
+        for (const connection of connections) {
+          const tools = mcpToolNames(connection)
+          if (always.includes(connection.id) && tools.length) next[connection.id] = tools
+        }
+        return next
+      })
+    }).catch(() => undefined)
+  }, [active])
+  useEffect(() => {
+    const reset = () => {
+      mcpGrantsRef.current = {}
+      setMcpGrants({})
+      setMcpPermission(null)
+      void api.mcpConnections().then(setMcpConnections).catch(() => undefined)
+    }
+    window.addEventListener('academia-mcp-permissions-changed', reset)
+    return () => window.removeEventListener('academia-mcp-permissions-changed', reset)
+  }, [])
   useEffect(() => {
     if (!apiProvider || !proposalMode) return
     // API providers can propose catalog actions only.
@@ -578,9 +706,27 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
       if (historyResult.status === 'rejected') unavailable.push('coursework history')
       if (studyResult.status === 'rejected') unavailable.push('saved study scope')
       setAcademicContext({ courseId, tasks, history, study, unavailable })
+    }).catch(() => {
+      if (current) setAcademicContext({ courseId, tasks: [], history: [], study: null, unavailable: ['course records'] })
     })
     return () => { current = false }
   }, [courseId, semester])
+  const warmedCourseRef = useRef('')
+  useEffect(() => {
+    if (!active || !courseId || !libraryLoaded) return
+    const key = `${semester}|${courseId}`
+    if (warmedCourseRef.current === key) return
+    // Reuse the local extraction cache before the student asks: the first deep
+    // retrieval is the only slow one, and this makes it a background cost.
+    const timer = window.setTimeout(() => {
+      warmedCourseRef.current = key
+      void api.study([
+        'context', '--course', courseId, ...(semester ? ['--semester', semester] : []),
+        '--deep', '--limit', '1', '--query', 'course sources',
+      ]).catch(() => undefined)
+    }, 2000)
+    return () => window.clearTimeout(timer)
+  }, [active, courseId, semester, libraryLoaded])
   useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' }) }, [messages, busy])
   useEffect(() => {
     const closeDropdowns = (event: PointerEvent) => {
@@ -605,11 +751,102 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
     }
   }, [])
 
-  const send = async () => {
-    const text = draft.trim()
+  const allowMcp = (persistent: boolean) => {
+    const permission = mcpPermission
+    if (!permission) return
+    const connection = permission.connection
+    const tools = mcpToolNames(connection)
+    const next = { ...mcpGrantsRef.current, [connection.id]: tools }
+    mcpGrantsRef.current = next
+    setMcpGrants(next)
+    if (persistent) writeMcpAlwaysAllowed([...readMcpAlwaysAllowed(), connection.id])
+    setMcpPermission(null)
+    void send()
+  }
+
+  const send = async (options: { skipMcpPrompt?: boolean; mentions?: string[]; text?: string } = {}) => {
+    const text = (options.text ?? draft).trim()
     if ((!text && !attachments.length) || busy || studyGenerationInProgress) return
+    if (courseId && (!libraryLoaded || academicContextLoading)) {
+      setError('Class sources or course records are still loading. Wait a moment, then send again.')
+      return
+    }
+    const activeMentions = options.mentions ?? mentions
+    let nextGoogleGrants = googleGrants
+    if (googleAvailable) {
+      const wanted = [
+        ...(/\b(gmail|email|emails|mail|inbox)\b/i.test(text) ? ['gmail'] : []),
+        ...(/\b(calendar|schedule|meeting|meetings|events?)\b/i.test(text) ? ['calendar'] : []),
+      ]
+      if (wanted.some((grant) => !nextGoogleGrants.includes(grant))) {
+        nextGoogleGrants = [...new Set([...nextGoogleGrants, ...wanted])]
+        setGoogleGrants(nextGoogleGrants)
+        localStorage.setItem('academia.chat.googleGrants', JSON.stringify(nextGoogleGrants))
+      }
+    }
+    let nextNotionGrant = notionGrant
+    if (notionAvailable && !nextNotionGrant && /\bnotion\b/i.test(text)) {
+      nextNotionGrant = true
+      setNotionGrant(true)
+      localStorage.setItem('academia.chat.notionGrant', 'true')
+    }
+    let nextWebSearch = webSearch
+    if (!nextWebSearch && /\b(search (?:the )?web|web search|look .* online|google it)\b/i.test(text)) {
+      nextWebSearch = true
+      setWebSearch(true)
+      localStorage.setItem('academia.chat.webSearch', 'true')
+    }
+    let resolvedConnections = mcpConnections
+    if (!options.skipMcpPrompt) {
+      let connections = resolvedConnections
+      if (!connections.length) {
+        try {
+          connections = await api.mcpConnections()
+          setMcpConnections(connections)
+        } catch {
+          connections = []
+        }
+      }
+      resolvedConnections = connections
+      const requested = findMcpConnection(text, connections)
+        ?? connections.find((connection) => activeMentions.includes(`mcp:${connection.id}`))
+        ?? (wantsLiveBrowserAction(text)
+          ? connections.find((connection) => connection.status === 'available' && connection.tools.length > 0 && isBrowserConnection(connection))
+          : undefined)
+      if (requested) {
+        const always = readMcpAlwaysAllowed()
+        let granted = mcpGrantsRef.current[requested.id] ?? []
+        if (!granted.length && always.includes(requested.id)) {
+          const tools = mcpToolNames(requested)
+          if (tools.length) {
+            const next = { ...mcpGrantsRef.current, [requested.id]: tools }
+            mcpGrantsRef.current = next
+            setMcpGrants(next)
+            granted = tools
+          }
+        }
+        if (!granted.length) {
+          setMcpPermission({ connection: requested, text })
+          return
+        }
+      }
+    }
+    const activeMcpGrants = Object.entries(mcpGrantsRef.current)
+      .filter(([, tools]) => tools.length > 0)
+      .map(([connection_id, tools]) => ({ connection_id, tools }))
+    const usedTools = Array.from(new Set(messages.flatMap((message) => (message.trace ?? []).map((step) => step.detail ? `${step.tool} (${step.detail})` : step.tool))))
+    const grantedNames = activeMcpGrants.map((grant) => {
+      const name = resolvedConnections.find((connection) => connection.id === grant.connection_id)?.name ?? grant.connection_id
+      return `${name}: ${grant.tools.join(', ')}`
+    })
+    const toolContext = [
+      usedTools.length ? `Tools already used in this conversation: ${usedTools.slice(0, 12).join('; ')}.` : '',
+      grantedNames.length ? `External connections granted for this conversation: ${grantedNames.slice(0, 8).join('; ')}.` : '',
+    ].filter(Boolean).join(' ')
+    const hasMcpNow = activeMcpGrants.length > 0
+    const effectiveProposalModeNow = proposalMode || hasMcpNow
     const pendingAttachments = [...attachments]
-    const userMessage: Message = { role: 'user', content: text || `Please review ${pendingAttachments.map((file) => file.name).join(', ')}.`, ...(mentions.length ? { mentions: [...mentions] } : {}) }
+    const userMessage: Message = { role: 'user', content: text || `Please review ${pendingAttachments.map((file) => file.name).join(', ')}.`, ...(activeMentions.length ? { mentions: [...activeMentions] } : {}) }
     let nextMessages = [...messages, userMessage]
     setMessages(nextMessages)
     setDraft('')
@@ -743,22 +980,45 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
         ownerId,
         sourceItems: sourceItems.slice(index * 300, (index + 1) * 300),
       })))
-      const contextResults = await Promise.all(retrievalBatches.map(async ({ ownerId, sourceItems }) => {
-        const evidenceLimit = Math.max(1, Math.floor(128 * sourceItems.length / Math.max(1, retrievalPlan.length)))
-        const args = ['context', '--course', ownerId, '--semester', semester, '--deep', '--limit', String(evidenceLimit)]
-        for (const item of sourceItems) args.push('--source', item.id)
-        const groupSearchQuery = [currentSearchText, priorSearchText.slice(-300), ownerId === courseId ? recordedScope.slice(0, 500) : ''].filter(Boolean).join(' ').slice(0, 1800)
-        if (groupSearchQuery) args.push('--query', groupSearchQuery)
-        return api.study<StudySourceContext>(args)
-      }))
       const semesterItems = retrievalPlan.filter((item) => !item.course_id)
-      const semesterResults = await Promise.all(semesterItems.map(async (item) => {
-        try {
-          return { item, preview: await api.filePreview(item.path, item.semester), error: '' }
-        } catch (reason) {
-          return { item, preview: null, error: String(reason) }
+      const [contextResults, semesterResults] = await (async () => {
+        let progressTimer: number | null = null
+        if (course && retrievalPlan.length) {
+          const total = retrievalPlan.length
+          setIndexing({ completed: 0, total })
+          const pollProgress = async () => {
+            try {
+              const value = await api.study<StudyProgress>(['progress', '--course', courseId, ...(semester ? ['--semester', semester] : [])])
+              if (value && value.course_id === courseId && typeof value.completed === 'number') {
+                setIndexing({ completed: value.completed, total: typeof value.total === 'number' && value.total > 0 ? value.total : total })
+              }
+            } catch { /* Progress is advisory. */ }
+          }
+          void pollProgress()
+          progressTimer = window.setInterval(() => { void pollProgress() }, 2_000)
         }
-      }))
+        try {
+          const contexts = await Promise.all(retrievalBatches.map(async ({ ownerId, sourceItems }) => {
+            const evidenceLimit = Math.max(1, Math.floor(128 * sourceItems.length / Math.max(1, retrievalPlan.length)))
+            const args = ['context', '--course', ownerId, '--semester', semester, '--deep', '--limit', String(evidenceLimit)]
+            for (const item of sourceItems) args.push('--source', item.id)
+            const groupSearchQuery = [currentSearchText, priorSearchText.slice(-300), ownerId === courseId ? recordedScope.slice(0, 500) : ''].filter(Boolean).join(' ').slice(0, 1800)
+            if (groupSearchQuery) args.push('--query', groupSearchQuery)
+            return api.study<StudySourceContext>(args)
+          }))
+          const semesters = await Promise.all(semesterItems.map(async (item) => {
+            try {
+              return { item, preview: await api.filePreview(item.path, item.semester), error: '' }
+            } catch (reason) {
+              return { item, preview: null, error: String(reason) }
+            }
+          }))
+          return [contexts, semesters] as const
+        } finally {
+          if (progressTimer !== null) window.clearInterval(progressTimer)
+          setIndexing(null)
+        }
+      })()
 
       const contextParts: string[] = []
       if (course) {
@@ -809,26 +1069,34 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
         boundedMessages.unshift(message)
         historyLength += message.content.length
       }
-      const chatPayload = { provider, messages: boundedMessages.map(({ role, content }) => ({ role, content })), model: currentModel || null, effort, speed, attachments: uploaded.map((attachment) => ({ name: attachment.name, type: attachment.type, data: attachment.data })), course_context: courseContext, proposal_mode: proposalMode, course_id: courseId || null, semester: semester || null, granted_proposal_tools: proposalMode ? proposalGrants : [], web_search: webSearch, connector_grants: [...googleGrants, ...(notionGrant ? ['notion'] : [])] }
+      const chatPayload = { provider, messages: boundedMessages.map(({ role, content }) => ({ role, content })), model: currentModel || null, effort, speed, attachments: uploaded.map((attachment) => ({ name: attachment.name, type: attachment.type, data: attachment.data })), course_context: courseContext, proposal_mode: effectiveProposalModeNow, course_id: courseId || null, semester: semester || null, granted_proposal_tools: proposalMode ? proposalGrants : [], web_search: nextWebSearch, connector_grants: [...nextGoogleGrants, ...(nextNotionGrant ? ['notion'] : [])], mcp_grants: activeMcpGrants, tool_context: toolContext }
       let result: ChatResult
       let capturedProgress: StreamProgress[] = []
-      if (proposalMode) {
+      if (effectiveProposalModeNow || apiProvider) {
         const controller = new AbortController()
         streamRef.current = { controller, runId: null }
         streamingRef.current = { content: '', progress: [], proposals: [] }
         setStreaming(streamingRef.current)
+        setProgressOpen(true)
         const handleEvent = (event: ChatStreamEvent) => {
           if (event.type === 'started') {
             if (streamRef.current && typeof event.run_id === 'string') streamRef.current.runId = event.run_id
             return
           }
+          if (event.type === 'reasoning' && typeof event.delta === 'string') {
+            updateStreaming((current) => current.progress.some((item) => item.id === 'reasoning')
+              ? current
+              : { ...current, progress: [...current.progress, { id: 'reasoning', tool: 'reasoning', label: 'Thinking through the request', state: 'running' }] })
+            return
+          }
           if (event.type === 'tool_started') {
             const tool = typeof event.tool === 'string' ? event.tool : 'academia'
             const callId = typeof event.call_id === 'string' ? event.call_id : ''
+            const detail = typeof event.detail === 'string' ? event.detail : ''
             const id = callId || `${tool}-${Date.now()}-${Math.random()}`
             updateStreaming((current) => ({
               ...current,
-              progress: [...current.progress.filter((item) => item.id !== id), { id, tool, label: toolProgressLabel(tool), state: 'running' }],
+              progress: [...current.progress.filter((item) => item.id !== id), { id, tool, label: toolProgressLabel(tool, detail), state: 'running' }],
             }))
             return
           }
@@ -847,6 +1115,9 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
             return
           }
           if (event.type === 'delta' && typeof event.delta === 'string') {
+            updateStreaming((current) => current.progress.some((item) => item.id === 'reasoning' && item.state === 'running')
+              ? { ...current, progress: current.progress.map((item) => item.id === 'reasoning' ? { ...item, state: 'done' } : item) }
+              : current)
             deltaBufferRef.current += event.delta
             if (deltaTimerRef.current === null) {
               deltaTimerRef.current = window.setTimeout(() => {
@@ -989,6 +1260,7 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
     setSourceIds([])
     setExcludedCourseSourceIds([])
     setLastRetrievedSourceIds([])
+    setSourceNotice('')
   }
   const toggleSource = (id: string) => {
     const item = readableItems.find((entry) => entry.id === id)
@@ -998,6 +1270,62 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
       setSourceIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id])
     }
     setLastRetrievedSourceIds([])
+  }
+  const importSourceFiles = async (selected: File[] | string[]) => {
+    if (!courseId) {
+      setSourceNotice('Choose a class scope before adding a source.')
+      return
+    }
+    if (!selected.length) return
+    const destination = `${semester}/${courseId}/00_INBOX`
+    setImportingSources(true)
+    setSourceNotice('')
+    let imported = 0
+    try {
+      for (const entry of selected) {
+        if (typeof entry === 'string') await api.importFile(entry, destination, false)
+        else await api.uploadFile(entry, destination, false)
+        imported += 1
+      }
+      await onReload()
+      setSourceNotice(`Added ${imported} source${imported === 1 ? '' : 's'} to ${course?.code || courseId}. Local processing started.`)
+    } catch (reason) {
+      setSourceNotice(`Source import failed. ${String(reason)}`)
+      if (imported) onReload()
+    } finally {
+      setImportingSources(false)
+    }
+  }
+  const chooseSource = async () => {
+    if (!courseId) {
+      setSourceNotice('Choose a class scope before adding a source.')
+      return
+    }
+    if (!isTauriEnvironment()) {
+      sourceFileInputRef.current?.click()
+      return
+    }
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const picked = await open({ multiple: true, directory: false })
+      if (picked) await importSourceFiles(Array.isArray(picked) ? picked : [picked])
+    } catch (reason) {
+      setSourceNotice(`The file picker could not open. ${String(reason)}`)
+    }
+  }
+  const handleSourceFileInput = async (event: ReactChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    if (files.length) await importSourceFiles(files)
+  }
+  const openSourcePreview = async (item: LibraryItem) => {
+    setSourcePreview({ item, preview: null, loading: true, error: '' })
+    try {
+      const preview = await api.filePreview(item.path, item.semester)
+      setSourcePreview({ item, preview, loading: false, error: '' })
+    } catch (reason) {
+      setSourcePreview({ item, preview: null, loading: false, error: String(reason) })
+    }
   }
   const toggleAllVisibleSources = () => {
     const ids = filteredItems.map((item) => item.id)
@@ -1060,16 +1388,46 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
     setDraft('')
     setError('')
     setLastRetrievedSourceIds([])
+    const restoredGrants = Object.fromEntries((conversation.mcpGrants ?? []).map((grant) => [grant.connection_id, grant.tools]))
+    mcpGrantsRef.current = restoredGrants
+    setMcpGrants(restoredGrants)
     setHistoryOpen(false)
     setRailOpen(false)
   }
   const removeConversation = async (id: string) => {
+    if (busy || studyGenerationInProgress) return
+    if (!window.confirm('Delete this conversation? This cannot be undone.')) return
     try {
       await deleteChatConversation(id)
       setConversationHistory((current) => current.filter((conversation) => conversation.id !== id))
       setConversationHistoryError('')
+      if (activeConversationId === id) {
+        sessionGrantsRef.current = []
+        setSessionGrants([])
+        setActiveConversationId(null)
+        messagesRef.current = []
+        setMessages([])
+        setDraft('')
+        setChatAttachments([])
+        setAttachments([])
+        setError('')
+        setLastRetrievedSourceIds([])
+        mcpGrantsRef.current = {}
+        setMcpGrants({})
+      }
     } catch (reason) {
       setConversationHistoryError(`This conversation could not be deleted from this device. ${String(reason)}`)
+    }
+  }
+  const toggleConversationPin = async (id: string, pinned: boolean) => {
+    const before = conversationHistory
+    setConversationHistory((current) => sortConversationHistory(current.map((conversation) => conversation.id === id ? { ...conversation, pinned } : conversation)))
+    try {
+      await pinChatConversation(id, pinned)
+      setConversationHistoryError('')
+    } catch (reason) {
+      setConversationHistory(before)
+      setConversationHistoryError(`This conversation could not be ${pinned ? 'pinned' : 'unpinned'}. ${String(reason)}`)
     }
   }
   const startNewChat = () => {
@@ -1087,6 +1445,8 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
     setAttachments([])
     setError('')
     setLastRetrievedSourceIds([])
+    mcpGrantsRef.current = {}
+    setMcpGrants({})
     setHistoryOpen(false)
   }
   useEffect(() => {
@@ -1166,17 +1526,6 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
     }
   }
   useEffect(() => { sessionGrantsRef.current = sessionGrants }, [sessionGrants])
-  useEffect(() => {
-    setWebSearch(mentions.includes('web'))
-    setGoogleGrants([
-      ...(mentions.includes('gmail') ? ['gmail'] : []),
-      ...(mentions.includes('calendar') ? ['calendar'] : []),
-    ])
-    setNotionGrant(mentions.includes('notion'))
-    const wantsActions = mentions.includes('actions')
-    setProposalMode(wantsActions)
-    if (wantsActions) setProposalGrants(['actions'])
-  }, [mentions])
 
   const refreshActions = async () => {
     try {
@@ -1215,28 +1564,74 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
   }
   useEffect(() => { void refreshActions() }, [])
 
-  const mentionLabels: Record<string, string> = { web: 'Web', gmail: 'Gmail', calendar: 'Calendar', notion: 'Notion', actions: 'Actions' }
-  const mentionOptions = [
+  const mentionLabels = useMemo(() => {
+    const labels: Record<string, string> = { web: 'Web', gmail: 'Gmail', calendar: 'Calendar', notion: 'Notion', actions: 'Actions' }
+    for (const connection of mcpConnections) labels[`mcp:${connection.id}`] = connection.name
+    return labels
+  }, [mcpConnections])
+  const mentionOptions = useMemo(() => [
     { id: 'web', label: 'Web', hint: 'Search public pages and cite them', available: true },
     { id: 'gmail', label: 'Gmail', hint: 'Recent messages as reference', available: googleAvailable },
     { id: 'calendar', label: 'Calendar', hint: 'Upcoming events as reference', available: googleAvailable },
     { id: 'notion', label: 'Notion', hint: 'Pages shared with the integration', available: notionAvailable },
     { id: 'actions', label: 'Actions', hint: 'Let the agent propose workspace changes', available: true },
-  ]
+    ...mcpConnections
+      .filter((connection) => connection.status === 'available' && connection.tools.length > 0)
+      .map((connection) => ({ id: `mcp:${connection.id}`, label: connection.name, hint: 'External app tools · asks permission before use', available: true })),
+  ], [googleAvailable, notionAvailable, mcpConnections])
   const handleDraftChange = (value: string) => {
     setDraft(value)
-    const match = /(?:^|\s)@([a-z]*)$/i.exec(value)
+    const match = /(?:^|\s)@([\w:.-]*)$/i.exec(value)
     setMentionQuery(match ? match[1].toLowerCase() : null)
+    setMentions((current) => {
+      const present = current.filter((id) => mentionPattern(mentionLabels[id] ?? id).test(value))
+      for (const option of mentionOptions) {
+        if (!option.available || present.includes(option.id)) continue
+        if (mentionPattern(option.label).test(value)) present.push(option.id)
+      }
+      return present.length === current.length && present.every((id, index) => id === current[index]) ? current : present
+    })
   }
   const chooseMention = (id: string) => {
+    const label = mentionLabels[id] ?? id
     setMentions((current) => current.includes(id) ? current : [...current, id])
-    setDraft((current) => current.replace(/@[a-z]*$/i, '').replace(/\s+$/, ''))
+    if (id === 'gmail' || id === 'calendar') {
+      setGoogleGrants((current) => {
+        const next = current.includes(id) ? current : [...current, id]
+        localStorage.setItem('academia.chat.googleGrants', JSON.stringify(next))
+        return next
+      })
+    } else if (id === 'notion') {
+      setNotionGrant(true)
+      localStorage.setItem('academia.chat.notionGrant', 'true')
+    } else if (id === 'web') {
+      setWebSearch(true)
+      localStorage.setItem('academia.chat.webSearch', 'true')
+    } else if (id === 'actions') {
+      setProposalMode(true)
+      setProposalGrants((current) => current.includes('actions') ? current : [...current, 'actions'])
+    }
+    setDraft((current) => current.replace(/(?:^|\s)@[\w:.-]*$/i, (match) => `${match.startsWith(' ') ? ' ' : ''}@${label} `))
     setMentionQuery(null)
+    requestAnimationFrame(() => {
+      const node = textareaRef.current
+      if (!node) return
+      node.focus()
+      const end = node.value.length
+      node.setSelectionRange(end, end)
+    })
   }
 
   const contextPanel = <>
             <header className="chat-panel-heading"><div><p className="eyebrow">Context</p><h3>Sources</h3></div><div className="chat-panel-actions"><button className="chat-source-bulk-toggle" type="button" onClick={toggleAllVisibleSources} disabled={!filteredItems.length} aria-label={`${allVisibleSourcesSelected ? 'Uncheck' : 'Check'} all ${sourceFilter ? 'matching ' : ''}sources`} data-tooltip={`${allVisibleSourcesSelected ? 'Uncheck' : 'Check'} all ${sourceFilter ? 'matching ' : ''}sources`} data-tooltip-side="bottom"><span>{allVisibleSourcesSelected ? 'Uncheck all' : 'Check all'}</span><small>{availableSourceCount} available</small></button><button className="chat-panel-collapse" onClick={() => setPanelOpen(false)} aria-label="Collapse panel" data-tooltip="Collapse sources" data-tooltip-side="bottom">‹</button></div></header>
             <label className="chat-source-search"><span aria-hidden="true">⌕</span><input ref={sourceFilterRef} value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} placeholder={course ? `Find ${course.code} sources` : 'Find class sources'} aria-label="Search Academia sources" /></label>
+            <div className="chat-source-toolbar">
+              <button className="chat-source-add" type="button" onClick={() => void chooseSource()} disabled={!courseId || importingSources} title={courseId ? `Add a source to ${course?.code || courseId}` : 'Choose a class scope before adding a source'}>
+                {importingSources ? 'Adding…' : '＋ Add source'}
+              </button>
+              <input ref={sourceFileInputRef} className="chat-file-input" type="file" multiple accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,.docx,.pptx,.txt,.text,.md,.markdown,.csv,.json,.yaml,.yml" onChange={(event) => void handleSourceFileInput(event)} />
+              {sourceNotice && <p className="chat-source-notice" role="status">{sourceNotice}</p>}
+            </div>
               {draft.trim() && <section className="chat-source-plan" aria-live="polite"><header><strong>Full-text source search</strong><span>{selectedItems.length} selected</span></header><p>Every selected source’s extractable text is searched. Relevant passages with page locations are supplied to the chat, and any extraction limits are reported.</p></section>}
             <div className="chat-source-groups">
               {sourceGroups.map(([groupId, group]) => {
@@ -1246,11 +1641,14 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
                   {group.items.map((item) => {
                     const isAvailable = selectedSourceIdSet.has(item.id)
                     const wasRetrieved = lastRetrievedSourceIdSet.has(item.id)
-                    return <label className={`chat-source-row ${isAvailable ? 'selected' : ''} ${wasRetrieved ? 'retrieved' : ''}`} key={item.id}>
-                    <input type="checkbox" checked={isAvailable} onChange={() => toggleSource(item.id)} aria-label={`${isAvailable ? item.course_id === courseId ? 'Exclude' : 'Remove' : 'Add'} ${item.name} ${isAvailable && item.course_id === courseId ? 'from' : 'in'} this chat`} />
-                    <span className="chat-source-file-icon" aria-hidden="true">{item.extension.replace('.', '').slice(0, 3).toUpperCase()}</span>
-                    <span className="chat-source-copy"><strong>{item.name}</strong><small>{wasRetrieved ? 'Searched for latest reply · ' : ''}{item.category.replaceAll('_', ' ')}{item.intake_status === 'inbox' ? ' · Intake' : ''} · {item.extension.toUpperCase()}</small></span>
-                  </label>})}
+                    return <div className={`chat-source-row has-open ${isAvailable ? 'selected' : ''} ${wasRetrieved ? 'retrieved' : ''}`} key={item.id}>
+                    <label className="chat-source-toggle">
+                      <input type="checkbox" checked={isAvailable} onChange={() => toggleSource(item.id)} aria-label={`${isAvailable ? item.course_id === courseId ? 'Exclude' : 'Remove' : 'Add'} ${item.name} ${isAvailable && item.course_id === courseId ? 'from' : 'in'} this chat`} />
+                      <span className="chat-source-file-icon" aria-hidden="true">{item.extension.replace('.', '').slice(0, 3).toUpperCase()}</span>
+                      <span className="chat-source-copy"><strong>{item.name}</strong><small>{wasRetrieved ? 'Searched for latest reply · ' : ''}{item.category.replaceAll('_', ' ')}{item.intake_status === 'inbox' ? ' · Intake' : ''} · {item.extension.toUpperCase()}</small></span>
+                    </label>
+                    <button className="chat-source-open" type="button" onClick={() => void openSourcePreview(item)} aria-label={`Open ${item.name}`} title="Open source without changing selection">Open</button>
+                  </div>})}
                 </section>
               })}
               {!sourceGroups.length && <div className="chat-sources-empty"><span>▤</span><strong>{course ? 'No readable sources in this class yet' : 'No readable sources here yet'}</strong><p>Import course material, or choose a class with indexed PDFs, notes, or documents.</p></div>}
@@ -1275,14 +1673,20 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
       <section className="chat-main" aria-label="Conversation">
         <header className="chat-conversation-heading"><div className="chat-heading-start"><button className="agent-icon-button" type="button" onClick={() => { setRailOpen(true); setPanelOpen(false) }} aria-label="Show conversation history" title="History"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="3.5" y="4.5" width="13" height="11" rx="2" /><path d="M7.5 4.5v11" /></svg></button><ChatPicker id="course" icon="▣" value={courseId} placeholder="All Academia" ariaLabel="Scope" options={[{ value: '', label: 'All Academia' }, ...courses.map((entry) => ({ value: entry.id, label: entry.name.startsWith(entry.code) ? entry.name : `${entry.code} · ${entry.name}` }))]} openPicker={openPicker} setOpenPicker={setOpenPicker} onChange={selectCourse} /></div><div className="chat-heading-end"><button className="agent-icon-button" type="button" onClick={() => { setPanelOpen(true); setRailOpen(false) }} aria-label="Show panel" title="Panel"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="3.5" y="4.5" width="13" height="11" rx="2" /><path d="M12.5 4.5v11" /></svg></button></div></header>
         <div className="chat-messages" ref={listRef} aria-live="polite">
-          {messages.length === 0 ? <div className="chat-welcome"><p className="eyebrow">{course ? `Your ${course.code} study space` : 'Academia AI'}</p><h3>{course ? `What’s next in ${course.code}?` : 'What do you need?'}</h3><p>{course ? 'Pick a goal based on this class, or ask about an idea that still feels unclear.' : 'Choose a scope above to ground answers in a class, or ask across everything in your workspace.'}</p><div className="chat-suggestions">{course ? suggestions.map((suggestion) => <button key={suggestion.label} onClick={() => setDraft(suggestion.prompt)}>{suggestion.label} <span>↗</span></button>) : <span className="chat-suggestions-empty">Choose a scope above for prompts grounded in that class.</span>}</div></div> : messages.map((message, index) => <article className={`chat-message ${message.role}`} key={index}><span className="chat-avatar">{message.role === 'user' ? 'You' : 'A'}</span><div className="chat-message-content"><small>{message.role === 'user' ? 'You' : 'Academia study assistant'}</small>{message.mentions?.length ? <div className="chat-message-mentions">{message.mentions.map((mention) => <span key={mention}>{mentionLabels[mention] ?? mention}</span>)}</div> : null}{message.attachments?.length ? <div className="chat-message-attachments">{message.attachments.map((attachment, attachmentIndex) => attachment.preview ? <figure className="chat-message-image" key={`${attachment.name}-${attachmentIndex}`}><img src={attachment.preview} alt={`Attached image: ${attachment.name}`} /><figcaption>{attachment.name}</figcaption></figure> : <div className="chat-message-file" key={`${attachment.name}-${attachmentIndex}`}><span aria-hidden="true">▤</span><span><strong>{attachment.name}</strong><small>{attachment.type.startsWith('image/') ? 'Image attachment · reattach to view' : attachment.type === 'application/pdf' ? 'PDF document' : 'Attached document'}</small></span></div>)}</div> : null}<div className="chat-rich-text">{message.role === 'assistant' && message.trace?.length ? <ChatTrace trace={message.trace} /> : null}<ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={chatMarkdownComponents}>{message.content}</ReactMarkdown></div>{message.proposals?.length ? <ChatProposals proposals={message.proposals} onOpenReview={onOpenReview} onAllow={allowInlineProposal} onAllowForChat={allowForChat} onRefuse={(proposalId) => void refuseProposal(proposalId)} onAllowAll={allowAllProposals} /> : null}{message.role === 'assistant' && <ChatMessageFooter content={message.content} at={message.at} />}</div></article>)}
-          {(busy || studyGenerationInProgress) && !streaming && <div className="chat-thinking" role="status" aria-live="polite"><span className="chat-avatar">A</span><span className="chat-thinking-copy"><ElapsedTimer label={studyGenerationInProgress ? 'Creating source-grounded study material' : selectedItems.length ? 'Reading selected sources' : 'Thinking'} /><span className="chat-loading-dots" aria-hidden="true"><span /><span /><span /></span></span></div>}
+          {messages.length === 0 ? <div className="chat-welcome"><p className="eyebrow">{course ? `Your ${course.code} study space` : 'Academia AI'}</p><h3>{course ? `What’s next in ${course.code}?` : 'What do you need?'}</h3><p>{course ? 'Pick a goal based on this class, or ask about an idea that still feels unclear.' : 'Choose a scope above to ground answers in a class, or ask across everything in your workspace.'}</p><div className="chat-suggestions">{course ? suggestions.map((suggestion) => <button key={suggestion.label} onClick={() => setDraft(suggestion.prompt)}>{suggestion.label} <span>↗</span></button>) : <span className="chat-suggestions-empty">Choose a scope above for prompts grounded in that class.</span>}</div></div> : messages.map((message, index) => <article className={`chat-message ${message.role}`} key={index}><span className="chat-avatar">{message.role === 'user' ? 'You' : 'A'}</span><div className="chat-message-content"><small>{message.role === 'user' ? 'You' : 'Academia study assistant'}</small>{message.attachments?.length ? <div className="chat-message-attachments">{message.attachments.map((attachment, attachmentIndex) => attachment.preview ? <figure className="chat-message-image" key={`${attachment.name}-${attachmentIndex}`}><img src={attachment.preview} alt={`Attached image: ${attachment.name}`} /><figcaption>{attachment.name}</figcaption></figure> : <div className="chat-message-file" key={`${attachment.name}-${attachmentIndex}`}><span aria-hidden="true">▤</span><span><strong>{attachment.name}</strong><small>{attachment.type.startsWith('image/') ? 'Image attachment · reattach to view' : attachment.type === 'application/pdf' ? 'PDF document' : 'Attached document'}</small></span></div>)}</div> : null}<div className="chat-rich-text">{message.role === 'assistant' && message.trace?.length ? <ChatTrace trace={message.trace} /> : null}<ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={chatMarkdownComponents}>{message.content}</ReactMarkdown></div>{message.proposals?.length ? <ChatProposals proposals={message.proposals} onOpenReview={onOpenReview} onAllow={allowInlineProposal} onAllowForChat={allowForChat} onRefuse={(proposalId) => void refuseProposal(proposalId)} onAllowAll={allowAllProposals} /> : null}{message.role === 'assistant' && <ChatMessageFooter content={message.content} at={message.at} />}</div></article>)}
+          {(busy || studyGenerationInProgress) && !streaming && <div className="chat-thinking" role="status" aria-live="polite"><span className="chat-avatar">A</span><span className="chat-thinking-copy"><ElapsedTimer label={studyGenerationInProgress ? 'Creating source-grounded study material' : indexing ? `Indexing ${indexing.completed} of ${indexing.total} sources` : selectedItems.length ? 'Reading selected sources' : 'Thinking'} /><span className="chat-loading-dots" aria-hidden="true"><span /><span /><span /></span></span></div>}
           {streaming && <article className="chat-message assistant streaming">
             <span className="chat-avatar">A</span>
             <div className="chat-message-content">
               <small>Academia study assistant · working</small>
-              {streaming.progress.length > 0 && <ul className="chat-progress" aria-label="Assistant progress">{streaming.progress.map((item) => <li className={item.state} key={item.id}><span className="chat-progress-mark" aria-hidden="true">{item.state === 'done' ? '✓' : '·'}</span>{item.label}</li>)}</ul>}
-              <div className="chat-rich-text">{streaming.content ? <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={chatMarkdownComponents}>{streaming.content}</ReactMarkdown> : <span className="chat-stream-placeholder">{streaming.progress.length ? 'Working through the proposal…' : 'Starting the proposal run…'}</span>}</div>
+              <div className="chat-rich-text">{streaming.content ? <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={chatMarkdownComponents}>{streaming.content}</ReactMarkdown> : <span className="chat-stream-placeholder">{streaming.progress.length ? 'Working through the request…' : proposalMode ? 'Starting the proposal run…' : 'Starting the answer…'}</span>}</div>
+              {streaming.progress.length > 0 && <div className={`chat-stream-progress ${progressOpen ? 'open' : ''}`}>
+                <button type="button" className="chat-stream-progress-toggle" onClick={() => setProgressOpen((value) => !value)} aria-expanded={progressOpen}>
+                  <span aria-hidden="true">{progressOpen ? '▾' : '▸'}</span>
+                  <span>Tools · {streaming.progress.filter((item) => item.state === 'done').length}/{streaming.progress.length}</span>
+                </button>
+                {progressOpen && <ul className="chat-progress" aria-label="Assistant progress">{streaming.progress.map((item) => <li className={item.state} key={item.id}><span className="chat-progress-mark" aria-hidden="true">{item.state === 'done' ? '✓' : '·'}</span>{item.label}</li>)}</ul>}
+              </div>}
               {streaming.proposals.length > 0 && <ChatProposals proposals={streaming.proposals} onOpenReview={onOpenReview} onAllow={allowInlineProposal} onAllowForChat={allowForChat} onRefuse={(proposalId) => void refuseProposal(proposalId)} onAllowAll={allowAllProposals} />}
             </div>
           </article>}
@@ -1290,6 +1694,15 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
         </div>
         <div className="chat-composer-wrap">
           {error && <p className="chat-error" role="alert">{error}</p>}
+          {contextLoading && <p className="chat-context-wait" role="status">{libraryLoaded ? 'Loading course records…' : 'Loading class sources…'}{!libraryLoaded && <> <button type="button" onClick={onReload}>Retry</button></>}</p>}
+          {mcpPermission && <div className="chat-mcp-permission" role="alertdialog" aria-label={`Allow ${mcpPermission.connection.name} tools`}>
+            <div className="chat-mcp-permission-copy"><strong>{mcpPermission.connection.name}</strong> wants to use {mcpPermission.connection.tools.length} external tool{mcpPermission.connection.tools.length === 1 ? '' : 's'} for this message. Browser actions can affect signed-in sites, and every call is logged.</div>
+            <div className="chat-mcp-permission-actions">
+              <button type="button" className="quiet-button" onClick={() => { const id = mcpPermission.connection.id; const label = mentionLabels[id] ?? mcpPermission.connection.name; const cleaned = draft.replace(new RegExp(`(^|[\\s(])@${escapeRegExp(label)}\\s?`, 'ig'), '$1').trim(); const filtered = mentions.filter((mention) => mention !== `mcp:${id}`); setMentions(filtered); setDraft(cleaned); setMcpPermission(null); void send({ skipMcpPrompt: true, mentions: filtered, text: cleaned }) }}>Deny</button>
+              <button type="button" className="secondary-button" onClick={() => allowMcp(false)}>Allow</button>
+              <button type="button" className="primary-button" onClick={() => allowMcp(true)}>Always allow</button>
+            </div>
+          </div>}
 
           {showAttachMenu && <div className="chat-attach-menu" role="menu" aria-label="Add to this chat">
             <button role="menuitem" onClick={() => { setShowAttachMenu(false); fileInputRef.current?.click() }}><span>↑</span><span><strong>Add a file to this chat</strong><small>Images, PDF, DOCX, PPTX, and text · 12 MB each</small></span></button>
@@ -1297,12 +1710,12 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
           </div>}
           {mentionQuery !== null && <div className="chat-mentions">
             <div className="chat-mention-menu" role="listbox" aria-label="Add context">
-              {mentionOptions.filter((option) => option.available && (!mentionQuery || option.id.startsWith(mentionQuery) || option.label.toLowerCase().includes(mentionQuery))).map((option) => <button type="button" role="option" key={option.id} onClick={() => chooseMention(option.id)}><strong>@{option.id}</strong><small>{option.hint}</small></button>)}
+              {mentionOptions.filter((option) => option.available && (!mentionQuery || option.id.startsWith(mentionQuery) || option.label.toLowerCase().includes(mentionQuery))).map((option) => <button type="button" role="option" key={option.id} onClick={() => chooseMention(option.id)}><strong>@{option.label}</strong><small>{option.hint}</small></button>)}
             </div>
           </div>}
           <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void send() }}>
             {(attachments.length > 0 || chatAttachments.length > 0 || selectedItems.some((item) => item.course_id !== courseId)) && <div className="chat-composer-attachments">{chatAttachments.map((file, index) => <span key={`kept-${file.name}-${index}`}>{file.type.startsWith('image/') ? '▧' : '▤'} {file.name} · in chat</span>)}{attachments.map((file, index) => <span key={`${file.name}-${index}`}>{file.type.startsWith('image/') ? '▧' : '▤'} {file.name}</span>)}{selectedItems.filter((item) => item.course_id !== courseId).map((item) => <span className="chat-source-chip" key={item.id} title={`${courses.find((entry) => entry.id === item.course_id)?.code ?? item.semester} · ${item.name}`}>▤ {item.name}<button type="button" aria-label={`Remove ${item.name} from chat`} onClick={() => toggleSource(item.id)}>×</button></span>)}</div>}
-            <textarea ref={textareaRef} value={draft} onChange={(event) => handleDraftChange(event.target.value)} onPaste={pasteFiles} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} placeholder="Ask anything about your classes…" rows={2} maxLength={12000} aria-label="Your message. Paste an image or document to attach it." />
+            <textarea ref={textareaRef} value={draft} onChange={(event) => handleDraftChange(event.target.value)} onPaste={pasteFiles} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} placeholder="Ask anything about your classes… type @ to add context" rows={2} maxLength={12000} aria-label="Your message. Paste an image or document to attach it." />
             <div className="chat-composer-toolbar">
               <div className="chat-composer-context">
                 <div className="chat-attach-anchor"><button className="chat-attach-button" type="button" aria-label="Attach a file or Academia source" aria-expanded={showAttachMenu} onClick={() => setShowAttachMenu((open) => !open)}>＋</button></div>
@@ -1369,7 +1782,7 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
                   </svg>
                 </button>}
                 {streaming && <button type="button" className="chat-cancel-run" onClick={cancelRun} aria-label="Cancel assistant run"><span aria-hidden="true">■</span> Stop</button>}
-                <button className="chat-send" type="submit" disabled={busy || studyGenerationInProgress || (!draft.trim() && !attachments.length) || !isAvailable || (proposalMode && proposalGrants.length === 0)} aria-label={busy || studyGenerationInProgress ? 'Sending message' : 'Send message'} aria-busy={busy || studyGenerationInProgress}>{busy || studyGenerationInProgress ? <span className="chat-loading-dots compact" aria-hidden="true"><span /><span /><span /></span> : '↑'}</button>
+                <button className="chat-send" type="submit" disabled={busy || studyGenerationInProgress || contextLoading || (!draft.trim() && !attachments.length) || !isAvailable || (effectiveProposalMode && proposalGrants.length === 0 && !hasMcp)} aria-label={busy || studyGenerationInProgress ? 'Sending message' : 'Send message'} aria-busy={busy || studyGenerationInProgress}>{busy || studyGenerationInProgress ? <span className="chat-loading-dots compact" aria-hidden="true"><span /><span /><span /></span> : '↑'}</button>
               </div>
             </div>
           </form>
@@ -1383,10 +1796,20 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
         <button className="agent-home-button" type="button" onClick={onGoHome}><span aria-hidden="true">⌂</span> Home</button>
         <button className="agent-new-chat" type="button" onClick={startNewChat} disabled={busy || studyGenerationInProgress}><span aria-hidden="true">＋</span> New chat</button>
         <div className="agent-history-list">
-          {conversationHistory.map((conversation) => <button key={conversation.id} type="button" className={`agent-history-row ${conversation.id === activeConversationId ? 'active' : ''}`} onClick={() => void resumeConversation(conversation.id)} disabled={busy || studyGenerationInProgress}>
-            <span>{conversation.title || 'Untitled chat'}</span>
-            <small>{conversation.courseLabel || 'All classes'}{conversation.updatedAt ? ` · ${new Date(conversation.updatedAt).toLocaleDateString()}` : ''}</small>
-          </button>)}
+          {conversationHistory.map((conversation) => <div key={conversation.id} className={`agent-history-row ${conversation.id === activeConversationId ? 'active' : ''} ${conversation.pinned ? 'pinned' : ''}`}>
+            <button type="button" className="agent-history-open" onClick={() => void resumeConversation(conversation.id)} disabled={busy || studyGenerationInProgress}>
+              <span className="agent-history-title">{conversation.pinned && <svg className="agent-history-pin-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3.5h6l-.8 5.2 2.8 2.8v1.8H7v-1.8l2.8-2.8L9 3.5Z" /><path d="M12 13.3v7.2" /></svg>}{conversation.title || 'Untitled chat'}</span>
+              <small>{conversation.courseLabel || 'All classes'}{conversation.updatedAt ? ` · ${new Date(conversation.updatedAt).toLocaleDateString()}` : ''}</small>
+            </button>
+            <div className="agent-history-actions">
+              <button type="button" className={`agent-history-action ${conversation.pinned ? 'active' : ''}`} aria-label={conversation.pinned ? `Unpin ${conversation.title || 'conversation'}` : `Pin ${conversation.title || 'conversation'}`} aria-pressed={Boolean(conversation.pinned)} title={conversation.pinned ? 'Unpin conversation' : 'Pin conversation'} onClick={() => void toggleConversationPin(conversation.id, !conversation.pinned)} disabled={busy || studyGenerationInProgress}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3.5h6l-.8 5.2 2.8 2.8v1.8H7v-1.8l2.8-2.8L9 3.5Z" /><path d="M12 13.3v7.2" /></svg>
+              </button>
+              <button type="button" className="agent-history-action danger" aria-label={`Delete ${conversation.title || 'conversation'}`} title="Delete conversation" onClick={() => void removeConversation(conversation.id)} disabled={busy || studyGenerationInProgress}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7h15M9.5 7V4.5h5V7M7 7l.9 12.5h8.2L17 7M10 10.5v6M14 10.5v6" /></svg>
+              </button>
+            </div>
+          </div>)}
           {!conversationHistory.length && <p className="agent-history-empty">{conversationHistoryLoading ? 'Loading conversations…' : 'No conversations yet.'}</p>}
           {conversationHistoryError && <p className="agent-history-error" role="alert">{conversationHistoryError}</p>}
         </div>
@@ -1441,6 +1864,22 @@ export function DashboardChat({ courses, items, semester, activity, onOpenReview
       </div>
       <footer><button className="secondary-button" onClick={startNewChat} disabled={busy}>Start a new study chat</button><button className="primary-button" onClick={() => setHistoryOpen(false)}>Done</button></footer>
     </section></div>}
+    {sourcePreview && <div className="file-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSourcePreview(null) }}>
+      <section className="file-preview-dialog" role="dialog" aria-modal="true" aria-label={`Open source ${sourcePreview.item.name}`}>
+        <header className="file-preview-heading">
+          <div><p className="eyebrow">Source</p><h2>{sourcePreview.item.name}</h2><p>{sourcePreview.item.relative_path}</p></div>
+          <button className="icon-button" type="button" aria-label="Close source preview" onClick={() => setSourcePreview(null)}>×</button>
+        </header>
+        {sourcePreview.loading && <div className="file-preview-loading" role="status">Opening source preview…</div>}
+        {sourcePreview.error && <p className="setup-error" role="alert">{sourcePreview.error}</p>}
+        {sourcePreview.preview && !sourcePreview.loading && <>
+          <div className="file-preview-meta"><span>{sourcePreview.preview.extension.toUpperCase().replace('.', '')} · {formatSourceBytes(sourcePreview.preview.size)}</span>{sourcePreviewAssetUrl ? <a href={sourcePreviewAssetUrl} target="_blank" rel="noreferrer">Open original</a> : <span>Source unchanged</span>}</div>
+          <Suspense fallback={<div className="file-preview-loading" role="status">Formatting document…</div>}>
+            <DocumentReader preview={sourcePreview.preview} assetUrl={sourcePreviewAssetUrl} emptyMessage="No extractable text was found. Open the original file to view its full contents." />
+          </Suspense>
+        </>}
+      </section>
+    </div>}
   </div>
 }
 
@@ -1561,6 +2000,7 @@ function ElapsedTimer({ label }: { label: string }) {
 }
 
 function friendlyTool(tool: string) {
+  if (tool === 'mcp.call' || tool === 'academia_mcp_call') return 'External app tool'
   const name = tool.includes('.') ? tool.split('.').pop() || tool : tool
   return name.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
@@ -1574,7 +2014,7 @@ function formatDuration(ms?: number | null) {
 function ChatTrace({ trace }: { trace: ChatTraceStep[] }) {
   const [open, setOpen] = useState(false)
   const failed = trace.filter((step) => !step.ok).length
-  const names = [...new Set(trace.map((step) => friendlyTool(step.tool)))]
+  const names = [...new Set(trace.map((step) => `${friendlyTool(step.tool)}${step.detail ? ` (${step.detail})` : ''}`))]
   return <div className={`chat-trace ${open ? 'open' : ''}`}>
     <button type="button" className="chat-trace-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
       <span className="chat-trace-caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
@@ -1584,7 +2024,7 @@ function ChatTrace({ trace }: { trace: ChatTraceStep[] }) {
     {open && <ul className="chat-trace-list">
       {trace.map((step, index) => <li key={`${step.tool}-${index}`} className={step.ok ? '' : 'failed'}>
         <span className="chat-trace-dot" aria-hidden="true" />
-        <strong>{friendlyTool(step.tool)}</strong>
+        <strong>{friendlyTool(step.tool)}{step.detail ? ` · ${step.detail}` : ''}</strong>
         <code>{step.tool}</code>
         <time>{step.ok ? formatDuration(step.ms) || 'done' : 'failed'}</time>
       </li>)}

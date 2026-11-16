@@ -42,7 +42,7 @@ def available_catalog() -> dict[str, Any]:
 
 
 def test_validate_payload_accepts_minimal_codex_chat() -> None:
-    prompt, messages, provider, model, effort, fast, attachments, context, proposal_mode, course_id, semester, grants, web_search, connector_grants = _validate_payload(payload())
+    prompt, messages, provider, model, effort, fast, attachments, context, proposal_mode, course_id, semester, grants, web_search, connector_grants, mcp_grants = _validate_payload(payload())
 
     assert prompt == "USER: hello"
     assert messages == [{"role": "user", "content": "hello"}]
@@ -58,16 +58,17 @@ def test_validate_payload_accepts_minimal_codex_chat() -> None:
     assert grants == []
     assert web_search is False
     assert connector_grants == []
+    assert mcp_grants == []
 
 
 def test_validate_payload_requires_explicit_boolean_web_search() -> None:
-    assert _validate_payload(payload(web_search=True))[-2] is True
+    assert _validate_payload(payload(web_search=True))[-3] is True
     with pytest.raises(ValueError, match="web_search"):
         _validate_payload(payload(web_search="yes"))
 
 
 def test_validate_payload_accepts_bounded_google_connector_grants() -> None:
-    assert _validate_payload(payload(connector_grants=["gmail", "calendar", "notion"]))[-1] == ["gmail", "calendar", "notion"]
+    assert _validate_payload(payload(connector_grants=["gmail", "calendar", "notion"]))[-2] == ["gmail", "calendar", "notion"]
     with pytest.raises(ValueError, match="connector_grants"):
         _validate_payload(payload(connector_grants=["gmail", "drive"]))
 
@@ -292,7 +293,7 @@ def test_respond_uses_a_configured_api_provider(tmp_path: Path, monkeypatch: pyt
     assert result["notice"] is None
 
     # API providers may propose catalog actions; the task/import grant stays Codex-only.
-    assert _validate_payload(payload(provider="api:openai", proposal_mode=True, granted_proposal_tools=["actions"]))[-3] == ["actions"]
+    assert _validate_payload(payload(provider="api:openai", proposal_mode=True, granted_proposal_tools=["actions"]))[-4] == ["actions"]
 
 
 def test_respond_runs_api_provider_read_tools_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -391,7 +392,7 @@ def test_respond_reports_timeout_and_empty_answer(monkeypatch: pytest.MonkeyPatc
 
 
 def test_validate_payload_accepts_and_bounds_proposal_scope() -> None:
-    *_, proposal_mode, course_id, semester, grants, web_search, connector_grants = _validate_payload(
+    *_, proposal_mode, course_id, semester, grants, web_search, connector_grants, mcp_grants = _validate_payload(
         payload(proposal_mode=True, course_id="POL 2103", semester="Fall 2026")
     )
     assert proposal_mode is True
@@ -399,11 +400,11 @@ def test_validate_payload_accepts_and_bounds_proposal_scope() -> None:
     assert semester == "Fall 2026"
     assert grants == ["task", "import"]
 
-    *_, grants, web_search, connector_grants = _validate_payload(payload(proposal_mode=True, granted_proposal_tools=["task"]))
+    *_, grants, web_search, connector_grants, mcp_grants = _validate_payload(payload(proposal_mode=True, granted_proposal_tools=["task"]))
     assert grants == ["task"]
     with pytest.raises(ValueError, match="at least one"):
         _validate_payload(payload(proposal_mode=True, granted_proposal_tools=[]))
-    assert _validate_payload(payload(proposal_mode=True, granted_proposal_tools=["calendar"]))[-3] == ["calendar"]
+    assert _validate_payload(payload(proposal_mode=True, granted_proposal_tools=["calendar"]))[-4] == ["calendar"]
     with pytest.raises(ValueError, match="granted_proposal_tools"):
         _validate_payload(payload(proposal_mode=True, granted_proposal_tools=["drive"]))
 
@@ -680,6 +681,149 @@ def test_google_context_reads_only_granted_sources(monkeypatch: pytest.MonkeyPat
         dashboard_chat._google_context(profile, ["gmail"])
 
 
+def test_stream_chat_streams_api_provider_answer_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+    from academia_os.model_connections import ModelConnectionManager
+    from tests.test_api_providers import FakeChatServer
+    from tests.test_model_connections import MemoryCredentials
+
+    server = FakeChatServer()
+    manager = ModelConnectionManager(tmp_path / "model_connections.json", credentials=MemoryCredentials())  # type: ignore[arg-type]
+    try:
+        manager.add(provider="openai", api_key="key", base_url=server.origin + "/v1")
+        monkeypatch.setattr(dashboard_chat, "ModelConnectionManager", lambda _path: manager)
+        events: list[dict[str, Any]] = []
+
+        stream_chat(
+            payload(provider="api:openai", model="gpt-test", course_context="COURSE CONTEXT"),
+            profile=profile,
+            run_id="run-api",
+            cancel=CancelToken(),
+            emit=events.append,
+        )
+
+        assert [event["type"] for event in events] == ["started", "reasoning", "delta", "delta", "final"]
+        assert events[0]["run_id"] == "run-api"
+        assert events[0]["provider"] == "api:openai"
+        assert events[0]["model"] == "gpt-test"
+        assert events[1]["delta"] == "Checking the reading"
+        assert [event["delta"] for event in events if event["type"] == "delta"] == ["Streamed ", "answer."]
+        final = events[-1]
+        assert final["message"] == "Streamed answer."
+        assert final["provider"] == "api:openai"
+        assert final["model"] == "gpt-test"
+        assert final["proposals"] == []
+        assert final["trace"] == []
+        assert final["notice"] is None
+        body = server.openai_bodies[-1]
+        assert body["stream"] is True
+        assert "tools" not in body
+        system = body["messages"][0]
+        assert system["role"] == "system"
+        assert "COURSE CONTEXT" in system["content"]
+        assert "No Academia tools are available for this answer" in system["content"]
+    finally:
+        server.close()
+
+
+def test_stream_chat_keeps_api_tool_rounds_non_streaming(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+    from academia_os.model_connections import ModelConnectionManager
+    from tests.test_api_providers import FakeChatServer
+    from tests.test_model_connections import MemoryCredentials
+
+    server = FakeChatServer()
+    manager = ModelConnectionManager(tmp_path / "model_connections.json", credentials=MemoryCredentials())  # type: ignore[arg-type]
+    try:
+        manager.add(provider="openai", api_key="key", base_url=server.origin + "/v1")
+        monkeypatch.setattr(dashboard_chat, "ModelConnectionManager", lambda _path: manager)
+        events: list[dict[str, Any]] = []
+
+        stream_chat(
+            payload(provider="api:openai", model="gpt-test", proposal_mode=True, granted_proposal_tools=["actions"]),
+            profile=profile,
+            run_id="run-api-tools",
+            cancel=CancelToken(),
+            emit=events.append,
+        )
+
+        assert [event["type"] for event in events] == ["started", "tool_started", "tool_result", "final"]
+        assert events[0]["granted_proposal_tools"] == ["actions"]
+        assert events[-1]["message"] == "API final answer"
+        assert events[-1]["proposals"] == []
+        assert events[1]["tool"] == "task.list"
+        assert events[2]["ok"] is True
+        # v1 does not stream tool rounds, so none of the request bodies streamed.
+        assert [body.get("stream") for body in server.openai_bodies] == [None, None]
+        assert any("ACTION PROPOSALS" in message.get("content", "") for message in server.openai_bodies[-1]["messages"] if message["role"] == "system")
+    finally:
+        server.close()
+
+
+def test_stream_chat_reports_api_cancellation_before_the_first_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+    from academia_os.model_connections import ModelConnectionManager
+    from tests.test_api_providers import FakeChatServer
+    from tests.test_model_connections import MemoryCredentials
+
+    server = FakeChatServer()
+    manager = ModelConnectionManager(tmp_path / "model_connections.json", credentials=MemoryCredentials())  # type: ignore[arg-type]
+    try:
+        manager.add(provider="openai", api_key="key", base_url=server.origin + "/v1")
+        monkeypatch.setattr(dashboard_chat, "ModelConnectionManager", lambda _path: manager)
+        cancel = CancelToken()
+        cancel.cancel()
+        events: list[dict[str, Any]] = []
+
+        stream_chat(
+            payload(provider="api:openai", model="gpt-test"),
+            profile=profile,
+            run_id="run-api-cancel",
+            cancel=cancel,
+            emit=events.append,
+        )
+
+        assert [event["type"] for event in events] == ["started", "cancelled"]
+        assert server.openai_bodies == []
+    finally:
+        server.close()
+
+
+def test_stream_chat_reports_api_provider_error_without_masking_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+    from academia_os.model_connections import ModelConnectionManager
+    from tests.test_api_providers import FakeChatServer
+    from tests.test_model_connections import MemoryCredentials
+
+    server = FakeChatServer()
+    manager = ModelConnectionManager(tmp_path / "model_connections.json", credentials=MemoryCredentials())  # type: ignore[arg-type]
+    try:
+        manager.add(provider="openai", api_key="key", base_url=server.origin + "/v1")
+
+        class FailingAdapter:
+            id = "api:openai"
+
+            def complete(self, request: Any, *, cancel: Any = None) -> Any:
+                raise RuntimeError("provider exploded")
+
+        monkeypatch.setattr(dashboard_chat, "ModelConnectionManager", lambda _path: manager)
+        monkeypatch.setattr(dashboard_chat, "_api_adapter", lambda record, key, model, **_: FailingAdapter())
+        events: list[dict[str, Any]] = []
+
+        stream_chat(
+            payload(provider="api:openai", model="gpt-test", proposal_mode=True, granted_proposal_tools=["actions"]),
+            profile=profile,
+            run_id="run-api-error",
+            cancel=CancelToken(),
+            emit=events.append,
+        )
+
+        assert events[0]["type"] == "started"
+        assert events[-1] == {"type": "error", "message": "provider exploded"}
+    finally:
+        server.close()
+
+
 def test_stream_chat_reports_cancellation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _, _, profile = prepared_workspace(tmp_path)
 
@@ -701,6 +845,78 @@ def test_stream_chat_reports_cancellation(tmp_path: Path, monkeypatch: pytest.Mo
     stream_chat(payload(proposal_mode=True, semester="Fall 2026"), profile=profile, run_id="run-1", cancel=CancelToken(), emit=events.append)
 
     assert [event["type"] for event in events] == ["started", "cancelled"]
+
+
+def test_validate_payload_bounds_mcp_grants() -> None:
+    *_, mcp_grants = _validate_payload(payload(
+        proposal_mode=True,
+        mcp_grants=[{"connection_id": "conn-1", "tools": ["read_note", "write_note", "read_note"]}],
+    ))
+    assert mcp_grants == [{"connection_id": "conn-1", "tools": ["read_note", "write_note"]}]
+
+    *_, api_grants = _validate_payload(payload(
+        provider="api:openai",
+        mcp_grants=[{"connection_id": "conn-1", "tools": ["read_note"]}],
+    ))
+    assert api_grants == [{"connection_id": "conn-1", "tools": ["read_note"]}]
+
+    with pytest.raises(ValueError, match="Proposal mode"):
+        _validate_payload(payload(mcp_grants=[{"connection_id": "conn-1", "tools": ["read_note"]}]))
+    with pytest.raises(ValueError, match="once"):
+        _validate_payload(payload(proposal_mode=True, mcp_grants=[
+            {"connection_id": "conn-1", "tools": ["read_note"]},
+            {"connection_id": "conn-1", "tools": ["write_note"]},
+        ]))
+    with pytest.raises(ValueError, match="connection id"):
+        _validate_payload(payload(proposal_mode=True, mcp_grants=[{"connection_id": "", "tools": []}]))
+    with pytest.raises(ValueError, match="24 tools"):
+        _validate_payload(payload(proposal_mode=True, mcp_grants=[{"connection_id": "conn-1", "tools": [f"t{index}" for index in range(25)]}]))
+
+
+def test_validate_payload_accepts_mcp_only_proposal_mode() -> None:
+    *_, proposal_mode, _course_id, _semester, grants, _web, _connectors, mcp_grants = _validate_payload(payload(
+        proposal_mode=True,
+        granted_proposal_tools=[],
+        mcp_grants=[{"connection_id": "conn-1", "tools": ["read_note"]}],
+    ))
+    assert proposal_mode is True
+    assert grants == []
+    assert mcp_grants == [{"connection_id": "conn-1", "tools": ["read_note"]}]
+
+
+def test_stream_chat_passes_mcp_grants_to_the_codex_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+    captured: dict[str, Any] = {}
+
+    class FakeRuntime:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+        def run(self, request: Any, *, cancel: Any = None, on_event: Any = None) -> RunResult:
+            return RunResult(run_id="r", status="completed", message="ok")
+
+    monkeypatch.setattr(dashboard_chat, "provider_catalog", available_catalog)
+    monkeypatch.setattr(dashboard_chat, "codex_runtime", lambda: {"executable": "/fake/codex", "models": [], "recommended_model": None})
+    monkeypatch.setattr(dashboard_chat, "codex_model", lambda runtime, requested: ("test-model", None))
+    monkeypatch.setattr(dashboard_chat, "CodexAppServerRuntime", FakeRuntime)
+    events: list[dict[str, Any]] = []
+
+    stream_chat(
+        payload(
+            proposal_mode=True,
+            granted_proposal_tools=[],
+            semester="Fall 2026",
+            mcp_grants=[{"connection_id": "conn-1", "tools": ["read_note", "write_note"]}],
+        ),
+        profile=profile,
+        run_id="run-mcp",
+        cancel=CancelToken(),
+        emit=events.append,
+    )
+
+    assert captured["mcp_mode"] == "read_only"
+    assert captured["mcp_grants"] == (("conn-1", "read_note"), ("conn-1", "write_note"))
+    assert events[-1]["type"] == "final"
 
 
 def test_proposal_card_names_an_import_source() -> None:
@@ -749,3 +965,44 @@ def test_action_proposals_become_inline_cards() -> None:
     assert review["review_id"] == "review-2"
 
     assert _proposal_card("academia_propose_action", {"tier": "inline"}) is None
+
+
+def test_validate_payload_appends_bounded_conversation_tool_context() -> None:
+    context = _validate_payload(payload(tool_context="Previously used Aside (repl)."))[7]
+    assert "CONVERSATION TOOL CONTEXT" in context
+    assert "Previously used Aside (repl)." in context
+    assert "reuse the same granted" in context
+
+    with pytest.raises(ValueError, match="tool context"):
+        _validate_payload(payload(tool_context="x" * 4001))
+
+
+def test_api_provider_tool_step_limit_returns_partial_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, profile = prepared_workspace(tmp_path)
+    from academia_os.model_connections import ModelConnectionManager
+    from tests.test_api_providers import FakeChatServer
+    from tests.test_model_connections import MemoryCredentials
+
+    server = FakeChatServer()
+    manager = ModelConnectionManager(tmp_path / "model_connections.json", credentials=MemoryCredentials())  # type: ignore[arg-type]
+    try:
+        manager.add(provider="openai", api_key="key", base_url=server.origin + "/v1")
+        monkeypatch.setattr(dashboard_chat, "ModelConnectionManager", lambda _path: manager)
+        monkeypatch.setattr(dashboard_chat, "CHAT_MAX_TOOL_ITERATIONS", 1)
+        events: list[dict[str, Any]] = []
+
+        stream_chat(
+            payload(provider="api:openai", model="gpt-test", proposal_mode=True, granted_proposal_tools=["actions"]),
+            profile=profile,
+            run_id="run-api-limit",
+            cancel=CancelToken(),
+            emit=events.append,
+        )
+
+        final = events[-1]
+        assert final["type"] == "final"
+        assert "tool-step limit" in final["message"]
+        assert "continue" in final["message"].lower()
+        assert final["notice"] is None
+    finally:
+        server.close()

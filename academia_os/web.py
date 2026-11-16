@@ -509,6 +509,9 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
         if self.request_path == "/api/v1/agent/sessions/delete":
             self._handle_agent_sessions(origin, "delete")
             return
+        if self.request_path == "/api/v1/agent/sessions/pin":
+            self._handle_agent_sessions(origin, "pin")
+            return
         if self.request_path == "/api/v1/account/login":
             self._handle_account_action(origin, "login")
             return
@@ -846,6 +849,14 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                     raise DashboardRequestError(400, "InvalidSession", "session id is required")
                 store.delete(session_id)
                 self._send_json(200, {"deleted": True}, cors_origin=origin)
+                return
+            if action == "pin":
+                body = self._small_json_body()
+                session_id = body.get("id")
+                pinned = body.get("pinned")
+                if not isinstance(session_id, str) or not isinstance(pinned, bool):
+                    raise DashboardRequestError(400, "InvalidSession", "session id and pinned are required")
+                self._send_json(200, {"session": store.set_pinned(session_id, pinned)}, cors_origin=origin)
                 return
             raise DashboardRequestError(404, "NotFound", "unknown session action")
         except DashboardRequestError as exc:
@@ -1359,6 +1370,7 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 "text/html; charset=utf-8",
                 cors_origin=cors_origin,
                 head_only=head_only,
+                extra_headers={"Cache-Control": "no-store"},
             )
             return
         root = dist_dir.resolve()
@@ -1369,6 +1381,7 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 "text/html; charset=utf-8",
                 cors_origin=cors_origin,
                 head_only=head_only,
+                extra_headers={"Cache-Control": "no-store"},
             )
             return
 
@@ -1403,10 +1416,21 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             self._send_bytes(404, b"Not Found\n", "text/plain; charset=utf-8", cors_origin=cors_origin, head_only=head_only)
             return
         content_type, _encoding = mimetypes.guess_type(candidate.name)
+        # Hashed build assets never change under the same name; the HTML shell
+        # and every unhashed file must revalidate so a rebuilt bundle cannot
+        # keep pointing at deleted assets.
+        hashed_asset = len(parts) >= 2 and parts[0] == "assets"
         self._send_bytes(
             200,
             body,
             content_type or "application/octet-stream",
             cors_origin=cors_origin,
             head_only=head_only,
+            extra_headers={
+                "Cache-Control": (
+                    "public, max-age=31536000, immutable"
+                    if hashed_asset
+                    else "no-cache"
+                )
+            },
         )

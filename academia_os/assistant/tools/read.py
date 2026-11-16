@@ -6,7 +6,7 @@ and policy authorization before a handler is called.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +26,8 @@ class ReadContext:
     config: dict[str, Any]
     snapshot: dict[str, Any]
     policy: PolicyContext
+    mcp_grants: dict[str, frozenset[str]] = field(default_factory=dict)
+    profile_path: Path | None = None
 
     @classmethod
     def create(cls, config: dict[str, Any], *, semester: str | None = None, hosted_model_allowed: bool = False) -> "ReadContext":

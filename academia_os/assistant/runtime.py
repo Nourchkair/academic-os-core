@@ -134,7 +134,13 @@ class RunController:
                     ],
                 })
                 for call in calls:
-                    emit(EventType.TOOL_STARTED, {"name": call.name, "call_id": call.call_id})
+                    detail = ""
+                    if call.name == "mcp.call" and isinstance(call.arguments.get("tool"), str):
+                        detail = str(call.arguments["tool"])[:80]
+                    started_data: dict[str, Any] = {"name": call.name, "call_id": call.call_id}
+                    if detail:
+                        started_data["detail"] = detail
+                    emit(EventType.TOOL_STARTED, started_data)
                     try:
                         result = invoke_granted(
                             call.name,
@@ -162,6 +168,8 @@ class RunController:
                             "truncated": result.truncated,
                             "citation_count": len(result.citations),
                         }
+                        if detail:
+                            event_data["detail"] = detail
                         if call.name in WRITE_TOOLS:
                             event_data["data"] = result.data
                         emit(EventType.TOOL_RESULT, event_data)

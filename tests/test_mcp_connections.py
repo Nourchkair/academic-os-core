@@ -37,6 +37,7 @@ def test_add_inspect_and_grant_only_read_only_tools(tmp_path: Path) -> None:
     assert [tool["name"] for tool in inspected["tools"]] == ["read_note", "search_notes", "write_note"]
     assert inspected["tools"][0]["read_only"] is True
     assert inspected["tools"][-1]["read_only"] is False
+    assert inspected["tools"][0]["input_schema"]
     assert inspected["enabled"] is False
 
     granted = connections.grant(record["id"], ["search_notes", "read_note"])
@@ -60,6 +61,22 @@ def test_add_inspect_and_grant_only_read_only_tools(tmp_path: Path) -> None:
     disconnected = connections.disconnect(record["id"])
     assert disconnected["id"] == record["id"]
     assert connections.list() == []
+
+
+def test_per_conversation_grants_can_call_action_tools(tmp_path: Path) -> None:
+    connections = manager(tmp_path)
+    record = add_fake(connections)
+    connections.inspect(record["id"])
+
+    called = connections.call_tool(record["id"], "write_note", {"id": "note-1"}, allowed_tools=["write_note"])
+    assert called["tool"] == "write_note"
+    assert called["is_error"] is False
+    assert called["content"][0]["text"] == "ok"
+
+    with pytest.raises(MCPConnectionError, match="not granted for this conversation"):
+        connections.call_tool(record["id"], "write_note", {}, allowed_tools=["read_note"])
+    with pytest.raises(MCPConnectionError, match="not declared"):
+        connections.call_tool(record["id"], "missing_tool", {}, allowed_tools=["missing_tool"])
 
 
 def test_connection_state_persists_and_duplicate_names_fail(tmp_path: Path) -> None:

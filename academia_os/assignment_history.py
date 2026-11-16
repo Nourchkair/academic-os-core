@@ -16,7 +16,7 @@ HISTORY_RELATIVE_PATH = Path("03_ASSIGNMENTS") / HISTORY_FILENAME
 KINDS = frozenset({"assignment", "essay", "project", "exam", "presentation", "quiz", "other"})
 STATUSES = frozenset({"planned", "in_progress", "submitted", "graded", "completed"})
 TERMINAL_STATUSES = frozenset({"submitted", "graded", "completed"})
-_FIELDS = frozenset({"kind", "title", "status", "due_date", "submitted_on", "grade", "task_title", "artifact_paths", "notes"})
+_FIELDS = frozenset({"kind", "title", "status", "due_date", "submitted_on", "grade", "score", "percentage", "letter_grade", "task_title", "artifact_paths", "notes"})
 
 
 def _text(value: Any, label: str, *, required: bool = False, limit: int = 200) -> str | None:
@@ -100,6 +100,12 @@ def validate_record_fields(course_root: Path, values: dict[str, Any], *, partial
         result["submitted_on"] = _date(values["submitted_on"], "submitted_on")
     if "grade" in values:
         result["grade"] = _text(values["grade"], "grade", limit=50)
+    if "score" in values:
+        result["score"] = _text(values["score"], "score", limit=50)
+    if "percentage" in values:
+        result["percentage"] = _text(values["percentage"], "percentage", limit=20)
+    if "letter_grade" in values:
+        result["letter_grade"] = _text(values["letter_grade"], "letter_grade", limit=20)
     if "task_title" in values:
         result["task_title"] = _text(values["task_title"], "task_title", limit=200)
     if "artifact_paths" in values:

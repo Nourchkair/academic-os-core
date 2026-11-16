@@ -474,6 +474,47 @@ button.library-file-row:focus-visible { border-color: #a8a8a8; box-shadow: 0 0 0
 .coursework-editor-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
 .coursework-editor-actions button:disabled { cursor: wait; opacity: .6; }
 .history-file-preview-link { color: #767676; }
+/* Course grades: recorded results, not an official transcript. */
+.course-grades { display: grid; gap: 16px; }
+.course-grades-heading { align-items: flex-start; display: flex; gap: 16px; justify-content: space-between; }
+.course-grades-heading h3 { color: var(--text-strong, #404040); font: 650 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 4px 0 5px; }
+.course-grades-heading p:not(.eyebrow) { color: var(--text-muted, #909090); font-size: 11px; line-height: 1.5; margin: 0; max-width: 620px; }
+.course-grades-heading .secondary-button { flex: 0 0 auto; }
+.course-grades-summary { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.course-grades-summary > div { background: var(--surface-raised, #f7f6f2); border: 1px solid var(--line, #e8e8e8); border-radius: 12px; display: grid; gap: 2px; padding: 14px 15px; }
+.course-grades-summary span { color: var(--text-muted, #8a8a8a); font-size: 9px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.course-grades-summary strong { color: var(--text-strong, #3f3f3f); font-size: 24px; line-height: 1.1; }
+.course-grades-summary small { color: var(--text-muted, #999999); font-size: 9px; }
+.course-grades-toolbar { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; }
+.course-grades-filters { display: flex; flex-wrap: wrap; gap: 4px; }
+.course-grades-filters button { background: var(--surface-raised, #f7f6f2); border: 1px solid var(--line, #e8e8e8); border-radius: 999px; color: var(--text-muted, #7d7d7d); cursor: pointer; font-size: 10px; padding: 6px 10px; }
+.course-grades-filters button:hover { background: var(--surface-hover, #efebe3); color: var(--text-strong, #3f3f3f); }
+.course-grades-filters button.active { background: var(--surface-soft, #efebe3); border-color: var(--text-muted, #b9b4aa); color: var(--text-strong, #2f2f2f); font-weight: 700; }
+.course-grades-filters button span { color: var(--text-muted, #9a9a9a); font-size: 9px; margin-left: 3px; }
+.course-grades-note { color: var(--text-muted, #999999); font-size: 10px; line-height: 1.5; margin: 0; max-width: 460px; }
+.course-grades-list { display: grid; gap: 8px; }
+.course-grade-row { align-items: center; background: var(--surface, #ffffff); border: 1px solid var(--line, #e8e8e8); border-radius: 12px; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) auto; padding: 13px 15px; }
+.course-grade-row.graded { border-left: 3px solid var(--semantic-green, #34734a); }
+.course-grade-main { display: grid; gap: 7px; min-width: 0; }
+.course-grade-heading { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+.course-grade-heading h4 { color: var(--text-strong, #464646); font-size: 13px; margin: 0; overflow-wrap: anywhere; }
+.course-grade-meta { align-items: center; color: var(--text-muted, #828282); display: flex; flex-wrap: wrap; font-size: 9px; gap: 6px 13px; }
+.course-grade-meta .history-status { font-size: 8px; }
+.course-grade-notes { color: var(--text-muted, #747474); font-size: 10px; line-height: 1.5; margin: 0; white-space: pre-wrap; }
+.course-grade-result { align-content: center; display: grid; gap: 3px; justify-items: end; min-width: 96px; text-align: right; }
+.course-grade-result strong { color: var(--text-strong, #353535); font-size: 21px; letter-spacing: -.02em; }
+.course-grade-result .grade-percentage { color: var(--text-strong, #5d5d5d); font-size: 12px; font-weight: 650; }
+.course-grade-result .grade-letter { background: var(--surface-raised, #f2f0ea); border: 1px solid var(--line, #e4e0d8); border-radius: 999px; color: var(--text-strong, #3f3f3f); font-size: 11px; font-weight: 750; padding: 2px 8px; }
+.course-grade-result span { color: var(--text-muted, #929292); font-size: 10px; }
+.course-grade-result small { color: var(--text-muted, #a0a0a0); font-size: 8px; }
+@media (max-width: 760px) {
+  .course-grades-heading { align-items: stretch; flex-direction: column; }
+  .course-grades-heading .secondary-button { align-self: flex-start; }
+  .course-grades-summary { grid-template-columns: 1fr; }
+  .course-grade-row { align-items: start; grid-template-columns: 1fr; }
+  .course-grade-result { justify-items: start; text-align: left; }
+}
+
 @media (max-width: 760px) { .coursework-history-heading { align-items: stretch; flex-direction: column; }.coursework-history-heading .primary-button { align-self: flex-start; }.coursework-editor-grid { grid-template-columns: 1fr; }.coursework-editor .history-wide-field,.coursework-editor .history-title-field { grid-column: auto; }.coursework-history-card-heading { flex-direction: column; gap: 8px; }.history-status { align-self: flex-start; } }
 
 /* Polished application shell and responsive navigation */

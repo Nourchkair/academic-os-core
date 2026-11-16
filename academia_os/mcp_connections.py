@@ -29,7 +29,7 @@ MAX_ARGS = 40
 MAX_ARG_LENGTH = 1000
 MAX_NAME_LENGTH = 120
 MAX_COMMAND_LENGTH = 1000
-MAX_DESCRIPTION_LENGTH = 500
+MAX_DESCRIPTION_LENGTH = 6000
 MAX_TOOLS = 200
 
 
@@ -68,9 +68,11 @@ def _normalize_tool(value: Any) -> dict[str, Any] | None:
         return None
     annotations = value.get("annotations") if isinstance(value.get("annotations"), dict) else {}
     description = value.get("description")
+    schema = value.get("inputSchema") if isinstance(value.get("inputSchema"), dict) else value.get("input_schema")
     return {
         "name": name.strip(),
         "description": description[:MAX_DESCRIPTION_LENGTH] if isinstance(description, str) else "",
+        "input_schema": schema if isinstance(schema, dict) else {},
         "read_only": annotations.get("readOnlyHint") is True if annotations else value.get("read_only") is True,
         "destructive": annotations.get("destructiveHint") is True if annotations else value.get("destructive") is True,
         "open_world": annotations.get("openWorldHint") is True if annotations else value.get("open_world") is True,
@@ -495,8 +497,38 @@ class MCPConnectionManager:
         tool_record = next((item for item in record["tools"] if item["name"] == tool), None)
         if tool_record is None or not tool_record["read_only"]:
             raise MCPConnectionError("only granted read-only tools can be called")
+        return self._call_tool(record, tool, arguments)
+
+    def call_tool(
+        self,
+        connection_id: str,
+        tool: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        allowed_tools: Sequence[str],
+        timeout: float = INSPECT_TIMEOUT_SECONDS,
+    ) -> dict[str, Any]:
+        """Call one tool explicitly granted by the host for this conversation.
+
+        Read-only and action tools use the same path; the host's per-conversation
+        grant is the authorization boundary, so the persistent read-only grant
+        list is not required here.
+        """
+
+        record = self.store.get(connection_id)
+        if record["status"] != "available":
+            raise MCPConnectionError("inspect the connection before calling its tools")
+        allowed = {str(item) for item in allowed_tools}
+        if tool not in allowed:
+            raise MCPConnectionError("tool is not granted for this conversation")
+        tool_record = next((item for item in record["tools"] if item["name"] == tool), None)
+        if tool_record is None:
+            raise MCPConnectionError("tool is not declared by this server")
         if record["transport"] == "http" and record["trust"] != "remote_trusted":
             raise MCPConnectionError("trust the remote server before calling its tools")
+        return self._call_tool(record, tool, arguments, timeout=timeout)
+
+    def _call_tool(self, record: dict[str, Any], tool: str, arguments: dict[str, Any] | None, *, timeout: float = INSPECT_TIMEOUT_SECONDS) -> dict[str, Any]:
         if arguments is not None and not isinstance(arguments, dict):
             raise MCPConnectionError("arguments must be a JSON object")
         if record["transport"] == "http":
@@ -508,7 +540,7 @@ class MCPConnectionManager:
         try:
             client = _MCPClient([record["command"], *record["args"]], cwd=record.get("cwd"))
             client.initialize()
-            result = client.request("tools/call", {"name": tool, "arguments": arguments or {}}, timeout=INSPECT_TIMEOUT_SECONDS)
+            result = client.request("tools/call", {"name": tool, "arguments": arguments or {}}, timeout=timeout)
         except (OSError, MCPConnectionError, subprocess.SubprocessError) as exc:
             raise MCPConnectionError(str(exc)) from exc
         finally:
@@ -530,7 +562,7 @@ class MCPConnectionManager:
             if total >= 64_000:
                 break
         return {
-            "connection_id": connection_id,
+            "connection_id": record["id"],
             "tool": tool,
             "is_error": bool(result.get("isError")),
             "content": bounded,

@@ -672,6 +672,7 @@ def build_parser() -> argparse.ArgumentParser:
     task_create.add_argument("--due-date", help="Calendar date in YYYY-MM-DD")
     task_create.add_argument("--due-time", help="Local 24-hour time in HH:MM")
     task_create.add_argument("--semester", help="Semester containing SEMESTER_TASKS.md")
+    task_create.add_argument("--actor", default="user")
     task_create.add_argument("--json", action="store_true")
     task_update = task_sub.add_parser("update", help="Update one user task")
     task_update.add_argument("task_id")
@@ -684,11 +685,13 @@ def build_parser() -> argparse.ArgumentParser:
     task_update.add_argument("--clear-due-time", action="store_true")
     task_update.add_argument("--status", choices=("open", "done", "cancelled"))
     task_update.add_argument("--semester", help="Semester containing SEMESTER_TASKS.md")
+    task_update.add_argument("--actor", default="user")
     task_update.add_argument("--json", action="store_true")
     for action, summary in (("complete", "Mark one user task done"), ("reopen", "Reopen one completed user task")):
         task_action = task_sub.add_parser(action, help=summary)
         task_action.add_argument("task_id")
         task_action.add_argument("--semester", help="Semester containing SEMESTER_TASKS.md")
+        task_action.add_argument("--actor", default="user")
         task_action.add_argument("--json", action="store_true")
     process = sub.add_parser("process", help="Manage local background text extraction")
     process_sub = process.add_subparsers(dest="process_command", required=True)
@@ -825,6 +828,9 @@ def build_parser() -> argparse.ArgumentParser:
     history_add.add_argument("--due-date")
     history_add.add_argument("--submitted-on")
     history_add.add_argument("--grade")
+    history_add.add_argument("--score")
+    history_add.add_argument("--percentage")
+    history_add.add_argument("--letter-grade")
     history_add.add_argument("--task-title", help="Exact course task title to associate with this record")
     history_add.add_argument("--artifact", action="append", dest="artifact_paths", help="Course-relative file path; may be repeated")
     history_add.add_argument("--notes")
@@ -840,6 +846,9 @@ def build_parser() -> argparse.ArgumentParser:
     history_update.add_argument("--due-date")
     history_update.add_argument("--submitted-on")
     history_update.add_argument("--grade")
+    history_update.add_argument("--score")
+    history_update.add_argument("--percentage")
+    history_update.add_argument("--letter-grade")
     history_update.add_argument("--task-title")
     history_update.add_argument("--artifact", action="append", dest="artifact_paths")
     history_update.add_argument("--clear-artifacts", action="store_true")
@@ -904,7 +913,7 @@ def build_parser() -> argparse.ArgumentParser:
     imported.add_argument("--destination", type=Path, required=True, help="Workspace inbox directory; source files are never moved")
     imported.add_argument("--source-label", help="Truthful provenance label for a staged source, instead of recording its temporary path")
     imported.add_argument("--uncertain", action="store_true", help="Keep the file in general intake and create a Review item")
-    imported.add_argument("--actor", choices=("user", "agent:mcp"), default="user", help="Audit attribution for an explicitly requested import")
+    imported.add_argument("--actor", choices=("user", "agent:mcp", "agent:chat"), default="user", help="Audit attribution for an explicitly requested import")
     imported.add_argument("--json", action="store_true")
     migration = sub.add_parser("migration", help="Plan and execute safe legacy material migration")
     migration_sub = migration.add_subparsers(dest="migration_command", required=True)
@@ -928,6 +937,9 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_mode.add_argument("--read-only", action="store_true", help="Expose read tools only; disable all write and proposal tools")
     mcp_mode.add_argument("--proposal-only", action="store_true", help="Expose read tools and exact approval proposals, but no direct writes")
     mcp_serve.add_argument("--proposal-tool", action="append", choices=("propose_import", "propose_task", "propose_calendar", "propose_action"), dest="proposal_tools", help="Grant one exact proposal tool in proposal-only mode; may be repeated")
+    mcp_serve.add_argument("--mcp-grant", action="append", default=[], dest="mcp_grants", metavar="CONNECTION_ID:TOOL", help="Grant one external MCP tool for this run; may be repeated")
+    mcp_serve.add_argument("--download-intake", action="store_true", help="Expose the staged browser-download intake tools for this run")
+    mcp_serve.add_argument("--allow-action", action="append", default=[], choices=("tasks", "history", "study", "imports", "downloads", "files", "calendar", "structure"), dest="allow_actions", help="Auto-apply one trusted action category; may be repeated")
     mcp_serve.add_argument("--semester", help="Limit read tools to one exact semester folder")
     mcp_serve.add_argument("--course", help="Limit read tools to one exact course ID, code, or name")
     connections = sub.add_parser("mcp-connections", help="Manage local external MCP connections and read-only tool grants")
@@ -1109,6 +1121,10 @@ def build_parser() -> argparse.ArgumentParser:
     sessions_delete = sessions_sub.add_parser("delete", help="Delete one saved agent conversation")
     sessions_delete.add_argument("session_id")
     sessions_delete.add_argument("--json", action="store_true")
+    sessions_pin = sessions_sub.add_parser("pin", help="Pin or unpin one saved agent conversation")
+    sessions_pin.add_argument("session_id")
+    sessions_pin.add_argument("--unpin", action="store_true")
+    sessions_pin.add_argument("--json", action="store_true")
     chat_providers = sub.add_parser("chat-providers", help=argparse.SUPPRESS)
     native_chat = sub.add_parser("chat-stream", help=argparse.SUPPRESS)
     native_chat.add_argument("--input-file", required=True)
@@ -1146,11 +1162,20 @@ def main(argv: list[str] | None = None) -> int:
             from .mcp_server import serve
             if args.proposal_tools and not args.proposal_only:
                 raise ValueError("--proposal-tool requires --proposal-only")
+            mcp_grants: dict[str, set[str]] = {}
+            for value in args.mcp_grants:
+                connection_id, separator, tool = value.partition(":")
+                if not separator or not connection_id or not tool:
+                    raise ValueError("--mcp-grant must use CONNECTION_ID:TOOL")
+                mcp_grants.setdefault(connection_id, set()).add(tool)
             return serve(
                 profile=args.profile,
                 read_only=bool(args.read_only),
                 proposal_only=bool(args.proposal_only),
                 proposal_tools={f"academia_{name}" for name in args.proposal_tools} if args.proposal_tools else None,
+                mcp_grants=mcp_grants or None,
+                download_intake=bool(args.download_intake),
+                allow_actions=set(args.allow_actions),
                 semester=args.semester,
                 course=args.course,
             )
@@ -1451,7 +1476,7 @@ def dispatch(args: argparse.Namespace) -> int:
                 course_id=args.course_id,
                 due_date=args.due_date,
                 due_time=args.due_time,
-                actor="user",
+                actor=args.actor,
             )
         elif args.task_command == "update":
             fields: dict[str, Any] = {}
@@ -1473,11 +1498,11 @@ def dispatch(args: argparse.Namespace) -> int:
                 fields["status"] = args.status
             if not fields:
                 raise ValueError("provide at least one task field to update")
-            value = store.update(args.task_id, actor="user", **fields)
+            value = store.update(args.task_id, actor=args.actor, **fields)
         elif args.task_command == "complete":
-            value = store.complete(args.task_id, actor="user")
+            value = store.complete(args.task_id, actor=args.actor)
         elif args.task_command == "reopen":
-            value = store.reopen(args.task_id, actor="user")
+            value = store.reopen(args.task_id, actor=args.actor)
         else:
             raise ValueError(f"unsupported task command: {args.task_command}")
         _emit(value, as_json=args.json)
@@ -1524,9 +1549,14 @@ def dispatch(args: argparse.Namespace) -> int:
             saved = store.save(session)
             _emit({"session": summarize(saved)}, as_json=True)
             return 0
-        store.delete(args.session_id)
-        _emit({"deleted": True}, as_json=True)
-        return 0
+        if args.sessions_command == "delete":
+            store.delete(args.session_id)
+            _emit({"deleted": True}, as_json=True)
+            return 0
+        if args.sessions_command == "pin":
+            _emit({"session": store.set_pinned(args.session_id, not args.unpin)}, as_json=True)
+            return 0
+        raise ValueError(f"unknown sessions command: {args.sessions_command}")
     if args.command == "chat-providers":
         from .dashboard_chat import providers
         _emit(providers(profile=_profile_path(args)), as_json=True)
@@ -1641,7 +1671,7 @@ def dispatch(args: argparse.Namespace) -> int:
             value = list_assignment_history(root, semester, args.course_id)
         elif args.history_command == "add":
             fields = {"kind": args.kind, "title": args.title, "status": args.status}
-            for source, target in (("due_date", "due_date"), ("submitted_on", "submitted_on"), ("grade", "grade"), ("task_title", "task_title"), ("artifact_paths", "artifact_paths"), ("notes", "notes")):
+            for source, target in (("due_date", "due_date"), ("submitted_on", "submitted_on"), ("grade", "grade"), ("score", "score"), ("percentage", "percentage"), ("letter_grade", "letter_grade"), ("task_title", "task_title"), ("artifact_paths", "artifact_paths"), ("notes", "notes")):
                 raw = getattr(args, source)
                 if raw is not None:
                     fields[target] = raw
@@ -1657,7 +1687,7 @@ def dispatch(args: argparse.Namespace) -> int:
             )
         elif args.history_command == "update":
             fields = {}
-            for source in ("kind", "title", "status", "due_date", "submitted_on", "grade", "task_title", "artifact_paths", "notes"):
+            for source in ("kind", "title", "status", "due_date", "submitted_on", "grade", "score", "percentage", "letter_grade", "task_title", "artifact_paths", "notes"):
                 raw = getattr(args, source)
                 if raw is not None:
                     fields[source] = raw
@@ -1943,8 +1973,8 @@ def dispatch(args: argparse.Namespace) -> int:
         value = {str(folder): [str(path) for path in scan_watched_folder(folder)] for folder in configured_watched_folders(config)}
         _emit(value, as_json=args.json); return 0
     if args.command == "import":
-        config, snapshot, _ = _context(args)
-        workspace_root = Path(snapshot["academic_root"]).expanduser().resolve()
+        config = load_config(_profile_path(args))
+        workspace_root = Path(config["academic"]["root_directory"]).expanduser().resolve()
         destination = validate_import_destination(workspace_root, args.destination)
         from .processing import ProcessingStore
         processing = ProcessingStore(workspace_root / ".academia" / "processing.json")

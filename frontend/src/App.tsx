@@ -157,6 +157,7 @@ function App() {
   const [reviewFocusId, setReviewFocusId] = useState<string | null>(null)
   const [reviewRevision, setReviewRevision] = useState(0)
   const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([])
+  const [libraryLoaded, setLibraryLoaded] = useState(false)
   const [inbox, setInbox] = useState<ProcessingRecord[]>([])
   const [selectedSemester, setSelectedSemester] = useState(cachedStartup?.workspace.semester || '')
   const [studyResumeRequest, setStudyResumeRequest] = useState<StudyResumeRequest | null>(null)
@@ -295,6 +296,7 @@ function App() {
             const libraryData = await api.library({ semester: targetSemester })
             if (sequence !== refreshSequence.current) return
             setLibraryItems(libraryData)
+            setLibraryLoaded(true)
           } catch (reason) {
             if (sequence === refreshSequence.current) setError(`Course materials could not be loaded: ${String(reason)}`)
           }
@@ -330,6 +332,7 @@ function App() {
     try {
       setSemesterLoading(true)
       setError(null)
+      setLibraryLoaded(false)
       const courseData = await api.courses(semester)
       if (sequence !== refreshSequence.current) return
       const taskData = await api.tasks(semester)
@@ -341,6 +344,7 @@ function App() {
       setTasks(taskData.tasks)
       setTaskStateError(taskData.task_state_error)
       setLibraryItems(libraryData)
+      setLibraryLoaded(true)
     } catch (reason) {
       if (sequence === refreshSequence.current) setError(`The ${semester} workspace could not be loaded: ${String(reason)}`)
     } finally {
@@ -533,7 +537,7 @@ function App() {
       {view === 'home' && <HomeView status={status} courses={courses} tasks={tasks} activity={activity} inbox={inbox} semester={selectedSemester || status?.workspace.semester || ''} semesters={semesters} loading={semesterLoading} onSemesterChange={changeSemester} onOpenCourse={openCourse} onOpenIntake={() => openActionPanel('import')} onNavigate={navigate} />}
       {view === 'review' && <ReviewView items={reviews} courses={courses} activity={activity} busy={reviewBusy} error={reviewError} focusId={reviewFocusId} onFocusConsumed={() => setReviewFocusId(null)} onDecision={decideReview} onExecute={executeReview} onAmend={amendReview} />}
       {view === 'courses' && <CoursesView semesters={semesters} semester={selectedSemester || status?.workspace.semester || ''} courses={courses} items={libraryItems} inbox={inbox} loading={semesterLoading} onSemesterChange={changeSemester} onOpenActions={openActionPanel} onHistoryChanged={() => refresh()} studyResumeRequest={studyResumeRequest} onStudyResumeConsumed={clearStudyResumeRequest} onOpenStudyConversation={openStudyConversation} onStartStudyChat={startStudyChat} courseOpenRequest={courseOpenRequest} onCourseOpenConsumed={clearCourseOpenRequest} onBackHome={() => setView('home')} />}
-      <div className={`chat-route-shell ${view === 'chat' ? 'active' : ''}`} aria-hidden={view !== 'chat'}><DashboardChat courses={courses} items={libraryItems} semester={selectedSemester || status?.workspace.semester || ''} activity={activity}  onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} onProposalCreated={() => void refreshReviews()} reviewRevision={reviewRevision} onResumeStudySession={resumeStudySession} studyChatRequest={studyChatRequest} onStudyChatRequestConsumed={clearStudyChatRequest} onGoHome={() => setView('home')} /></div>
+      <div className={`chat-route-shell ${view === 'chat' ? 'active' : ''}`} aria-hidden={view !== 'chat'}><DashboardChat courses={courses} items={libraryItems} libraryLoaded={libraryLoaded} active={view === 'chat'} onReload={() => void refresh()} semester={selectedSemester || status?.workspace.semester || ''} activity={activity}  onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} onProposalCreated={() => void refreshReviews()} reviewRevision={reviewRevision} onResumeStudySession={resumeStudySession} studyChatRequest={studyChatRequest} onStudyChatRequestConsumed={clearStudyChatRequest} onGoHome={() => setView('home')} /></div>
       {view === 'tasks' && <Tasks tasks={tasks} courses={courses} semester={selectedSemester || status?.workspace.semester || ''} timezone={status?.workspace.timezone} stateError={taskStateError} onNavigate={navigate} onChanged={() => refresh()} />}
       {view === 'activity' && <ActivityView activity={activity} processing={inbox} onNavigate={navigate} />}
       {view === 'settings' && status && <SettingsView status={status} onSaved={() => refresh()} onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} />}
@@ -741,7 +745,7 @@ function TaskCompletionControl({ task, courses, semester, onChanged }: { task: T
       ? <button type="button" className="task-grade-trigger" onClick={() => void openEditor()} data-tooltip="Add or edit the grade for this completed task">{savedGrade ? `Grade · ${savedGrade}` : 'Add grade'}</button>
       : <button type="button" className="task-done-trigger" onClick={() => void openEditor()} data-tooltip="Mark this task done and optionally record a grade">Mark done</button>}
     {open && <div className="task-grade-editor">
-      <label><span>{loadingHistory ? 'Loading course record…' : task.completed ? 'Grade' : 'Grade (optional)'}</span><input value={grade} onChange={(event) => setGrade(event.target.value)} maxLength={50} placeholder="e.g. 71/100" disabled={busy || loadingHistory || !taskCourse} /></label>
+      <label><span>{loadingHistory ? 'Loading course record…' : task.completed ? 'Grade' : 'Grade (optional)'}</span><input value={grade} onChange={(event) => setGrade(event.target.value)} maxLength={50} placeholder="e.g. 54/60 · 90% · A+" disabled={busy || loadingHistory || !taskCourse} /></label>
       {error && <p className="task-grade-error" role="alert">{error}</p>}
       {!taskCourse && <p className="task-grade-error">This task is not linked to a course, so it cannot be saved to course history.</p>}
       <div><button type="button" className="task-save-done" onClick={() => void save(true)} disabled={busy || loadingHistory || historyLoadFailed || !taskCourse || !grade.trim()}>{loadingHistory ? 'Loading…' : busy ? 'Saving…' : task.completed ? 'Save grade' : 'Mark done'}</button>{!task.completed && <button type="button" className="task-skip-grade" onClick={() => void save(false)} disabled={busy || loadingHistory || historyLoadFailed || !taskCourse}>{loadingHistory ? 'Loading…' : busy ? 'Saving…' : 'Skip grade'}</button>}<button type="button" className="task-close-editor" onClick={() => setOpen(false)} disabled={busy || loadingHistory}>Cancel</button></div>

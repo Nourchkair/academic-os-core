@@ -145,6 +145,9 @@ export type CourseworkHistoryRecord = {
   due_date?: string | null
   submitted_on?: string | null
   grade?: string | null
+  score?: string | null
+  percentage?: string | null
+  letter_grade?: string | null
   task_title?: string | null
   artifact_paths: string[]
   notes?: string | null
@@ -162,6 +165,9 @@ export type CourseworkHistoryInput = {
   due_date?: string
   submitted_on?: string
   grade?: string
+  score?: string
+  percentage?: string
+  letter_grade?: string
   task_title?: string
   artifact_paths?: string[]
   notes?: string

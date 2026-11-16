@@ -56,6 +56,135 @@ def test_reads_are_side_effect_free_and_sources_are_bounded(workspace):
         service.context(source_ids=[source.relative_to(root).as_posix()], pages='1-2')['chunks'][0]
 
 
+def write_pdf_cache(root: Path, pdf: Path, *, text: str, digest: str = 'cached-digest', signature: str | None = None) -> None:
+    from academia_os.processing import cache_signature
+    from academia_os.state import JsonStateStore
+
+    relative = pdf.relative_to(root).as_posix()
+    record = {
+        'signature': signature if signature is not None else cache_signature(pdf),
+        'document': {
+            'path': relative,
+            'media_type': 'application/pdf',
+            'segments': [{'text': text, 'page': 1, 'section': None, 'start_line': None, 'end_line': None, 'index': 0}],
+            'extraction_method': 'pypdf-text',
+            'content_hash': digest,
+            'status': 'supported',
+            'warnings': [],
+            'unsupported': [],
+        },
+    }
+    store = JsonStateStore(root / '.academia' / 'extracted_sources.json')
+    store.update({'schema_version': 1, 'records': {}}, lambda state: {**state, 'records': {**state.get('records', {}), relative: record}})
+
+
+def test_deep_retrieval_reuses_cached_pdf_text_without_reparsing(workspace):
+    _, root, course, _source, service = workspace
+    pdf = course / '05_REFERENCE' / 'scan.pdf'
+    pdf.write_bytes(b'%PDF-1.4\n% not a parseable fixture; only the cache may supply text\n')
+    write_pdf_cache(root, pdf, text='Cached sovereignty passage about the social contract.')
+
+    context = service.context(source_ids=[pdf.relative_to(root).as_posix()], deep=True)
+
+    assert context['coverage']['scanned_sources'] == 1
+    assert context['warnings'] == []
+    assert context['chunks'][0]['sha256'] == 'cached-digest'
+    assert 'Cached sovereignty passage' in context['chunks'][0]['text']
+    assert context['chunks'][0]['locator'].startswith('page 1 · characters 1-')
+
+
+def test_stale_pdf_cache_is_ignored(workspace):
+    _, root, course, _source, service = workspace
+    pdf = course / '05_REFERENCE' / 'scan.pdf'
+    pdf.write_bytes(b'%PDF-1.4\n% broken fixture\n')
+    write_pdf_cache(root, pdf, text='Stale cached passage.', signature='1:1')
+
+    context = service.context(source_ids=[pdf.relative_to(root).as_posix()], deep=True)
+
+    assert context['chunks'] == []
+    assert context['coverage']['scanned_sources'] == 0
+    assert any('text extraction failed' in warning for warning in context['warnings'])
+
+
+def test_deep_extraction_writes_a_reusable_pdf_cache(workspace):
+    from academia_os.processing import cache_signature
+    from academia_os.state import JsonStateStore
+    from academia_os.study.sources import _cache_pdf_document
+
+    _, root, course, _source, service = workspace
+    pdf = course / '05_REFERENCE' / 'live.pdf'
+    pdf.write_bytes(b'%PDF-1.4\n')
+
+    _cache_pdf_document(root, pdf, 'live-digest', [('page 1', 'Live extracted passage.', False)])
+
+    state = JsonStateStore(root / '.academia' / 'extracted_sources.json').read({'records': {}})
+    record = state['records'][pdf.relative_to(root).as_posix()]
+    assert record['signature'] == cache_signature(pdf)
+    assert record['document']['content_hash'] == 'live-digest'
+    assert record['document']['segments'][0]['text'] == 'Live extracted passage.'
+    context = service.context(source_ids=[pdf.relative_to(root).as_posix()], deep=True)
+    assert context['chunks'][0]['text'] == 'Live extracted passage.'
+
+
+def write_text_pdf(path: Path, text: str) -> Path:
+    from pypdf import PdfWriter
+    from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=612, height=792)
+    stream = DecodedStreamObject()
+    stream.set_data(f'BT /F1 18 Tf 72 720 Td ({text}) Tj ET'.encode())
+    page[NameObject('/Contents')] = writer._add_object(stream)
+    font = DictionaryObject({
+        NameObject('/Type'): NameObject('/Font'),
+        NameObject('/Subtype'): NameObject('/Type1'),
+        NameObject('/BaseFont'): NameObject('/Helvetica'),
+    })
+    page[NameObject('/Resources')] = DictionaryObject({
+        NameObject('/Font'): DictionaryObject({NameObject('/F1'): writer._add_object(font)}),
+    })
+    with path.open('wb') as output:
+        writer.write(output)
+    return path
+
+
+def test_parallel_cold_extraction_caches_sources_and_reports_progress(workspace, monkeypatch):
+    from academia_os.state import JsonStateStore
+    from academia_os.study.sources import read_progress
+
+    _, root, course, _source, service = workspace
+    first = write_text_pdf(course / '05_REFERENCE' / 'parallel-one.pdf', 'Parallel one discusses sovereignty.')
+    second = write_text_pdf(course / '05_REFERENCE' / 'parallel-two.pdf', 'Parallel two discusses federalism.')
+    monkeypatch.setenv('ACADEMIA_EXTRACT_WORKERS', '2')
+    source_ids = [first.relative_to(root).as_posix(), second.relative_to(root).as_posix()]
+
+    context = service.context(source_ids=source_ids, deep=True)
+
+    assert context['coverage']['scanned_sources'] == 2
+    assert context['warnings'] == []
+    text = ' '.join(chunk['text'] for chunk in context['chunks'])
+    assert 'Parallel one discusses sovereignty.' in text
+    assert 'Parallel two discusses federalism.' in text
+    records = JsonStateStore(root / '.academia' / 'extracted_sources.json').read({'records': {}})['records']
+    assert set(source_ids) <= set(records)
+    progress = read_progress(root, 'Fall 2026', 'POL 2103')
+    assert progress['status'] == 'completed'
+    assert progress['completed'] == 2
+    assert progress['total'] == 2
+
+
+def test_progress_is_idle_before_a_retrieval(workspace):
+    from academia_os.study.sources import read_progress
+
+    _, root, *_ = workspace
+
+    progress = read_progress(root, 'Fall 2026', 'POL 2103')
+
+    assert progress['status'] == 'idle'
+    assert progress['completed'] == 0
+    assert progress['total'] == 0
+
+
 def test_agent_creates_then_resumes_and_grades_without_dashboard_or_model(workspace):
     config, root, course, source, service = workspace
     context, payload = context_and_payload(service, source)

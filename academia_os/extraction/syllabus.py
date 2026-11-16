@@ -148,7 +148,7 @@ def _extract_pdf(path: Path, raw: bytes, digest: str) -> SourceDocument:
         warning = tuple(notices) or ("Some PDF pages have no extractable text and local OCR found no readable text.",)
         return SourceDocument(str(path), "application/pdf", segments, "pypdf-text", digest, warnings=warning)
 
-    # Keep Vision as a fallback for systems without Poppler/Tesseract, and
+    # Keep Vision as a fallback for systems without Tesseract, and
     # retain both diagnostics if neither OCR path can read the document.
     vision = _extract_vision(path, "application/pdf", digest, is_pdf=True)
     if vision.status is ExtractionStatus.SUPPORTED and vision.segments:

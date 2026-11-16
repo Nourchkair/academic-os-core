@@ -29,6 +29,11 @@ EXPECTED_TOOLS = {
     "academia_import_targets",
     "academia_library",
     "academia_processing_status",
+    "academia_processing_detail",
+    "academia_grade_history",
+    "academia_study_exam_scope",
+    "academia_study_overview",
+    "academia_search_passages",
     "academia_propose_action",
     "academia_propose_calendar",
     "academia_propose_import",
@@ -46,7 +51,7 @@ EXPECTED_TOOLS = {
 class McpServer:
     """Spawn the real stdio server and speak newline-delimited JSON-RPC."""
 
-    def __init__(self, profile: Path, *, read_only: bool = False, proposal_only: bool = False, proposal_tools: list[str] | None = None, semester: str | None = None, course: str | None = None) -> None:
+    def __init__(self, profile: Path, *, read_only: bool = False, proposal_only: bool = False, proposal_tools: list[str] | None = None, allow_actions: list[str] | None = None, download_intake: bool = False, semester: str | None = None, course: str | None = None) -> None:
         environment = os.environ.copy()
         environment["PYTHONPATH"] = str(ROOT)
         command = [sys.executable, "-m", "academia_os", "--profile", str(profile), "mcp", "serve"]
@@ -56,6 +61,10 @@ class McpServer:
             command.append("--proposal-only")
         for proposal_tool in proposal_tools or []:
             command.extend(["--proposal-tool", proposal_tool])
+        for action in allow_actions or []:
+            command.extend(["--allow-action", action])
+        if download_intake:
+            command.append("--download-intake")
         if semester:
             command.extend(["--semester", semester])
         if course:
@@ -423,3 +432,139 @@ def test_capability_report_mcp_metadata_matches_actual_tools(mcp: tuple[McpServe
 
     advertised = {normalize(name) for name in mcp_report["read_tools"] + mcp_report["write_tools"] + mcp_report.get("proposal_tools", [])}
     assert advertised == actual
+
+
+def test_read_search_study_and_grade_history_tools(tmp_path: Path) -> None:
+    from academia_os.assignment_history import add_assignment_history
+
+    _, root, profile = prepared_workspace(tmp_path)
+    course = "POL 2103 - Politics"
+    add_assignment_history(root, "Fall 2026", course, {
+        "kind": "exam",
+        "title": "Midterm",
+        "status": "graded",
+        "score": "54/60",
+        "percentage": "90%",
+        "letter_grade": "A+",
+    })
+    server = McpServer(profile)
+    try:
+        search = call_json(server, "academia_search_passages", {
+            "course": course, "query": "private source content", "deep": True, "limit": 5,
+        })
+        assert search["data"]["chunks"]
+        assert search["citations"]
+
+        overview = call_json(server, "academia_study_overview", {"course": course})
+        assert overview["tool"] == "study.overview"
+
+        exam = call_json(server, "academia_study_exam_scope", {"course": course})
+        assert exam["tool"] == "study.exam_scope"
+
+        grades = call_json(server, "academia_grade_history", {"course": course})
+        assert grades["graded_count"] == 1
+        assert grades["records"][0]["score"] == "54/60"
+        assert grades["records"][0]["percentage"] == "90%"
+        assert grades["records"][0]["letter_grade"] == "A+"
+    finally:
+        server.close()
+
+
+def test_trusted_task_and_history_actions_apply_without_review(tmp_path: Path) -> None:
+    _, _root, profile = prepared_workspace(tmp_path)
+    server = McpServer(profile, allow_actions=["tasks", "history"])
+    try:
+        exposed = {tool["name"] for tool in server.request("tools/list")["result"]["tools"]}
+        assert "academia_task_create" in exposed
+        assert "academia_review_decide" not in exposed
+        assert "academia_review_execute" not in exposed
+        assert "academia_import_file" not in exposed
+        task = call_json(server, "academia_task_create", {"title": "Trusted task", "due_date": "2026-12-01"})
+        assert task["title"] == "Trusted task"
+        tasks = call_json(server, "academia_tasks", {})
+        assert any(item["title"] == "Trusted task" for item in tasks)
+
+        record = call_json(server, "academia_history_add", {
+            "course": "POL 2103 - Politics",
+            "kind": "exam",
+            "title": "Trusted midterm",
+            "status": "graded",
+            "score": "54/60",
+            "percentage": "90%",
+            "letter_grade": "A+",
+        })
+        assert record["score"] == "54/60"
+        assert record["letter_grade"] == "A+"
+    finally:
+        server.close()
+
+
+def test_trusted_file_move_action_runs_and_verifies(tmp_path: Path) -> None:
+    _, root, profile = prepared_workspace(tmp_path)
+    source = "Fall 2026/POL 2103 - Politics/05_REFERENCE/week-4-reading.md"
+    destination = "Fall 2026/POL 2103 - Politics/05_REFERENCE/week-4-reading-moved.md"
+    server = McpServer(profile, allow_actions=["files"])
+    try:
+        result = call_json(server, "academia_apply_action", {
+            "action_type": "file_move",
+            "details": {"source": source, "destination": destination},
+            "title": "Trusted move",
+        })
+        assert result["result"]["status"] == "verified"
+        assert (root / destination).is_file()
+        assert not (root / source).exists()
+    finally:
+        server.close()
+
+
+def test_trusted_study_create_uses_retrieved_citations(tmp_path: Path) -> None:
+    _, _root, profile = prepared_workspace(tmp_path)
+    server = McpServer(profile, allow_actions=["study"])
+    try:
+        search = call_json(server, "academia_search_passages", {
+            "course": "POL 2103 - Politics", "query": "private source content", "deep": True, "limit": 5,
+        })
+        chunk = search["data"]["chunks"][0]
+        chunk_id = chunk["id"]
+        created = call_json(server, "academia_study_create", {
+            "course": "POL 2103 - Politics",
+            "source_ids": [chunk["source_id"]],
+            "query": "private source content",
+            "deep": True,
+            "payload": {
+                "kind": "quiz",
+                "title": "Trusted practice",
+                "items": [{
+                    "kind": "short_answer",
+                    "topic": "Reading",
+                    "prompt": "What does the reading contain?",
+                    "answer": "Private source content.",
+                    "explanation": "The prepared reading contains this sentence.",
+                    "citation_ids": [chunk_id],
+                }],
+            },
+        })
+        assert created["kind"] == "quiz"
+        assert created["items"][0]["citations"][0]["id"] == chunk_id
+    finally:
+        server.close()
+
+
+def test_processing_detail_returns_failure_context(tmp_path: Path) -> None:
+    from academia_os.processing import ProcessingStore
+
+    _, root, profile = prepared_workspace(tmp_path)
+    source = root / "Fall 2026" / "POL 2103 - Politics" / "00_INBOX" / "raw.pdf"
+    source.parent.mkdir()
+    source.write_bytes(b"raw")
+    processing = ProcessingStore(root / ".academia" / "processing.json")
+    record = processing.detect(source, signature="3:1")
+    processing.begin(record.id)
+    processing.fail(record.id, "synthetic extraction failure")
+    server = McpServer(profile)
+    try:
+        value = call_json(server, "academia_processing_detail", {"record_id": record.id})
+        assert value["id"] == record.id
+        assert value["failure_reason"] == "synthetic extraction failure"
+    finally:
+        server.close()

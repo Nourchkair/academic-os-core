@@ -12,7 +12,7 @@ export type ChatProposal = {
   action_status?: string | null
   status_label?: string
 }
-export type ChatTraceStep = { tool: string; ok: boolean; ms?: number | null }
+export type ChatTraceStep = { tool: string; ok: boolean; ms?: number | null; detail?: string }
 export type ChatMessage = { role: 'user' | 'assistant'; content: string; at?: string; attachments?: ChatMessageAttachment[]; proposals?: ChatProposal[]; trace?: ChatTraceStep[]; mentions?: string[] }
 
 export type ChatConversation = {
@@ -24,6 +24,8 @@ export type ChatConversation = {
   sourceIds: string[]
   excludedCourseSourceIds: string[]
   updatedAt: string
+  pinned?: boolean
+  mcpGrants?: Array<{ connection_id: string; tools: string[] }>
 }
 
 export type ChatConversationSummary = {
@@ -35,6 +37,7 @@ export type ChatConversationSummary = {
   preview: string
   createdAt: string
   updatedAt: string
+  pinned?: boolean
 }
 
 export type StudyChatRequest =
@@ -132,6 +135,21 @@ export async function saveChatConversation(conversation: ChatConversation): Prom
     body: JSON.stringify(payload),
   })
   if (!response.ok) throw await failure(response)
+}
+
+export async function pinChatConversation(id: string, pinned: boolean): Promise<ChatConversationSummary> {
+  if (isDesktopShell()) {
+    const value = await invokeSessions<{ session?: unknown }>(['pin', id, ...(pinned ? [] : ['--unpin']), '--json'])
+    return value.session as ChatConversationSummary
+  }
+  const response = await fetch(`${sessionsPath}/pin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, pinned }),
+  })
+  if (!response.ok) throw await failure(response)
+  const value = await response.json() as { session?: unknown }
+  return value.session as ChatConversationSummary
 }
 
 export async function deleteChatConversation(id: string): Promise<void> {

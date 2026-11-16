@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import hashlib
 import heapq
+import os
 import re
 import time
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +18,8 @@ from ..course_identity import resolve_course_directory
 from ..file_preview import PREVIEW_EXTENSIONS, read_office_text
 from ..library import list_material
 from ..pdf_ocr import ocr_pdf_pages
+from ..processing import cache_signature
+from ..state import JsonStateStore
 
 MAX_SOURCE_BYTES = 64 * 1024 * 1024
 MAX_TEXT_CHARS = 2_000_000
@@ -23,6 +28,7 @@ MAX_DEEP_TEXT_CHARS = 64_000_000
 MAX_DEEP_CHUNKS = 128
 MAX_STUDY_OCR_PAGES = 180
 MAX_STUDY_OCR_SECONDS = 180
+MAX_EXTRACTION_WORKERS = 4
 CHUNK_SIZE = 1200
 SEARCH_STOP_WORDS = {
     'about', 'after', 'again', 'also', 'and', 'are', 'because', 'been', 'before', 'being', 'between',
@@ -68,6 +74,226 @@ def catalog(root: Path, semester: str, course: str) -> list[dict[str, Any]]:
             and '/STUDY/' not in item['relative_path']]
 
 
+_CACHE_INCOMPLETE_MARKERS = (
+    'incomplete', 'did not extract', 'truncated', 'was not searched',
+    'no readable text', 'could not process', 'unavailable',
+)
+
+
+def _cache_state(root: Path) -> dict[str, Any]:
+    """Read the rebuildable extraction cache once per retrieval call."""
+
+    try:
+        state = JsonStateStore(root / '.academia' / 'extracted_sources.json').read({'records': {}})
+    except (OSError, ValueError):
+        return {}
+    records = state.get('records') if isinstance(state, dict) else None
+    return records if isinstance(records, dict) else {}
+
+
+def _cached_pdf(
+    root: Path,
+    path: Path,
+    records: dict[str, Any],
+) -> tuple[str, list[tuple[str, str, bool]], bool, int, None, int, list[str]] | None:
+    """Return cached PDF text without re-parsing the file, when the cache is current."""
+
+    if path.suffix.lower() != '.pdf':
+        return None
+    try:
+        relative = path.resolve().relative_to(root.resolve()).as_posix()
+        signature = cache_signature(path)
+    except (OSError, ValueError):
+        return None
+    record = records.get(relative)
+    if not isinstance(record, dict) or record.get('signature') != signature:
+        return None
+    document = record.get('document')
+    if not isinstance(document, dict) or document.get('status') != 'supported':
+        return None
+    raw_segments = document.get('segments')
+    if not isinstance(raw_segments, list):
+        return None
+    method = str(document.get('extraction_method') or '').casefold()
+    used_ocr = 'ocr' in method or 'vision' in method
+    pages: dict[int, list[str]] = {}
+    for segment in raw_segments:
+        if not isinstance(segment, dict):
+            continue
+        text = segment.get('text')
+        page = segment.get('page')
+        if not isinstance(text, str) or not text.strip() or not isinstance(page, int) or page <= 0:
+            continue
+        pages.setdefault(page, []).append(text)
+    if not pages:
+        return None
+    segments = [(f'page {number}', '\n'.join(parts), used_ocr) for number, parts in sorted(pages.items())]
+    document_warnings = [warning for warning in document.get('warnings') or [] if isinstance(warning, str)]
+    truncated = any(
+        marker in warning.casefold()
+        for warning in document_warnings
+        for marker in _CACHE_INCOMPLETE_MARKERS
+    )
+    digest = document.get('content_hash')
+    if not isinstance(digest, str) or not digest:
+        digest = fingerprint(path)
+    return digest, segments, truncated, len(segments), None, 0, []
+
+
+def _cache_pdf_document(root: Path, path: Path, digest: str, segments: list[tuple[str, str, bool]]) -> None:
+    """Persist extracted PDF text so later retrievals skip the expensive parse."""
+
+    if path.suffix.lower() != '.pdf':
+        return
+    try:
+        relative = path.resolve().relative_to(root.resolve()).as_posix()
+        signature = cache_signature(path)
+        stored: list[dict[str, Any]] = []
+        for index, (location, text, _ocr) in enumerate(segments):
+            stored.append({
+                'text': text,
+                'page': int(location.rsplit(' ', 1)[-1]),
+                'section': None,
+                'start_line': None,
+                'end_line': None,
+                'index': index,
+            })
+    except (OSError, ValueError):
+        return
+    if not stored:
+        return
+    document = {
+        'path': relative,
+        'media_type': 'application/pdf',
+        'segments': stored,
+        'extraction_method': 'study-pypdf+ocr' if any(ocr for _location, _text, ocr in segments) else 'study-pypdf',
+        'content_hash': digest,
+        'status': 'supported',
+        'warnings': [],
+        'unsupported': [],
+    }
+    store = JsonStateStore(root / '.academia' / 'extracted_sources.json')
+
+    def save(raw: Any) -> Any:
+        state = raw if isinstance(raw, dict) else {'schema_version': 1, 'records': {}}
+        records = state.get('records')
+        if not isinstance(records, dict):
+            records = {}
+        previous = records.get(relative)
+        # Keep a document the import worker already extracted for this exact version.
+        if isinstance(previous, dict) and previous.get('signature') == signature and isinstance(previous.get('document'), dict):
+            return state
+        record = previous if isinstance(previous, dict) else {}
+        record['signature'] = signature
+        record['document'] = document
+        records[relative] = record
+        state['schema_version'] = 1
+        state['records'] = records
+        return state
+
+    try:
+        store.update({'schema_version': 1, 'records': {}}, save)
+    except OSError:
+        return
+
+
+def _write_progress(
+    root: Path,
+    course: str,
+    *,
+    completed: int,
+    total: int,
+    source: str | None,
+    status: str,
+) -> None:
+    """Record retrieval progress for the dashboard's local status poll."""
+
+    record = {
+        'status': status,
+        'completed': completed,
+        'total': total,
+        'source': source,
+        'updated_at': datetime.now(timezone.utc).isoformat(),
+    }
+    store = JsonStateStore(root / '.academia' / 'study_progress.json')
+
+    def save(raw: Any) -> Any:
+        state = raw if isinstance(raw, dict) else {'schema_version': 1, 'courses': {}}
+        courses = state.get('courses')
+        if not isinstance(courses, dict):
+            courses = {}
+        courses[course] = record
+        state['schema_version'] = 1
+        state['courses'] = courses
+        return state
+
+    try:
+        store.update({'schema_version': 1, 'courses': {}}, save)
+    except OSError:
+        return
+
+
+def read_progress(root: Path, semester: str, course: str) -> dict[str, Any]:
+    """Return the latest local retrieval progress for one course."""
+
+    directory = resolve_course_directory(root, semester, course)
+    try:
+        state = JsonStateStore(root / '.academia' / 'study_progress.json').read({'courses': {}})
+    except (OSError, ValueError):
+        state = {}
+    courses = state.get('courses') if isinstance(state, dict) else None
+    record = courses.get(directory.name) if isinstance(courses, dict) else None
+    base = {'course_id': directory.name, 'semester': semester}
+    if not isinstance(record, dict):
+        return {**base, 'status': 'idle', 'completed': 0, 'total': 0, 'source': None, 'updated_at': None}
+    return {
+        **base,
+        **{key: record.get(key) for key in ('status', 'completed', 'total', 'source', 'updated_at')},
+    }
+
+
+def _extract_pdf_source(path: str, root: str, ocr_pages: int, ocr_seconds: float) -> dict[str, Any]:
+    """Process-pool entry point: extract one uncached PDF in a child process."""
+
+    source = Path(path)
+    workspace = Path(root)
+    try:
+        digest = fingerprint(source)
+        segments, truncated, pages_scanned, page_count, ocr_attempted, ocr_notices = _segments(
+            source,
+            None,
+            deep=True,
+            workspace_root=workspace,
+            digest=digest,
+            ocr_budget=ocr_pages,
+            ocr_seconds=ocr_seconds,
+            # Workers must not race on the shared cache; the parent stores the text.
+            write_ocr_cache=False,
+        )
+    except Exception as exc:
+        return {'path': path, 'error': str(exc)}
+    return {
+        'path': path,
+        'digest': digest,
+        'segments': segments,
+        'truncated': truncated,
+        'pages_scanned': pages_scanned,
+        'page_count': page_count,
+        'ocr_attempted': ocr_attempted,
+        'ocr_notices': ocr_notices,
+    }
+
+
+def _extraction_workers(total: int) -> int:
+    override = os.environ.get('ACADEMIA_EXTRACT_WORKERS', '').strip()
+    if override:
+        try:
+            return max(1, min(8, int(override)))
+        except ValueError:
+            pass
+    return max(1, min(MAX_EXTRACTION_WORKERS, total, os.cpu_count() or 1))
+
+
 def _segments(
     path: Path,
     pages: str | None,
@@ -77,6 +303,7 @@ def _segments(
     digest: str | None = None,
     ocr_budget: int | None = None,
     ocr_seconds: float = MAX_STUDY_OCR_SECONDS,
+    write_ocr_cache: bool = True,
 ) -> tuple[list[tuple[str, str, bool]], bool, int | None, int | None, int, list[str]]:
     if path.suffix.lower() == '.pdf':
         reader = PdfReader(str(path))
@@ -112,6 +339,7 @@ def _segments(
                 digest=digest,
                 max_pages=ocr_budget,
                 max_seconds=ocr_seconds,
+                write_cache=write_ocr_cache,
             )
         for index in range(start - 1, end):
             page_number = index + 1
@@ -185,26 +413,96 @@ def retrieve(root: Path, semester: str, course: str, *, source_ids: list[str] | 
             warnings.append(f"Deep topic search examined the first {MAX_DEEP_SOURCES} course sources; narrow the class selection to search beyond that set.")
         else:
             warnings.append('Topic search examined the first 12 course sources. Select specific Library IDs to search other material.')
+    cache_records = _cache_state(root)
+    names = {item['id']: item['name'] for item in selected}
+    progress_total = len(selected)
+    reported: set[str] = set()
+
+    def report(item_id: str, name: str) -> None:
+        if not deep or item_id in reported:
+            return
+        reported.add(item_id)
+        _write_progress(root, directory.name, completed=len(reported), total=progress_total,
+                        source=name, status='running')
+
+    if deep:
+        _write_progress(root, directory.name, completed=0, total=progress_total, source=None, status='running')
+
+    prepared: dict[str, tuple[Any, ...]] = {}
+    parallel: dict[str, dict[str, Any]] = {}
+    if deep and pages is None:
+        uncached: list[tuple[str, Path]] = []
+        for item in selected:
+            try:
+                path = safe_path(root, Path(item['path']))
+            except (OSError, ValueError):
+                continue
+            cached = _cached_pdf(root, path, cache_records)
+            if cached is not None:
+                prepared[item['id']] = cached
+            elif path.suffix.lower() == '.pdf':
+                uncached.append((item['id'], path))
+        workers = _extraction_workers(len(uncached))
+        if len(uncached) > 1 and workers > 1:
+            pages_each = max(1, MAX_STUDY_OCR_PAGES // len(uncached))
+            try:
+                with ProcessPoolExecutor(max_workers=workers) as pool:
+                    futures = {
+                        pool.submit(_extract_pdf_source, str(path), str(root), pages_each, MAX_STUDY_OCR_SECONDS): item_id
+                        for item_id, path in uncached
+                    }
+                    for future in as_completed(futures):
+                        item_id = futures[future]
+                        parallel[item_id] = future.result()
+                        report(item_id, names.get(item_id, 'source'))
+            except Exception:
+                # The pool is an optimization; the loop below retries the rest.
+                parallel.clear()
+
     for item in selected:
         path = safe_path(root, Path(item['path']))
         try:
-            digest = fingerprint(path)
-            segments, truncated, pages_scanned, page_count, ocr_attempted, ocr_notices = _segments(
-                path,
-                pages,
-                deep=deep,
-                workspace_root=root,
-                digest=digest,
-                ocr_budget=ocr_page_budget,
-                ocr_seconds=max(0, ocr_deadline - time.monotonic()),
-            )
-            ocr_page_budget = max(0, ocr_page_budget - ocr_attempted)
+            # Page ranges keep the live bounded extraction; the cache stores whole documents.
+            cached = prepared.get(item['id'])
+            if cached is not None:
+                digest, segments, truncated, pages_scanned, page_count, ocr_attempted, ocr_notices = cached
+            elif item['id'] in parallel:
+                result = parallel[item['id']]
+                if 'error' in result:
+                    raise ValueError(str(result['error']))
+                digest = str(result['digest'])
+                segments = list(result['segments'])
+                truncated = bool(result['truncated'])
+                pages_scanned = result['pages_scanned']
+                page_count = result['page_count']
+                ocr_attempted = int(result.get('ocr_attempted') or 0)
+                ocr_notices = list(result.get('ocr_notices') or [])
+                if not truncated and not ocr_notices:
+                    _cache_pdf_document(root, path, digest, segments)
+            else:
+                digest = fingerprint(path)
+                segments, truncated, pages_scanned, page_count, ocr_attempted, ocr_notices = _segments(
+                    path,
+                    pages,
+                    deep=deep,
+                    workspace_root=root,
+                    digest=digest,
+                    ocr_budget=ocr_page_budget,
+                    ocr_seconds=max(0, ocr_deadline - time.monotonic()),
+                )
+                ocr_page_budget = max(0, ocr_page_budget - ocr_attempted)
+                # Cache only complete full-document extractions; a page range or
+                # partial OCR would permanently hide the rest of the source.
+                if deep and pages is None and not truncated and not ocr_notices:
+                    _cache_pdf_document(root, path, digest, segments)
         except (OSError, ValueError) as exc:
             if pages and isinstance(exc, ValueError):
                 raise
+            report(item['id'], item['name'])
             warnings.append(f"{item['name']}: {exc}")
             continue
         except Exception:
+            report(item['id'], item['name'])
             warnings.append(f"{item['name']}: text extraction failed; use an accessible text copy.")
             continue
         ocr_pages = sum(1 for _location, text, is_ocr in segments if is_ocr and text.strip())
@@ -254,6 +552,10 @@ def retrieve(root: Path, semester: str, course: str, *, source_ids: list[str] | 
                     unranked_chunks.append(chunk)
         if not found:
             warnings.append(f"{item['name']}: no readable text was found, including after local OCR.")
+        report(item['id'], item['name'])
+    if deep:
+        _write_progress(root, directory.name, completed=len(reported), total=progress_total,
+                        source=None, status='completed')
     if deep and terms:
         unranked_chunks = [entry[2] for entry in sorted(heap, key=lambda entry: (-entry[0], entry[1]))]
     elif terms:

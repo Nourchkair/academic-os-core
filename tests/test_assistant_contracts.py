@@ -179,3 +179,10 @@ def test_tool_grants_are_exact_and_validated() -> None:
     assert ToolGrant.none().tools == frozenset()
     with pytest.raises(AssistantError, match="non-empty"):
         ToolGrant(tools=frozenset({""}))
+
+
+def test_run_request_accepts_a_larger_bounded_tool_budget() -> None:
+    request = RunRequest(messages=({"role": "user", "content": "hello"},), scope=Scope(), max_iterations=64)
+    assert request.max_iterations == 64
+    with pytest.raises(AssistantError, match="max_iterations"):
+        RunRequest(messages=({"role": "user", "content": "hello"},), scope=Scope(), max_iterations=65)

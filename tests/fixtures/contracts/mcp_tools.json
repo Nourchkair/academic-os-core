@@ -61,6 +61,30 @@
     ]
   },
   {
+    "name": "academia_search_passages",
+    "required": [
+      "query"
+    ]
+  },
+  {
+    "name": "academia_study_overview",
+    "required": []
+  },
+  {
+    "name": "academia_study_exam_scope",
+    "required": []
+  },
+  {
+    "name": "academia_grade_history",
+    "required": []
+  },
+  {
+    "name": "academia_processing_detail",
+    "required": [
+      "record_id"
+    ]
+  },
+  {
     "name": "academia_processing_status",
     "required": []
   },

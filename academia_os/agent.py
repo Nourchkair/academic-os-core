@@ -563,7 +563,7 @@ def build_agent_context(config: dict[str, Any], snapshot: dict[str, Any], *, sco
         coursework_history.extend({
             "course_id": course_id_value,
             "course": str(course_record.get("name", course_id_value)),
-            **{key: record.get(key) for key in ("id", "kind", "title", "status", "due_date", "submitted_on", "grade", "task_title", "artifact_paths", "notes", "record_basis", "status_history", "created_at", "updated_at")},
+            **{key: record.get(key) for key in ("id", "kind", "title", "status", "due_date", "submitted_on", "grade", "score", "percentage", "letter_grade", "task_title", "artifact_paths", "notes", "record_basis", "status_history", "created_at", "updated_at")},
         } for record in records)
     open_tasks = [task for task in tasks if not task.get("completed")]
     deadlines = [_compact_entity(entity, root) for entity in entities if entity.get("entity_type") == "deadline" and entity.get("evidence", {}).get("confidence") == "current-confirmed"]
@@ -580,6 +580,7 @@ def build_agent_context(config: dict[str, Any], snapshot: dict[str, Any], *, sco
     open_tasks = open_tasks[:_limit(detail, "tasks")]
     deadlines = sorted(deadlines, key=lambda item: (str(item.get("date") or "9999-99-99"), str(item.get("title", ""))))[:_limit(detail, "deadlines")]
     assignments = assignments[:_limit(detail, "assignments")]
+    grade_history = [record for record in coursework_history if str(record.get("grade") or "").strip()][: _limit(detail, "assignment_history")]
     coursework_history = coursework_history[:_limit(detail, "assignment_history")]
     readings = readings[:_limit(detail, "readings")]
     library_items = [_compact_library_item(item) for item in source_items[:_limit(detail, "sources")]]
@@ -631,6 +632,7 @@ def build_agent_context(config: dict[str, Any], snapshot: dict[str, Any], *, sco
             "next_deadlines": deadlines,
             "current_assignments": assignments,
             "assignment_history": coursework_history,
+            "grade_history": grade_history,
             "study": study_summaries,
             "relevant_readings": readings,
         },

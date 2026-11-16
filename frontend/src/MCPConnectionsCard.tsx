@@ -16,6 +16,14 @@ export function MCPConnectionsCard() {
   const [pendingAuth, setPendingAuth] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [localAdvanced, setLocalAdvanced] = useState(false)
+  const [alwaysAllowed, setAlwaysAllowed] = useState<string[]>(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem('academia.chat.mcpAlwaysAllow') || '[]')
+      return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : []
+    } catch {
+      return []
+    }
+  })
 
   const load = useCallback(async () => {
     try {
@@ -220,5 +228,6 @@ export function MCPConnectionsCard() {
         </article>
       })}
     </div>}
+    {alwaysAllowed.length > 0 && <p className="account-note">Chat permissions: {alwaysAllowed.map((id) => connections.find((connection) => connection.id === id)?.name ?? id).join(', ')} · <button type="button" className="quiet-button" onClick={() => { localStorage.removeItem('academia.chat.mcpAlwaysAllow'); setAlwaysAllowed([]); window.dispatchEvent(new Event('academia-mcp-permissions-changed')) }}>Revoke always-allow</button></p>}
   </div>
 }

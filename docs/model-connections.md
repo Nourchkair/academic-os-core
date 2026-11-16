@@ -59,9 +59,11 @@ The Connections hub stores a provider/model reference for:
 - Image generation
 
 The current API chat path uses the selected per-chat model, or the default chat
-model, and exposes Academia's read tools. API-backed chat is non-streaming in
-this slice. Proposal mode, Codex web search, and Codex reasoning controls remain
-Codex-only.
+model, and exposes Academia's read tools. A tool-free API turn streams its final
+answer as it is generated; a turn that needs action proposals or web search runs
+its bounded tool rounds non-streaming and returns one finished answer. Anthropic
+and Gemini answers remain non-streaming. Task, import, and Calendar proposals,
+Codex web search, and Codex reasoning controls remain Codex-only.
 
 ## Billing rules
 
