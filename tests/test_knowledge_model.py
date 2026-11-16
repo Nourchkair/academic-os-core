@@ -251,6 +251,9 @@ def test_full_change_updates_owner_and_linked_task_and_is_idempotent(tmp_path: P
     after_apply = service.course_view(course.name)["assessments"][0]["fields"]["due_date"]
     assert after_apply["value"] == "2026-11-20"
     assert after_apply["resolution"] == "recorded"
+    assert after_apply["source_kind"] == "student_report"
+    assert after_apply["source"]["source_kind"] == "student_report"
+    assert after_apply["verification"] == "unverified"
     assert after_apply["conflicts"] == []
     again = service.execute_changeset(changeset["id"])
     assert again["status"] == "verified"

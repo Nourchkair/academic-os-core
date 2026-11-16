@@ -404,6 +404,22 @@ def _owner_source(assessment: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _resolved_source(assessment: dict[str, Any], lead: dict[str, Any] | None, evidence_items: list[dict[str, Any]]) -> dict[str, Any]:
+    owner = _owner_source(assessment)
+    if lead is None:
+        return owner
+    evidence = evidence_items[0] if evidence_items else {}
+    return {
+        **owner,
+        "label": lead.get("source_kind") or owner.get("label"),
+        "path": evidence.get("source_path") or owner.get("path"),
+        "locator": evidence.get("locator") or owner.get("locator"),
+        "source_kind": lead.get("source_kind"),
+        "verification": lead.get("verification"),
+        "confidence": lead.get("confidence"),
+    }
+
+
 def resolve_field(
     assessment: dict[str, Any],
     field: str,
@@ -458,7 +474,7 @@ def resolve_field(
             "confidence": lead.get("confidence") if lead else _owner_source(assessment)["confidence"],
             "verification": lead.get("verification") if lead else "unverified",
             "source_kind": lead.get("source_kind") if lead else "legacy_record",
-            "source": _owner_source(assessment),
+            "source": _resolved_source(assessment, lead, evidence_items),
             "evidence": evidence_items,
             "alternatives": alternatives,
             "conflicts": conflicts,
