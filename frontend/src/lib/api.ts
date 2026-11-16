@@ -1,5 +1,5 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
-import type { AccountStatus, ActivityEvent, AgentSetupPlaybook, AttachmentResult, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, GoogleAuthorizationStart, GoogleAuthorizationStatus, GoogleCalendarEvent, GoogleCalendarProposalResult, GoogleConnectorStatus, ImportResult, ModelConnectionsPayload, ModelProviderInput, ModelRole, NotionPage, NotionPageContent, NotionStatus, LibraryItem, MCPAuthorizationStart, MCPAuthorizationStatus, MCPConnection, MCPConnectionInput, MCPRemoteInput, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, TaskInput, TaskListPayload, TaskProposalAmendment, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
+import type { AccountStatus, ActivityEvent, AgentSetupPlaybook, AttachmentResult, CodexConnectionStatus, Course, CourseworkHistoryInput, CourseworkHistoryRecord, DomainEntity, ExtractionPreview, FilePreview, GoogleAuthorizationStart, GoogleAuthorizationStatus, GoogleCalendarEvent, GoogleCalendarProposalResult, GoogleConnectorStatus, ImportResult, ModelConnectionsPayload, ModelProviderInput, ModelRole, NotionPage, NotionPageContent, NotionStatus, LibraryItem, MCPAuthorizationStart, MCPAuthorizationStatus, MCPConnection, MCPConnectionInput, MCPRemoteInput, MigrationExecuteResult, MigrationPlanResult, MigrationStatusResult, PlaybooksPayload, ProcessingRecord, RecommendationsPayload, ReviewItem, SettingsPreview, StatusPayload, Task, TaskInput, TaskListPayload, TaskProposalAmendment, WorkflowPreferencesPayload, WorkflowResetPayload, WorkflowSetPayload, WorkflowShowPayload, WorkspaceCandidate, WorkspaceCreationResult, WorkspaceInspection, WorkspaceSnapshot } from '../types'
 
 export class BridgeUnavailableError extends Error {
   constructor() {
@@ -428,6 +428,11 @@ export const api = {
   disableMCPConnection: (id: string) => isTauriEnvironment() ? command<MCPConnection>('mcp-connections', ['disable', id]) : postJson<MCPConnection>('/api/v1/mcp/connections/disable', { id }),
   disconnectMCPConnection: (id: string) => isTauriEnvironment() ? command<MCPConnection>('mcp-connections', ['disconnect', id]) : postJson<MCPConnection>('/api/v1/mcp/connections/disconnect', { id }),
   chatProviders: <T>() => isTauriEnvironment() ? command<T>('chat-providers') : fetch('/api/v1/chat/providers').then(readJsonResponse<T>),
+  codexConnection: () => isTauriEnvironment() ? command<CodexConnectionStatus>('agent', ['codex', 'status']) : fetch('/api/v1/agent/codex').then(readJsonResponse<CodexConnectionStatus>),
+  connectCodex: (allowActions: string[]) => isTauriEnvironment()
+    ? command<CodexConnectionStatus>('agent', ['codex', 'connect', ...allowActions.flatMap((action) => ['--allow-action', action])])
+    : postJson<CodexConnectionStatus>('/api/v1/agent/codex/connect', { allow_actions: allowActions }),
+  disconnectCodex: () => isTauriEnvironment() ? command<CodexConnectionStatus>('agent', ['codex', 'disconnect']) : postJson<CodexConnectionStatus>('/api/v1/agent/codex/disconnect', {}),
   status: () => command<StatusPayload>('status'),
   startupStatus: () => command<StatusPayload>('status', ['--fast']),
   courses: (semester?: string) => command<Course[]>('courses', semester ? ['--semester', semester] : []),

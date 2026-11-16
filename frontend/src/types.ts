@@ -489,6 +489,20 @@ export type MCPTool = {
   open_world: boolean
 }
 
+export type CodexConnectionStatus = {
+  connected: boolean
+  config_path: string
+  command: string | null
+  allow_actions: string[]
+  approval_mode: string | null
+  expected_command: string
+  expected_args: string[]
+  codex_installed: boolean
+  matches_current_install: boolean
+  backup_path?: string | null
+  selected_actions?: string[]
+}
+
 export type MCPConnection = {
   id: string
   name: string

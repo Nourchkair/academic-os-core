@@ -738,6 +738,15 @@ def build_parser() -> argparse.ArgumentParser:
     agent_recipe = agent_sub.add_parser("recipe", help="Compatibility alias for `agent playbook`")
     agent_recipe.add_argument("workflow_id")
     agent_recipe.add_argument("--json", action="store_true")
+    agent_codex = agent_sub.add_parser("codex", help="Connect the local Academia MCP server to Codex")
+    codex_sub = agent_codex.add_subparsers(dest="codex_command", required=True)
+    codex_status = codex_sub.add_parser("status", help="Read the Codex Academia MCP connection")
+    codex_status.add_argument("--json", action="store_true")
+    codex_connect = codex_sub.add_parser("connect", help="Create or update the Codex Academia MCP entry")
+    codex_connect.add_argument("--allow-action", action="append", choices=("tasks", "history", "study", "imports", "downloads", "files", "calendar", "structure"), dest="allow_actions", help="Trusted action category; may be repeated")
+    codex_connect.add_argument("--json", action="store_true")
+    codex_disconnect = codex_sub.add_parser("disconnect", help="Remove the Codex Academia MCP entry")
+    codex_disconnect.add_argument("--json", action="store_true")
     assistant = sub.add_parser("assistant", help="Inspect the first-party assistant contract and provider status")
     assistant_sub = assistant.add_subparsers(dest="assistant_command", required=True)
     assistant_tools = assistant_sub.add_parser("tools", help="List read-only assistant tools and their schemas")
@@ -1628,6 +1637,16 @@ def dispatch(args: argparse.Namespace) -> int:
             return 0
         if args.agent_command == "recipe":
             _emit(get_recipe(args.workflow_id), as_json=args.json)
+            return 0
+        if args.agent_command == "codex":
+            from . import codex_connect
+            if args.codex_command == "connect":
+                _emit(codex_connect.connect(_profile_path(args), args.allow_actions), as_json=args.json)
+                return 0
+            if args.codex_command == "disconnect":
+                _emit(codex_connect.disconnect(), as_json=args.json)
+                return 0
+            _emit(codex_connect.status(_profile_path(args)), as_json=args.json)
             return 0
         if args.agent_command == "changes":
             config = load_config(_profile_path(args))

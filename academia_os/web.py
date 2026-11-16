@@ -433,6 +433,8 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 self._handle_agent_sessions(origin, "list")
             elif self.request_path == "/api/v1/agent/sessions/load":
                 self._handle_agent_sessions(origin, "load")
+            elif self.request_path == "/api/v1/agent/codex":
+                self._handle_codex_connection(origin, "status")
             elif self.request_path == "/api/v1/chat/providers":
                 self._handle_chat_providers(origin)
             elif self.request_path == "/api/v1/account":
@@ -511,6 +513,12 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             return
         if self.request_path == "/api/v1/agent/sessions/pin":
             self._handle_agent_sessions(origin, "pin")
+            return
+        if self.request_path == "/api/v1/agent/codex/connect":
+            self._handle_codex_connection(origin, "connect")
+            return
+        if self.request_path == "/api/v1/agent/codex/disconnect":
+            self._handle_codex_connection(origin, "disconnect")
             return
         if self.request_path == "/api/v1/account/login":
             self._handle_account_action(origin, "login")
@@ -867,6 +875,26 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             self._send_api_error(DashboardRequestError(400, "InvalidSession", str(exc)), cors_origin=origin)
         except (OSError, ValueError) as exc:
             self._send_api_error(DashboardRequestError(500, "SessionError", f"the conversation could not be saved: {exc}"), cors_origin=origin)
+
+    def _handle_codex_connection(self, origin: str | None, action: str) -> None:
+        from . import codex_connect
+
+        try:
+            if action == "connect":
+                body = self._small_json_body()
+                actions = body.get("allow_actions")
+                if not isinstance(actions, list):
+                    raise DashboardRequestError(400, "InvalidCodexConnection", "allow_actions is required")
+                value = codex_connect.connect(self.dashboard.profile, [str(item) for item in actions])
+            elif action == "disconnect":
+                value = codex_connect.disconnect()
+            else:
+                value = codex_connect.status(self.dashboard.profile)
+            self._send_json(200, value, cors_origin=origin)
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except (OSError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(400, "CodexConnectionError", str(exc)), cors_origin=origin)
 
     def _handle_account(self, origin: str | None) -> None:
         try:
