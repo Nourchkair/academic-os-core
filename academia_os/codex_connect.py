@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -34,7 +35,10 @@ def _toml_string(value: str) -> str:
 def _academia_command(profile: Path | None) -> tuple[str, list[str], dict[str, str]]:
     profile_path = Path(profile or (Path.home() / ".academic-os" / "profile.json")).expanduser().resolve()
     frozen = bool(getattr(sys, "frozen", False))
-    command = str(Path(sys.executable).resolve())
+    # Keep a virtual environment's Python path as the user installed it. Resolving
+    # the symlink can point at the base interpreter, which does not have the
+    # dependencies installed by install-mac.sh.
+    command = os.path.abspath(sys.executable)
     if frozen:
         args = ["--profile", str(profile_path), "mcp", "serve"]
         environment: dict[str, str] = {}
@@ -68,14 +72,22 @@ def _server_block(command: str, args: list[str], environment: dict[str, str]) ->
     return "\n".join(lines)
 
 
+def _is_academia_header(line: str) -> bool:
+    """Match valid TOML spellings of the Academia server table or its env subtable."""
+    return bool(re.match(
+        r'^\[\s*mcp_servers\s*\.\s*(?:academia|"academia"|\'academia\')(?:\s*\.\s*(?:env|"env"|\'env\'))?\s*\]\s*(?:#.*)?$',
+        line.strip(),
+    ))
+
+
 def _find_section(lines: list[str]) -> tuple[int, int] | None:
-    start = next((index for index, line in enumerate(lines) if line.strip() == HEADER), None)
+    start = next((index for index, line in enumerate(lines) if _is_academia_header(line)), None)
     if start is None:
         return None
     end = start + 1
     while end < len(lines):
         stripped = lines[end].strip()
-        if stripped.startswith("[") and stripped != HEADER and not stripped.startswith("[mcp_servers.academia."):
+        if stripped.startswith("[") and not _is_academia_header(lines[end]):
             break
         end += 1
     return start, end

@@ -69,3 +69,35 @@ def test_connect_rejects_unknown_actions_and_invalid_toml(tmp_path: Path) -> Non
         codex_connect.connect(tmp_path / "profile.json", ["everything"], config_path=path)
     defaulted = codex_connect.connect(tmp_path / "profile.json", [], config_path=path)
     assert defaulted["allow_actions"] == list(codex_connect.DEFAULT_ACTIONS)
+
+
+def test_connect_updates_quoted_and_commented_headers(tmp_path: Path) -> None:
+    path = config(tmp_path, '[mcp_servers."academia"] # local server\ncommand = "/old/python"\nargs = []\n')
+    value = codex_connect.connect(tmp_path / "profile.json", ["tasks"], config_path=path)
+
+    text = path.read_text(encoding="utf-8")
+    assert value["connected"] is True
+    assert '[mcp_servers."academia"]' not in text
+    assert text.count("[mcp_servers.academia]") == 1
+    assert 'command = "/old/python"' not in text
+
+    codex_connect.disconnect(config_path=path)
+    assert "academia" not in path.read_text(encoding="utf-8")
+
+
+def test_command_keeps_the_virtual_environment_symlink(tmp_path: Path, monkeypatch) -> None:
+    import sys
+
+    real = tmp_path / "python-real"
+    real.write_text("", encoding="utf-8")
+    link = tmp_path / "python"
+    link.symlink_to(real)
+    monkeypatch.setattr(sys, "executable", str(link))
+
+    command, args, environment = codex_connect._academia_command(tmp_path / "profile.json")
+
+    assert command == str(link)
+    assert command != str(real)
+    assert command.endswith("python")
+    assert args[:2] == ["-m", "academia_os"]
+    assert environment["PYTHONPATH"]
