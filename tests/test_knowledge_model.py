@@ -372,6 +372,68 @@ def test_required_failure_blocks_dependent_task(tmp_path: Path) -> None:
     assert TaskStore(root, "Fall 2026").get(task["id"])["due_date"] == "2026-11-12"
 
 
+def test_history_owner_syncs_domain_projections_and_reversal(tmp_path: Path) -> None:
+    root, course = _workspace(tmp_path)
+    evidence = Evidence(
+        source="Syllabus",
+        source_path=str(course / "01_COURSE" / "syllabus.md"),
+        confidence="current-confirmed",
+        authority="course syllabus",
+    )
+    domain = DomainProjection(root / ".academia" / "domain.json")
+    domain.upsert(Assignment(
+        id="essay-projection", course_id=course.name, title="Second Essay", deadline="2026-11-12", weight="25%",
+        instructions_source=None, rubric_source=None, submission_method=None, status=None, evidence=evidence,
+    ))
+    domain.upsert(Deadline(
+        id="deadline-projection", course_id=course.name, title="Second Essay", date="2026-11-12", time=None,
+        type="assignment", evidence=evidence,
+    ))
+    record = _history(root, course)
+    service = KnowledgeService(root, "Fall 2026")
+    changeset = service.propose_deadline_change(course_id=course.name, assessment_id=_assessment_id(record), new_date="2026-11-20")
+    service.approve_changeset(changeset["id"])
+    executed = service.execute_changeset(changeset["id"])
+
+    assert executed["status"] == "verified"
+    assert domain.get("assignment", "essay-projection")["deadline"] == "2026-11-20"
+    assert domain.get("deadline", "deadline-projection")["date"] == "2026-11-20"
+    projection_evidence = domain.get("assignment", "essay-projection")["evidence"]
+    assert projection_evidence["source"] == "Syllabus"
+    assert projection_evidence["reference"]["update_basis"] == "approved_change"
+    projections = executed["result"]["operation_results"][0]["projection_results"]
+    assert {item["status"] for item in projections} == {"verified"}
+
+    service.reverse_changeset(changeset["id"])
+    assert domain.get("assignment", "essay-projection")["deadline"] == "2026-11-12"
+    assert domain.get("deadline", "deadline-projection")["date"] == "2026-11-12"
+
+
+def test_divergent_projection_is_left_visible_instead_of_overwritten(tmp_path: Path) -> None:
+    root, course = _workspace(tmp_path)
+    evidence = Evidence(
+        source="Syllabus",
+        source_path=str(course / "01_COURSE" / "syllabus.md"),
+        confidence="current-confirmed",
+        authority="course syllabus",
+    )
+    domain = DomainProjection(root / ".academia" / "domain.json")
+    domain.upsert(Assignment(
+        id="essay-divergent", course_id=course.name, title="Second Essay", deadline="2026-11-10", weight="25%",
+        instructions_source=None, rubric_source=None, submission_method=None, status=None, evidence=evidence,
+    ))
+    record = _history(root, course)
+    service = KnowledgeService(root, "Fall 2026")
+    changeset = service.propose_deadline_change(course_id=course.name, assessment_id=_assessment_id(record), new_date="2026-11-20")
+    assert any("left unchanged" in warning for warning in changeset["warnings"])
+    service.approve_changeset(changeset["id"])
+    executed = service.execute_changeset(changeset["id"])
+    assert executed["status"] == "verified"
+    assert domain.get("assignment", "essay-divergent")["deadline"] == "2026-11-10"
+    projections = executed["result"]["operation_results"][0]["projection_results"]
+    assert projections[0]["status"] == "conflict"
+
+
 def test_cancelled_proposal_does_not_leave_a_candidate_conflict(tmp_path: Path) -> None:
     root, course = _workspace(tmp_path)
     record = _history(root, course)

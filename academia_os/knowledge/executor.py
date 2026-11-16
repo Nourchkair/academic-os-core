@@ -139,11 +139,13 @@ class ChangeExecutor:
                     self._reverse_operation(changeset, operation, actor=actor)
                     if self._read_target(changeset, operation) != operation.before:
                         raise ValueError("reversal readback did not match the previous value")
+                    projection_results: list[dict[str, Any]] = []
                     if operation.type == "assessment.set_deadline":
+                        projection_results = self._sync_projections(operation, target_value=str(operation.before), actor=actor, reverse=True)
                         self.service.record_reversal_assertion(operation, changeset_id=changeset.id)
                     operation.status = "reversed"
                     operation.completed_at = now()
-                    changeset.reversal["operation_results"].append({"operation_id": operation.id, "status": "reversed", "value": operation.before})
+                    changeset.reversal["operation_results"].append({"operation_id": operation.id, "status": "reversed", "value": operation.before, "projection_results": projection_results})
                     reversed_any = True
                     self.store.append_event(
                         changeset_id=changeset.id,
@@ -237,7 +239,16 @@ class ChangeExecutor:
                 continue
             if current == operation.after:
                 operation.status = "verified"
-                operation.result = {"verified": True, "recovered": True, "value": current, "read_at": now()}
+                projection_results: list[dict[str, Any]] = []
+                if operation.type == "assessment.set_deadline":
+                    projection_results = self._sync_projections(operation, target_value=str(operation.after), actor="system")
+                operation.result = {
+                    "verified": True,
+                    "recovered": True,
+                    "value": current,
+                    "read_at": now(),
+                    "projection_results": projection_results,
+                }
                 operation.completed_at = now()
                 assertion_id = operation.target.get("assertion_id") if operation.type == "assessment.set_deadline" else None
                 if assertion_id:
@@ -251,7 +262,7 @@ class ChangeExecutor:
                     actor="system",
                     channel="internal",
                     operation_id=operation.id,
-                    details={"recovered": True, "value": current},
+                    details={"recovered": True, "value": current, "projection_results": projection_results},
                 )
             elif current == operation.before:
                 operation.status = "approved" if operation.attempts < DEFAULT_MAX_ATTEMPTS else "failed"
@@ -295,7 +306,7 @@ class ChangeExecutor:
             details={"attempt": operation.attempts, "before": operation.before, "after": operation.after},
         )
         try:
-            already_applied = self._apply_operation(changeset, operation, actor=actor)
+            outcome = self._apply_operation(changeset, operation, actor=actor)
             current = self._read_target(changeset, operation)
             if current != operation.after:
                 raise ValueError("verification readback did not match the approved value")
@@ -303,7 +314,13 @@ class ChangeExecutor:
             if assertion_id:
                 self.service.apply_assertion(str(assertion_id), changeset_id=changeset.id)
             operation.status = "verified"
-            operation.result = {"verified": True, "already_applied": already_applied, "value": current, "read_at": now()}
+            operation.result = {
+                "verified": True,
+                "already_applied": bool(outcome.get("already_applied")),
+                "value": current,
+                "read_at": now(),
+                "projection_results": outcome.get("projection_results", []),
+            }
             operation.completed_at = now()
             self.store.append_event(
                 changeset_id=changeset.id,
@@ -311,7 +328,7 @@ class ChangeExecutor:
                 actor=actor,
                 channel=channel,
                 operation_id=operation.id,
-                details={"value": current, "already_applied": already_applied},
+                details={"value": current, "already_applied": bool(outcome.get("already_applied")), "projection_results": outcome.get("projection_results", [])},
             )
         except OperationConflict as exc:
             operation.status = "conflict"
@@ -342,13 +359,14 @@ class ChangeExecutor:
         changeset.updated_at = now()
         self.store.save_changeset(changeset)
 
-    def _apply_operation(self, changeset: ChangeSet, operation: Operation, *, actor: str) -> bool:
+    def _apply_operation(self, changeset: ChangeSet, operation: Operation, *, actor: str) -> dict[str, Any]:
         if operation.type == "assessment.set_deadline":
             owner_kind = str(operation.target.get("owner_kind") or "")
             if owner_kind == "assignment_history":
                 current = self._read_target(changeset, operation)
                 if current == operation.after:
-                    return True
+                    projections = self._sync_projections(operation, target_value=str(operation.after), actor=actor)
+                    return {"already_applied": True, "projection_results": projections}
                 if current != operation.before:
                     raise OperationConflict("the assessment deadline changed after the proposal")
                 record_id = str(operation.target["entity_id"]).rsplit(":", 1)[-1]
@@ -359,7 +377,8 @@ class ChangeExecutor:
                     after=str(operation.after),
                     actor=actor,
                 )
-                return False
+                projections = self._sync_projections(operation, target_value=str(operation.after), actor=actor)
+                return {"already_applied": False, "projection_results": projections}
             if owner_kind == "domain_projection":
                 entity_id = str(operation.target["entity_id"]).rsplit(":", 1)[-1]
                 domain = self.service.domain()
@@ -369,12 +388,14 @@ class ChangeExecutor:
                     raise OperationConflict("the extracted assessment no longer exists") from exc
                 current = entity.get("deadline")
                 if current == operation.after:
-                    return True
+                    projections = self._sync_projections(operation, target_value=str(operation.after), actor=actor)
+                    return {"already_applied": True, "projection_results": projections}
                 if current != operation.before:
                     raise OperationConflict("the assessment deadline changed after the proposal")
                 evidence = self._operation_evidence(operation)
                 domain.update_field("assignment", entity_id, "deadline", operation.after, expected_before=operation.before, evidence=evidence)
-                return False
+                projections = self._sync_projections(operation, target_value=str(operation.after), actor=actor)
+                return {"already_applied": False, "projection_results": projections}
             raise OperationConflict("assertion-only assessments cannot be materialized in Phase 1")
         if operation.type == "task.set_due":
             task_store = self.service.task_store()
@@ -385,7 +406,7 @@ class ChangeExecutor:
             current = task.get("due_date")
             if current == operation.after:
                 self._update_link_sync(operation, str(operation.after), actor=actor)
-                return True
+                return {"already_applied": True, "projection_results": []}
             if current != operation.before:
                 raise OperationConflict("the task deadline changed after the proposal")
             task_store.update_due_date_if_unchanged(
@@ -395,8 +416,72 @@ class ChangeExecutor:
                 actor=actor,
             )
             self._update_link_sync(operation, str(operation.after), actor=actor)
-            return False
+            return {"already_applied": False, "projection_results": []}
         raise OperationConflict(f"unsupported operation type: {operation.type}")
+
+    def _sync_projections(self, operation: Operation, *, target_value: str, actor: str, reverse: bool = False) -> list[dict[str, Any]]:
+        updates = operation.target.get("projection_updates") or []
+        if not isinstance(updates, list) or not updates:
+            return []
+        domain = self.service.domain()
+        results: list[dict[str, Any]] = []
+        for update in updates:
+            if not isinstance(update, dict):
+                continue
+            entity_type = str(update.get("entity_type") or "")
+            entity_id = str(update.get("entity_id") or "")
+            field = str(update.get("field") or "")
+            if not entity_type or not entity_id or not field:
+                continue
+            desired = str(update.get("before") or "") if reverse else target_value
+            expected = str(operation.after) if reverse else str(update.get("expected") or update.get("before") or "")
+            try:
+                entity = domain.get(entity_type, entity_id)
+            except KeyError:
+                results.append({"entity_type": entity_type, "entity_id": entity_id, "field": field, "status": "missing"})
+                continue
+            current = entity.get(field)
+            if current == desired:
+                results.append({"entity_type": entity_type, "entity_id": entity_id, "field": field, "status": "already_synced", "value": current})
+                continue
+            if current != expected:
+                results.append({
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "field": field,
+                    "status": "conflict",
+                    "current": current,
+                    "expected": expected,
+                    "desired": desired,
+                })
+                continue
+            existing_evidence = entity.get("evidence") if isinstance(entity.get("evidence"), dict) else {}
+            evidence = {
+                **existing_evidence,
+                "reference": {
+                    **(existing_evidence.get("reference") if isinstance(existing_evidence.get("reference"), dict) else {}),
+                    "approved_operation_id": operation.id,
+                    "update_basis": "approved_reversal" if reverse else "approved_change",
+                    "updated_at": now(),
+                },
+                "updated_at": now(),
+            }
+            if not evidence.get("source_path"):
+                evidence.update(self._operation_evidence(operation))
+            try:
+                domain.update_field(entity_type, entity_id, field, desired, expected_before=expected, evidence=evidence)
+            except (KeyError, ValueError) as exc:
+                results.append({"entity_type": entity_type, "entity_id": entity_id, "field": field, "status": "failed", "reason": str(exc)})
+                continue
+            verified = domain.get(entity_type, entity_id).get(field)
+            results.append({
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "field": field,
+                "status": "verified" if verified == desired else "verification_failed",
+                "value": verified,
+            })
+        return results
 
     def _reverse_operation(self, changeset: ChangeSet, operation: Operation, *, actor: str) -> None:
         if operation.type == "assessment.set_deadline":
@@ -594,6 +679,7 @@ def _operation_results(changeset: ChangeSet) -> list[dict[str, Any]]:
             "attempts": operation.attempts,
             "error": operation.last_error,
             "skip_effect_applied": operation.skip_effect_applied,
+            "projection_results": (operation.result or {}).get("projection_results", []),
         }
         for operation in changeset.operations
     ]

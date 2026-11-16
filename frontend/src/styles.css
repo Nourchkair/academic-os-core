@@ -1166,6 +1166,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .deadline-change-preview, .deadline-change-result { display: grid; gap: 14px; padding: 20px 24px 24px; }
 .deadline-change-summary h3 { color: #3f3f3f; font-size: 16px; margin: 3px 0 5px; }
 .deadline-change-summary p { color: #7d7d7d; font-size: 11px; line-height: 1.5; margin: 0; }
+.deadline-change-summary .deadline-change-selection-summary { color: #5c6f5c; font-weight: 650; margin-top: 6px; }
 .deadline-change-operation-list { display: grid; gap: 8px; }
 .deadline-change-operation { align-items: center; background: #fafafa; border: 1px solid #ececec; border-radius: 10px; display: flex; gap: 12px; justify-content: space-between; padding: 11px 12px; }
 .deadline-change-operation.required { background: #f6faf5; border-color: #dce8d8; }
@@ -1198,3 +1199,45 @@ button { -webkit-tap-highlight-color: transparent; }
 .deadline-change-error { color: #a4584d; font-size: 9px; grid-column: 1 / -1; margin: 0; }
 .deadline-change-link-state { color: #8a6a42 !important; }
 @media (max-width: 760px) { .deadline-change-backdrop { padding: 10px; }.deadline-change-dialog { max-height: 92vh; }.deadline-change-operation { align-items: flex-start; flex-direction: column; }.deadline-change-values { justify-content: flex-start; }.history-card-actions { align-items: flex-start; flex-direction: column; gap: 8px; } }
+@media (prefers-color-scheme: dark) {
+  .deadline-change-dialog { background: #20201f; border-color: #3c3c39; color: #e4e4e4; }
+  .deadline-change-heading { border-bottom-color: #343432; }
+  .deadline-change-heading h2 { color: #f0f0f0; }
+  .deadline-change-heading p { color: #a8a8a5; }
+  .deadline-change-form > label > span { color: #b6b6b2; }
+  .deadline-change-form input, .deadline-change-form select, .deadline-change-form textarea { background: #2a2a28; border-color: #44443f; color: #ededeb; }
+  .deadline-change-links { background: #262624; border-color: #3a3a36; }
+  .deadline-change-links h3 { color: #e0e0dd; }
+  .deadline-change-hint { color: #a7a7a2; }
+  .deadline-change-task { background: #2d2d2a; border-color: #40403b; }
+  .deadline-change-task strong { color: #ececea; }
+  .deadline-change-task small { color: #a7a7a2; }
+  .deadline-change-summary h3 { color: #f0f0f0; }
+  .deadline-change-summary p { color: #b6b6b0; }
+  .deadline-change-summary .deadline-change-selection-summary { color: #c4d6c2; }
+  .deadline-change-operation { background: #2a2a27; border-color: #3a3a36; }
+  .deadline-change-operation.required { background: #263026; border-color: #3c5e45; }
+  .deadline-change-operation strong { color: #ececea; }
+  .deadline-change-operation small { color: #a7a7a2; }
+  .deadline-change-values b { color: #ececea; }
+  .deadline-change-values span { color: #8e8e89; }
+  .deadline-change-values em { background: #2f3b2f; color: #b8dcb8; }
+  .deadline-change-evidence { background: #262624; border-color: #3a3a36; }
+  .deadline-change-evidence h4 { color: #e0e0dd; }
+  .deadline-change-evidence-row strong { color: #ececea; }
+  .deadline-change-evidence-row span { color: #a7a7a2; }
+  .deadline-change-evidence-row p { color: #c0c0ba; }
+  .deadline-change-warning { background: #332a1f; border-color: #55452f; color: #dcc29e; }
+  .deadline-change-warning.soft { background: #2c2c29; border-color: #3c3c38; color: #b6b6b0; }
+  .deadline-change-result-banner { background: #263026; border-color: #3c5e45; }
+  .deadline-change-result-banner.status-partially_applied, .deadline-change-result-banner.status-failed, .deadline-change-result-banner.status-partially_reverted { background: #332a1f; border-color: #55452f; }
+  .deadline-change-result-banner.status-reversal_conflict { background: #382421; border-color: #5d3a33; }
+  .deadline-change-result-banner h3 { color: #b8dcb8; }
+  .deadline-change-result-banner.status-partially_applied h3, .deadline-change-result-banner.status-failed h3, .deadline-change-result-banner.status-partially_reverted h3 { color: #dcc29e; }
+  .deadline-change-result-banner p { color: #b8c8b6; }
+  .deadline-change-link-state { color: #dcc29e !important; }
+  .deadline-change-dialog .secondary-button { background: #2f2f2c; border-color: #45453f; color: #e0e0dd; }
+  .deadline-change-dialog .primary-button { background: #d5d5d5; color: #2f2f2f; }
+  .deadline-change-dialog .primary-button:disabled { background: #3a3a37; color: #8f8f8a; }
+  .deadline-change-operation.result-failed, .deadline-change-operation.result-blocked, .deadline-change-operation.result-conflict { background: #332a1f; border-color: #55452f; }
+}

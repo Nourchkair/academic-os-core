@@ -704,6 +704,7 @@ export type ChangeOperationResult = {
   attempts: number
   error?: string | null
   skip_effect_applied?: boolean
+  projection_results?: Array<Record<string, unknown>>
 }
 
 export type ChangeSet = {

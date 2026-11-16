@@ -462,6 +462,34 @@ class KnowledgeService:
 
     # ChangeSet proposal
 
+    def _projection_updates(self, assessment: dict[str, Any], before: str) -> tuple[list[dict[str, Any]], list[str]]:
+        updates: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        owner_kind = str(assessment.get("owner", {}).get("kind") or "")
+        for alias in assessment.get("aliases", []):
+            kind = str(alias.get("kind") or "")
+            if kind == "domain_assignment" and owner_kind == "assignment_history":
+                entity_type, field, value = "assignment", "deadline", alias.get("deadline")
+            elif kind == "deadline_projection":
+                entity_type, field, value = "deadline", "date", alias.get("date")
+            else:
+                continue
+            if value in {None, ""}:
+                continue
+            if value != before:
+                warnings.append(
+                    f"The extracted {entity_type} projection for {assessment.get('title')} says {value}, not {before}. It was left unchanged so the disagreement remains visible."
+                )
+            updates.append({
+                "entity_type": entity_type,
+                "entity_id": str(alias.get("entity_id")),
+                "field": field,
+                "before": value,
+                "expected": before,
+                "label": str(alias.get("title") or assessment.get("title") or entity_type),
+            })
+        return updates, warnings
+
     def _supersede_open_proposals(self, assessment_id: str, *, actor: str, channel: str) -> None:
         for raw in self.store.list_changesets():
             if raw.get("status") not in {"proposed", "approved", "executing"}:
@@ -587,6 +615,7 @@ class KnowledgeService:
         )
         self._supersede_open_proposals(assessment["id"], actor=actor, channel=channel)
         self.store.append_assertion(assertion, [evidence])
+        projection_updates, projection_warnings = self._projection_updates(assessment, str(before))
 
         assessment_operation_id = new_id("op")
         assessment_operation = Operation(
@@ -599,6 +628,7 @@ class KnowledgeService:
                 "owner_locator": assessment["owner"].get("locator"),
                 "field": "due_date",
                 "assertion_id": assertion.id,
+                "projection_updates": projection_updates,
             },
             before=before,
             after=after,
@@ -613,7 +643,7 @@ class KnowledgeService:
         )
         assessment_operation.idempotency_key = _operation_key(changeset_id, assessment_operation)
         operations = [assessment_operation]
-        warnings = [*assessment_warnings]
+        warnings = [*assessment_warnings, *projection_warnings]
         task_store = TaskStore(self.root, self.semester)
         for link in self.store.list_links(assessment_id=assessment["id"], status="active"):
             if link.get("mode") != "mirror_deadline":
@@ -701,7 +731,7 @@ class KnowledgeService:
             created_at=now(),
             updated_at=now(),
             created_by=actor,
-            summary=f"Update the assessment deadline from {before} to {after}" + (f" and {len(optional_ids)} mirrored task deadline{'s' if len(optional_ids) != 1 else ''}." if optional_ids else "."),
+            summary=f"Update the assessment deadline from {before} to {after}.",
             evidence_ids=[evidence.id],
             operations=operations,
             conflicts=conflicts,
@@ -908,6 +938,9 @@ class KnowledgeService:
                 assessment_operation.after = after
                 assessment_operation.target["assertion_id"] = assertion.id
                 assessment_operation.expected_revision = assessment_revision(assessment)
+                projection_updates, projection_warnings = self._projection_updates(assessment, str(assessment_operation.before))
+                assessment_operation.target["projection_updates"] = projection_updates
+                changeset.warnings = [*changeset.warnings, *[warning for warning in projection_warnings if warning not in changeset.warnings]]
                 assessment_operation.idempotency_key = _operation_key(changeset.id, assessment_operation)
                 evidence_ids = list(assertion.evidence_ids)
                 updated_conflicts = []

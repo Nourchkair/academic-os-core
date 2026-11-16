@@ -41,7 +41,7 @@ export function DeadlineChangeDialog({ course, semester, record, onClose, onChan
       })
       .catch((reason) => { if (active) setError(String(reason)) })
     return () => { active = false }
-  }, [assessmentId, course.id, currentDueDate, semester])
+  }, [assessmentId, course.code, course.id, currentDueDate, semester])
 
   const alreadyLinkedTaskIds = useMemo(() => new Set(links.map((link) => link.task_id)), [links])
   const candidateTasks = tasks.filter((task) => !alreadyLinkedTaskIds.has(task.task_id || task.id))
@@ -50,6 +50,12 @@ export function DeadlineChangeDialog({ course, semester, record, onClose, onChan
   const optionalOperations = changeset?.operations.filter((operation) => !operation.required) ?? []
   const reversible = changeset ? changeset.operations.every((operation) => operation.reversible || operation.status === 'skipped' || operation.status === 'reversed' || operation.status === 'already_reversed') : false
   const canRetry = Boolean(changeset && ['partially_applied', 'failed'].includes(changeset.status) && changeset.result.operation_results.some((operation) => ['failed', 'blocked'].includes(operation.status) && operation.error !== 'retry limit reached'))
+  const selectedOptionalCount = optionalOperations.filter((operation) => selectedOperationIds.includes(operation.id)).length
+  const skippedOptionalCount = optionalOperations.length - selectedOptionalCount
+  const assessmentOperation = changeset?.operations.find((operation) => operation.type === 'assessment.set_deadline')
+  const assessmentApplied = Boolean(changeset && ['verified', 'partially_applied'].includes(changeset.status) && assessmentOperation?.status === 'verified')
+  const headerDue = assessmentApplied ? assessmentOperation?.after || currentDueDate : currentDueDate
+  const headerDueLabel = assessmentApplied ? 'Now due' : 'Recorded due'
 
   const toggleCandidate = (taskId: string) => {
     setCandidateTaskIds((current) => current.includes(taskId) ? current.filter((item) => item !== taskId) : [...current, taskId])
@@ -162,7 +168,7 @@ export function DeadlineChangeDialog({ course, semester, record, onClose, onChan
   return <div className="deadline-change-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) void cancel() }}>
     <section className="deadline-change-dialog" role="dialog" aria-modal="true" aria-labelledby="deadline-change-title">
       <header className="deadline-change-heading">
-        <div><p className="eyebrow">Academic change preview</p><h2 id="deadline-change-title">{record.title}</h2><p>{currentDueDate ? `Recorded due ${formatDate(currentDueDate)}` : 'No recorded deadline'}</p></div>
+        <div><p className="eyebrow">Academic change preview</p><h2 id="deadline-change-title">{record.title}</h2><p>{headerDue ? `${headerDueLabel} ${formatDate(headerDue)}` : 'No recorded deadline'}</p></div>
         <button className="icon-button" type="button" aria-label="Close change preview" onClick={() => void cancel()} disabled={busy}>×</button>
       </header>
 
@@ -188,7 +194,7 @@ export function DeadlineChangeDialog({ course, semester, record, onClose, onChan
       </div>}
 
       {step === 'preview' && changeset && <div className="deadline-change-preview">
-        <div className="deadline-change-summary"><p className="eyebrow">Review before applying</p><h3>{changeset.title}</h3><p>{changeset.summary}</p></div>
+        <div className="deadline-change-summary"><p className="eyebrow">Review before applying</p><h3>{changeset.title}</h3><p>{changeset.summary}</p><p className="deadline-change-selection-summary">Selected: the required assessment deadline{selectedOptionalCount ? ` plus ${selectedOptionalCount} mirrored task${selectedOptionalCount === 1 ? '' : 's'}` : ''}.{skippedOptionalCount ? ` ${skippedOptionalCount} mirrored task${skippedOptionalCount === 1 ? '' : 's'} will be skipped and the link paused.` : ''}</p></div>
         <div className="deadline-change-operation-list">
           {requiredOperations.map((operation) => <div className="deadline-change-operation required" key={operation.id}><div><span className="deadline-change-required">Required</span><strong>{operation.label || operation.type}</strong><small>{operation.target_title}</small></div><div className="deadline-change-values"><b>{formatValue(operation.before)}</b><span>→</span><b>{formatValue(operation.after)}</b></div></div>)}
           {optionalOperations.map((operation) => <label className="deadline-change-operation" key={operation.id}><input type="checkbox" checked={selectedOperationIds.includes(operation.id)} disabled={busy || changeset.status === 'approved'} onChange={() => toggleOperation(operation)} /><div><span className="deadline-change-optional">Optional</span><strong>{operation.label || operation.type}</strong><small>{operation.target_title}{operation.skip_effect === 'pause_link' ? ' · if skipped, this link pauses' : ''}</small></div><div className="deadline-change-values"><b>{formatValue(operation.before)}</b><span>→</span><b>{formatValue(operation.after)}</b></div></label>)}
@@ -207,6 +213,7 @@ export function DeadlineChangeDialog({ course, semester, record, onClose, onChan
             <div><strong>{operation.label || operation.type}</strong><small>{operation.target_title}</small>{operation.status === 'skipped' && operation.skip_effect_applied && <small className="deadline-change-link-state">Deadline link paused. The task stays independent until you link it again.</small>}</div>
             <div className="deadline-change-values"><b>{formatValue(operation.before)}</b><span>→</span><b>{formatValue(operation.after)}</b><em>{operation.status.replaceAll('_', ' ')}</em></div>
             {operation.error && <p className="deadline-change-error">{operation.error}</p>}
+            {operation.projection_results?.some((projection) => !['verified', 'already_synced'].includes(String(projection.status))) && <p className="deadline-change-warning soft">An extracted source projection was left unchanged so its disagreement stays visible.</p>}
           </div>
         })}</div>
         {changeset.status === 'verified' && <p className="deadline-change-hint">Every approved operation was read back and verified. The evidence remains unverified until a source confirms it.</p>}
