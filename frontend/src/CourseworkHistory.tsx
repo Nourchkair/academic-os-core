@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { api, fileUrl, isTauriEnvironment } from './lib/api'
+import { composeGrade, gradeParts, gradePartsList } from './lib/grades'
 import type { Course, CourseworkHistoryRecord, CourseworkHistoryInput } from './types'
 import type { FilePreview } from './types'
 
@@ -59,7 +60,7 @@ export function CourseworkHistoryView({ course, semester, onHistoryChanged }: { 
     {loading ? <p className="muted-copy" role="status">Loading {course.code} history…</p> : orderedRecords.length ? <div className="coursework-history-list">{orderedRecords.map((record) => <article className="coursework-history-card" key={record.id}>
       {editingId === record.id ? <CourseworkEditor key={record.id} initial={record} onSave={(input) => saveUpdate(record.id, input)} onCancel={() => setEditingId(null)} /> : <>
         <div className="coursework-history-card-heading"><div><span className="history-kind">{labelForKind(record.kind)}</span><h4>{record.title}</h4></div><span className={`history-status status-${record.status}`}>{labelForStatus(record.status)}</span></div>
-        <div className="coursework-history-meta">{record.due_date && <span>Due {formatDate(record.due_date)}</span>}{record.submitted_on && <span>Submitted {formatDate(record.submitted_on)}</span>}{record.grade && <span>Grade {record.grade}</span>}</div>
+        <div className="coursework-history-meta">{record.due_date && <span>Due {formatDate(record.due_date)}</span>}{record.submitted_on && <span>Submitted {formatDate(record.submitted_on)}</span>}{gradePartsList(record).length > 0 && <span>Grade {gradePartsList(record).join(' · ')}</span>}</div>
         {record.notes && <p className="coursework-history-notes">{record.notes}</p>}
         {!!record.artifact_paths.length && <div className="history-artifacts"><strong>Files</strong>{record.artifact_paths.map((path) => <button type="button" className="history-artifact-link" key={path} onClick={() => setPreviewPath(path)}>{path.split('/').pop()} <span>Preview</span></button>)}</div>}
         {!!record.status_history.length && <details className="history-status-log"><summary>Status log</summary><ol>{record.status_history.map((event, index) => <li key={`${event.recorded_at}-${index}`}><strong>{labelForStatus(event.status)}</strong> · {formatDateTime(event.recorded_at)} · {event.basis}</li>)}</ol></details>}
@@ -77,7 +78,10 @@ function CourseworkEditor({ initial, onSave, onCancel }: { initial?: CourseworkH
   const [taskTitle, setTaskTitle] = useState(initial?.task_title ?? '')
   const [dueDate, setDueDate] = useState(initial?.due_date ?? '')
   const [submittedOn, setSubmittedOn] = useState(initial?.submitted_on ?? '')
-  const [grade, setGrade] = useState(initial?.grade ?? '')
+  const initialGrade = gradeParts(initial ?? {})
+  const [score, setScore] = useState(initialGrade.score ?? '')
+  const [percentage, setPercentage] = useState(initialGrade.percentage ?? '')
+  const [letterGrade, setLetterGrade] = useState(initialGrade.letter ?? '')
   const [artifactPaths, setArtifactPaths] = useState((initial?.artifact_paths ?? []).join('\n'))
   const [notes, setNotes] = useState(initial?.notes ?? '')
   const [saving, setSaving] = useState(false)
@@ -90,7 +94,9 @@ function CourseworkEditor({ initial, onSave, onCancel }: { initial?: CourseworkH
     try {
       await onSave({
         kind, title, status, task_title: taskTitle, due_date: dueDate, submitted_on: submittedOn,
-        grade, artifact_paths: artifactPaths.split('\n').map((path) => path.trim()).filter(Boolean), notes,
+        score, percentage, letter_grade: letterGrade,
+        grade: composeGrade({ score, percentage, letter: letterGrade }),
+        artifact_paths: artifactPaths.split('\n').map((path) => path.trim()).filter(Boolean), notes,
       })
     } catch (reason) {
       setError(String(reason))
@@ -107,7 +113,9 @@ function CourseworkEditor({ initial, onSave, onCancel }: { initial?: CourseworkH
       <label><span>Related task title <small>(optional)</small></span><input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} maxLength={200} placeholder="Match a task or deadline" /></label>
       <label><span>Due date</span><input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
       <label><span>Submitted on</span><input type="date" value={submittedOn} onChange={(event) => setSubmittedOn(event.target.value)} /></label>
-      <label><span>Grade <small>(optional)</small></span><input value={grade} onChange={(event) => setGrade(event.target.value)} maxLength={50} placeholder="Not graded yet" /></label>
+      <label><span>Score <small>(optional)</small></span><input value={score} onChange={(event) => setScore(event.target.value)} maxLength={50} placeholder="54/60" /></label>
+      <label><span>Percentage <small>(optional)</small></span><input value={percentage} onChange={(event) => setPercentage(event.target.value)} maxLength={20} placeholder="90%" /></label>
+      <label><span>Letter grade <small>(optional)</small></span><input value={letterGrade} onChange={(event) => setLetterGrade(event.target.value)} maxLength={20} placeholder="A+" /></label>
       <label className="history-wide-field"><span>Course-relative file paths <small>(one per line)</small></span><textarea value={artifactPaths} onChange={(event) => setArtifactPaths(event.target.value)} rows={2} placeholder="03_ASSIGNMENTS/A01 - First Essay/Submission/final.docx" /></label>
       <label className="history-wide-field"><span>Notes <small>(optional)</small></span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} maxLength={900} placeholder="Add useful context about this coursework record." /></label>
     </div>

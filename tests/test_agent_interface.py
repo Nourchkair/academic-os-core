@@ -237,3 +237,29 @@ def test_agent_read_context_does_not_create_operational_state_or_expose_absolute
     assert str(root) not in serialized
     assert ".academia" not in serialized
     assert all(not Path(str(task["id"]).split(":", 1)[0]).is_absolute() for task in value["current_state"]["open_tasks"])
+
+
+def test_agent_context_exposes_recorded_grade_history(tmp_path: Path) -> None:
+    from academia_os.assignment_history import add_assignment_history
+
+    _, root, profile = prepared_workspace(tmp_path)
+    course = root / "Fall 2026" / "POL 2103 - Politics"
+    add_assignment_history(root, "Fall 2026", course.name, {
+        "kind": "essay",
+        "title": "First Essay",
+        "status": "graded",
+        "grade": "82%",
+        "score": "41/50",
+        "percentage": "82%",
+        "letter_grade": "A-",
+    })
+
+    result = run_cli(profile, "agent", "context", "--scope", "course", "--course", course.name, "--detail", "standard", "--json")
+
+    assert result.returncode == 0, result.stderr
+    grades = json.loads(result.stdout)["current_state"]["grade_history"]
+    assert grades[0]["title"] == "First Essay"
+    assert grades[0]["grade"] == "82%"
+    assert grades[0]["score"] == "41/50"
+    assert grades[0]["percentage"] == "82%"
+    assert grades[0]["letter_grade"] == "A-"

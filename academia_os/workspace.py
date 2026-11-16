@@ -10,6 +10,7 @@ from .course_identity import course_records
 from .domain import DomainProjection
 from .library import list_material
 from .state import JsonStateStore
+from .tasks import TaskStore, project_task
 
 
 def state_root(config: dict[str, Any]) -> Path:
@@ -133,6 +134,14 @@ def build_workspace_snapshot(
             )
             tasks.extend(_extract_tasks(candidate / "01_COURSE" / "Course_Status.md", candidate.name))
     tasks.extend(_domain_tasks(root, {course["id"] for course in courses}))
+    task_state_error: str | None = None
+    try:
+        for task in TaskStore(root, semester).list():
+            if task["status"] == "cancelled":
+                continue
+            tasks.append(project_task(task, semester))
+    except (OSError, ValueError) as exc:
+        task_state_error = str(exc)
     # The template checklist is onboarding guidance, not academic workload. Actual
     # tasks should come from course evidence or a structured task file.
     today_path = semester_root / "TODAY.md"
@@ -154,6 +163,7 @@ def build_workspace_snapshot(
         # The desktop startup check only needs these two marker checks. Keep this
         # cheap so it can avoid running the full, recursive workspace inspection.
         "workspace_recognized": (root / "ACADEMIC_OS_RULES.md").is_file() and (root / "COURSE_TEMPLATE").is_dir(),
+        "task_state_error": task_state_error,
     }
     if persist:
         JsonStateStore(root / ".academia" / "index.json").write(snapshot)

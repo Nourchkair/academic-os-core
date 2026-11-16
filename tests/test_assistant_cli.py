@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+    environment = {**os.environ, "PYTHONPATH": str(ROOT)}
+    return subprocess.run(
+        [sys.executable, "-m", "academia_os", *args],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+    )
+
+
+def test_assistant_tools_cli_exposes_only_read_tools() -> None:
+    result = run_cli("assistant", "tools", "--json")
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["contract_version"] == 1
+    assert [tool["name"] for tool in value["write_tools"]] == ["import.propose", "study.create", "domain.propose", "task.propose", "action.propose"]
+    assert value["write_tools"][0]["requires_approval"] is True
+    assert value["write_tools"][1]["requires_approval"] is False
+    assert value["write_tools"][2]["requires_approval"] is True
+    assert value["write_tools"][3]["requires_approval"] is True
+    assert value["write_tools"][4]["requires_approval"] is True
+    assert len(value["tools"]) == 13
+    permissions = {tool["name"]: tool["permission"] for tool in value["tools"]}
+    assert permissions.pop("web.search") == "read_external"
+    assert all(permission == "read_local" for permission in permissions.values())
+    assert all(tool["side_effect"] == "none" for tool in value["tools"])
+
+
+def test_assistant_capabilities_cli_reports_the_provider_gate_as_pending() -> None:
+    result = run_cli("assistant", "capabilities", "--json")
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["runtime"]["status"] == "read_only_default_proposal_only_available"
+    assert value["runtime"]["write_tools"] == "proposal_only"
+    assert value["provider_gate"]["status"] in {"pending", "read_only_passed"}
+    assert value["providers"][0]["id"] == "codex-app-server"
+    assert value["providers"][0]["read_only"] is True
+    assert value["providers"][0]["writes"] is False
+    assert value["providers"][0]["proposal_mode"] is True
+    assert len(value["tools"]) == 13
+
+
+def test_assistant_capabilities_reports_exact_write_grants() -> None:
+    result = run_cli("assistant", "capabilities", "--json")
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    grants = {item["name"]: item for item in value["tool_grants"]["allowed_write_tools"]}
+    assert value["tool_grants"]["default"] == "read_only"
+    assert grants["task.propose"]["requires_approval"] is True
+    assert grants["task.propose"]["confirmation"] == "review"
+    assert grants["study.create"]["requires_approval"] is False
+    assert grants["study.create"]["confirmation"] == "host"

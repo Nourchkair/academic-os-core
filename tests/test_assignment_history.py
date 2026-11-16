@@ -32,6 +32,17 @@ def test_history_is_course_scoped_user_confirmed_and_status_updates_are_retained
 
     assert record["record_basis"] == "user-confirmed"
     assert list_assignment_history(root, "Fall 2026", course.name) == [record]
+    graded = add_assignment_history(root, "Fall 2026", course.name, {
+        "kind": "exam",
+        "title": "Midterm",
+        "status": "graded",
+        "score": "54/60",
+        "percentage": "90%",
+        "letter_grade": "A+",
+    })
+    assert graded["score"] == "54/60"
+    assert graded["percentage"] == "90%"
+    assert graded["letter_grade"] == "A+"
     assert all(item["name"] != "Assignment_History.json" for item in list_material(root, "Fall 2026"))
     assert apply_history_to_tasks([{"title": "First Essay", "course": course.name, "completed": False}], [record], course_name=course.name)[0] == {
         "title": "First Essay", "course": course.name, "completed": True, "status": "Submitted",

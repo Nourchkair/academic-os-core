@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -91,6 +92,43 @@ def main() -> int:
         if Path(str(snapshot.get("academic_root", ""))).resolve() != workspace.resolve():
             print("Bundled Academia CLI returned a workspace path different from the disposable fixture.", file=sys.stderr)
             return 1
+
+        # OCR renders PDFs with the bundled PDFium build, so make sure the
+        # packaged binary can import it before publishing a release.
+        try:
+            renderer = subprocess.run(
+                [str(cli), "--profile", str(profile), "study", "capabilities", "--json"],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=60,
+            )
+        except subprocess.TimeoutExpired:
+            print("Bundled Academia CLI did not finish `study capabilities --json` within 60 seconds.", file=sys.stderr)
+            return 1
+        if renderer.returncode:
+            detail = renderer.stderr.strip() or renderer.stdout.strip() or f"exit code {renderer.returncode}"
+            print(f"Bundled Academia CLI could not load its PDF renderer: {detail}", file=sys.stderr)
+            return 1
+
+        if os.environ.get("ACADEMIA_REQUIRE_GOOGLE_CLIENT") == "1":
+            google = subprocess.run(
+                [str(cli), "--profile", str(profile), "connectors", "google", "status", "--json"],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+            try:
+                google_status = json.loads(google.stdout) if google.returncode == 0 else {}
+            except json.JSONDecodeError:
+                google_status = {}
+            if not isinstance(google_status, dict) or google_status.get("auth_status") != "configured" or not google_status.get("client_id"):
+                detail = google.stderr.strip() or google.stdout.strip() or "client configuration was not found"
+                print(f"Packaged Google OAuth client bootstrap failed: {detail}", file=sys.stderr)
+                return 1
 
         print(f"SIDECAR_STATUS_OK: Academia {payload.get('version', 'unknown')} read a disposable local workspace.")
     return 0

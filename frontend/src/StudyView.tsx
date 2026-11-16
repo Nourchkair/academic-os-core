@@ -3,7 +3,7 @@ import { api } from './lib/api'
 import type { Course, LibraryItem } from './types'
 import { StudyMindMap } from './StudyMindMap'
 import { FlashcardCard } from './FlashcardCard'
-import { listChatConversations, type ChatConversation } from './lib/chat-history'
+import { listChatConversations, type ChatConversationSummary } from './lib/chat-history'
 import './study.css'
 
 type Citation = { id: string; source_id: string; source_name: string; locator: string; text: string; sha256: string }
@@ -20,7 +20,7 @@ const ratings = ['again', 'hard', 'good', 'easy'] as const
 
 export function StudyView({ course, semester, materials, resumeSessionId, onResumeConsumed, onOpenConversation, onStartStudyChat }: { course: Course; semester: string; materials: LibraryItem[]; resumeSessionId?: string; onResumeConsumed: () => void; onOpenConversation: (conversationId: string) => void; onStartStudyChat: (courseId: string, prompt?: string) => void }) {
   const [overview, setOverview] = useState<Overview | null>(null)
-  const [conversations, setConversations] = useState<ChatConversation[]>([])
+  const [conversations, setConversations] = useState<ChatConversationSummary[]>([])
   const [section, setSection] = useState<'history' | 'exams' | 'progress'>('history')
   const [filter, setFilter] = useState<'all' | 'chat' | 'material' | 'practice'>('all')
   const [archiveQuery, setArchiveQuery] = useState('')
@@ -81,7 +81,7 @@ export function StudyView({ course, semester, materials, resumeSessionId, onResu
   const classChats = conversations.filter((conversation) => conversation.courseId === course.id)
   const sets = overview?.sets ?? []
   const sessions = overview?.sessions ?? []
-  const archive: Array<{ key: string; type: 'chat'; timestamp: string; conversation: ChatConversation } | { key: string; type: 'material'; timestamp: string; record: StudySet } | { key: string; type: 'practice'; timestamp: string; record: Overview['sessions'][number] }> = [
+  const archive: Array<{ key: string; type: 'chat'; timestamp: string; conversation: ChatConversationSummary } | { key: string; type: 'material'; timestamp: string; record: StudySet } | { key: string; type: 'practice'; timestamp: string; record: Overview['sessions'][number] }> = [
     ...classChats.map((conversation) => ({ key: 'chat:' + conversation.id, type: 'chat' as const, timestamp: conversation.updatedAt, conversation })),
     ...sets.map((record) => ({ key: 'material:' + record.id, type: 'material' as const, timestamp: record.created_at || '', record })),
     ...sessions.map((record) => ({ key: 'practice:' + record.id, type: 'practice' as const, timestamp: record.created_at || '', record })),
@@ -90,7 +90,7 @@ export function StudyView({ course, semester, materials, resumeSessionId, onResu
     if (filter !== 'all' && entry.type !== filter) return false
     if (!archiveQuery.trim()) return true
     const query = archiveQuery.trim().toLowerCase()
-    const searchable = entry.type === 'chat' ? entry.conversation.title + ' ' + entry.conversation.messages.map((message) => message.content).join(' ')
+    const searchable = entry.type === 'chat' ? entry.conversation.title + ' ' + (entry.conversation.preview || '')
       : entry.type === 'material' ? entry.record.title + ' ' + (entry.record.items || []).map((item) => item.topic + ' ' + item.prompt).join(' ')
         : entry.record.title
     return searchable.toLowerCase().includes(query)
@@ -112,9 +112,8 @@ export function StudyView({ course, semester, materials, resumeSessionId, onResu
       <div className="study-archive-list">{visibleArchive.map((entry) => {
         if (entry.type === 'chat') {
           const conversation = entry.conversation
-          const latest = conversation.messages[conversation.messages.length - 1]
-          const snippet = (latest?.content || '').replace(/\s+/g, ' ').trim()
-          return <article className="study-archive-card" key={entry.key}><span className="study-archive-icon chat">◌</span><div className="study-archive-card-copy"><div className="study-archive-card-top"><span className="study-kind">Study chat</span><time>{conversation.updatedAt ? new Date(conversation.updatedAt).toLocaleString() : 'Date not recorded'}</time></div><h4>{conversation.title}</h4><p>{snippet ? snippet.slice(0, 190) + (snippet.length > 190 ? '…' : '') : 'Saved conversation'}</p><small>{conversation.messages.length} messages · {conversation.sourceIds.length} added source reference{conversation.sourceIds.length === 1 ? '' : 's'} · Saved on this device</small></div><button className="secondary-button" onClick={() => onOpenConversation(conversation.id)}>Open chat →</button></article>
+          const snippet = (conversation.preview || '').replace(/\s+/g, ' ').trim()
+          return <article className="study-archive-card" key={entry.key}><span className="study-archive-icon chat">◌</span><div className="study-archive-card-copy"><div className="study-archive-card-top"><span className="study-kind">Study chat</span><time>{conversation.updatedAt ? new Date(conversation.updatedAt).toLocaleString() : 'Date not recorded'}</time></div><h4>{conversation.title}</h4><p>{snippet ? snippet.slice(0, 190) + (snippet.length > 190 ? '…' : '') : 'Saved conversation'}</p><small>{conversation.messageCount} message{conversation.messageCount === 1 ? '' : 's'} · Saved in your workspace</small></div><button className="secondary-button" onClick={() => onOpenConversation(conversation.id)}>Open chat →</button></article>
         }
         if (entry.type === 'material') {
           const record = entry.record

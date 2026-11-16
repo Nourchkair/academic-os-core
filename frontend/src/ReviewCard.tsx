@@ -1,14 +1,31 @@
-import { useState } from 'react'
-import type { Course, ReviewItem } from './types'
+import { useEffect, useState } from 'react'
+import { api } from './lib/api'
+import type { Course, ReviewItem, TaskProposalAmendment } from './types'
 
 type ReviewCardProps = {
   item: ReviewItem
   courses: Course[]
   busy: boolean
   onDecision: (decision: string) => Promise<void>
+  onAmend?: (fields: TaskProposalAmendment) => Promise<void>
 }
 
-export function ReviewCard({ item, courses, busy, onDecision }: ReviewCardProps) {
+export function ReviewCard({ item, courses, busy, onDecision, onAmend }: ReviewCardProps) {
+  const [advice, setAdvice] = useState<{ options: Array<{ decision: string; label: string; rationale: string }>; recommended: string; note: string } | null>(null)
+  const [adviceBusy, setAdviceBusy] = useState(false)
+  const [adviceError, setAdviceError] = useState('')
+  const askForAdvice = async () => {
+    setAdviceBusy(true)
+    setAdviceError('')
+    try {
+      const value = await api.reviewAdvice(item.id)
+      setAdvice({ options: value.options, recommended: value.recommended, note: value.note })
+    } catch (reason) {
+      setAdviceError(String(reason))
+    } finally {
+      setAdviceBusy(false)
+    }
+  }
   const details = item.details
   const content = (() => {
     switch (item.kind) {
@@ -19,7 +36,7 @@ export function ReviewCard({ item, courses, busy, onDecision }: ReviewCardProps)
       case 'source_match': return <SourceVerification details={details} onDecision={onDecision} busy={busy} />
       case 'import_classification': return <ImportClassification details={details} courses={courses} onDecision={onDecision} busy={busy} />
       case 'course_identity_uncertainty': return <CourseUncertainty details={details} courses={courses} onDecision={onDecision} busy={busy} />
-      case 'action_approval': return <ActionApproval details={details} onDecision={onDecision} busy={busy} />
+      case 'action_approval': return <ActionApproval details={details} courses={courses} onDecision={onDecision} onAmend={onAmend} busy={busy} />
       default: return <GenericReview details={details} onDecision={onDecision} busy={busy} />
     }
   })()
@@ -27,6 +44,19 @@ export function ReviewCard({ item, courses, busy, onDecision }: ReviewCardProps)
   return <article className="review-card">
     <div className="review-card-heading"><div><span className="review-kind">{labelForKind(item.kind)}</span><h3>{item.title}</h3><p>{item.course || 'Workspace'} · {item.priority} priority</p></div><span className="review-status">Needs your decision</span></div>
     {content}
+    {item.kind !== 'action_approval' && <div className="review-advice">
+      {!advice && <button type="button" className="secondary-button review-advice-trigger" disabled={adviceBusy || busy} onClick={() => void askForAdvice()}>{adviceBusy ? 'Thinking…' : 'Help me decide'}</button>}
+      {adviceError && <p className="setup-error" role="alert">{adviceError}</p>}
+      {advice && <div className="review-advice-panel">
+        <header><strong>Suggested options</strong><button type="button" className="quiet-button" onClick={() => setAdvice(null)}>Hide</button></header>
+        {advice.options.map((option) => <div className={`review-advice-option ${option.decision === advice.recommended ? 'recommended' : ''}`} key={option.decision}>
+          <div><strong>{option.label}</strong>{option.decision === advice.recommended && <span className="review-advice-badge">Recommended</span>}<p>{option.rationale}</p></div>
+          <button type="button" className="primary-button" disabled={busy} onClick={() => onDecision(option.decision)}>Apply</button>
+        </div>)}
+        {advice.note && <p className="review-advice-note">{advice.note}</p>}
+        <p className="review-advice-foot">Suggestions come from your configured model. You still decide.</p>
+      </div>}
+    </div>}
     <details className="advanced-details"><summary>Advanced details</summary><pre>{JSON.stringify(details, null, 2)}</pre></details>
   </article>
 }
@@ -75,15 +105,85 @@ function CourseUncertainty({ details, courses, onDecision, busy }: DecisionProps
   return <div className="typed-review-content"><p className="review-question">{detected ? 'The syllabus identity does not match the supplied course. Choose the correct context before extracting facts.' : 'Academia found more than one possible course. Choose one only if the evidence is clear.'}</p>{detected && <div className="classification-grid"><InfoField label="Detected in syllabus" value={detected} /><InfoField label="Supplied context" value={supplied || 'Unknown'} /><InfoField label="Source" value={value(details, 'source') || 'Unknown'} /><InfoField label="Confidence" value={value(details, 'confidence') || 'unverified'} /></div>}{candidates.length > 0 && <div className="candidate-review-list">{candidates.map((candidate, index) => { const item = record(candidate) || {}; const id = value(item, 'id', 'course_id') || courses[index]?.id || ''; return <label key={id || index} className="candidate-review"><input type="radio" name={`candidate-${String(details.id || 'course')}`} value={id} checked={selected === id} onChange={() => setSelected(id)} /><span><strong>{value(item, 'name', 'label') || 'Candidate course'}</strong><small>{value(item, 'reason', 'evidence') || 'No reason recorded'}</small></span></label> })}</div>}{detected && <label className="setup-field"><span>Correct course context</span><select value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">Choose a course</option>{courses.map((course) => <option value={course.id} key={course.id}>{course.code} · {course.name}</option>)}</select></label>}<div className="decision-row"><button className="quiet-button" disabled={busy} onClick={() => void onDecision('keep_unassigned')}>Keep unassigned</button>{selected && <button className="primary-button" disabled={busy} onClick={() => void onDecision(`choose_course:${selected}`)}>{detected ? 'Record course correction' : 'Use selected course'}</button>}</div>{detected && <EffectNote text="Recording a course correction does not rerun extraction automatically. Re-run the syllabus preview with the corrected course context." />}</div>
 }
 
-function ActionApproval({ details, onDecision, busy }: DecisionProps) {
+function ActionApproval({ details, courses, onDecision, onAmend, busy }: DecisionProps & { courses: Course[]; onAmend?: (fields: TaskProposalAmendment) => Promise<void> }) {
   const proposal = record(details.proposal_details) || details
   const actionType = value(proposal, 'action_type') || value(details, 'action_type') || 'change'
   const before = value(proposal, 'before', 'current')
   const after = value(proposal, 'after', 'new', 'proposed')
+  const failure = value(details, 'failure_reason', 'last_failure_reason')
   const effects = Array.isArray(proposal.effects) ? proposal.effects : []
+  if (actionType === 'task_change') {
+    return <TaskActionApproval proposal={proposal} before={before} after={after} effects={effects} courses={courses} onDecision={onDecision} onAmend={onAmend} busy={busy} />
+  }
   const approveLabel = actionType.includes('calendar') ? 'Approve calendar change' : actionType.includes('file_move') ? 'Approve file move' : actionType.includes('configuration') ? 'Apply this setting' : 'Approve this change'
   const keepLabel = actionType.includes('calendar') ? 'Keep calendar unchanged' : actionType.includes('file_move') ? 'Keep files where they are' : 'Keep current data'
-  return <div className="typed-review-content"><p className="review-question">This action is waiting for your approval. Nothing external happens from this screen alone.</p>{before || after ? <div className="comparison-grid"><ComparisonCell label="Before" value={before || 'Unknown'} /><ComparisonCell label="After" value={after || 'Unknown'} emphasis /></div> : null}<div className="effect-list"><strong>This action will:</strong>{effects.length ? <ul>{effects.map((effect) => <li key={String(effect)}>{String(effect)}</li>)}</ul> : <ul><li>record your decision</li><li>preserve the previous source and activity history</li><li>wait for the approved action to be executed and verified</li></ul>}</div><div className="decision-row"><button className="secondary-button" disabled={busy} onClick={() => void onDecision('reject_action')}>{keepLabel}</button><button className="primary-button" disabled={busy} onClick={() => void onDecision('approve_action')}>{approveLabel}</button></div></div>
+  return <div className="typed-review-content"><p className="review-question">This action is waiting for your approval. Nothing external happens from this screen alone.</p>{failure && <p className="setup-error" role="status">The previous execution failed: {failure}. A new approval is required before retrying.</p>}{before || after ? <div className="comparison-grid"><ComparisonCell label="Before" value={before || 'Unknown'} /><ComparisonCell label="After" value={after || 'Unknown'} emphasis /></div> : null}<div className="effect-list"><strong>This action will:</strong>{effects.length ? <ul>{effects.map((effect) => <li key={String(effect)}>{String(effect)}</li>)}</ul> : <ul><li>record your decision</li><li>preserve the previous source and activity history</li><li>wait for the approved action to be executed and verified</li></ul>}</div><div className="decision-row"><button className="secondary-button" disabled={busy} onClick={() => void onDecision('reject_action')}>{keepLabel}</button><button className="primary-button" disabled={busy} onClick={() => void onDecision('approve_action')}>{approveLabel}</button></div></div>
+}
+
+function TaskActionApproval({ proposal, before, after, effects, courses, onDecision, onAmend, busy }: {
+  proposal: Record<string, unknown>
+  before: string
+  after: string
+  effects: unknown[]
+  courses: Course[]
+  onDecision: (decision: string) => Promise<void>
+  onAmend?: (fields: TaskProposalAmendment) => Promise<void>
+  busy: boolean
+}) {
+  const task = record(proposal.task_after) || {}
+  const initialTitle = value(task, 'title')
+  const initialCourse = value(task, 'course_id')
+  const initialDueDate = value(task, 'due_date')
+  const initialDueTime = value(task, 'due_time')
+  const [editing, setEditing] = useState(false)
+  const [title, setTitle] = useState(initialTitle)
+  const [courseId, setCourseId] = useState(initialCourse)
+  const [dueDate, setDueDate] = useState(initialDueDate)
+  const [dueTime, setDueTime] = useState(initialDueTime)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    if (editing) return
+    setTitle(initialTitle)
+    setCourseId(initialCourse)
+    setDueDate(initialDueDate)
+    setDueTime(initialDueTime)
+  }, [initialTitle, initialCourse, initialDueDate, initialDueTime, editing])
+  const save = async () => {
+    if (!onAmend || !title.trim() || saving) return
+    setSaving(true)
+    setError('')
+    try {
+      await onAmend({ title: title.trim(), course_id: courseId || null, due_date: dueDate || null, due_time: dueDate && dueTime ? dueTime : null })
+      setEditing(false)
+    } catch (reason) {
+      setError(`Could not update this proposal. ${String(reason)}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+  const approveLabel = value(proposal, 'action') === 'create' ? 'Add this task' : 'Apply task update'
+  return <div className="typed-review-content">
+    <p className="review-question">This personal-task proposal is waiting for your decision. You can edit the exact fields before approving it.</p>
+    <div className="comparison-grid"><ComparisonCell label="Before" value={before || 'No personal task'} /><ComparisonCell label="After" value={after || 'Task proposal'} emphasis /></div>
+    <div className="effect-list"><strong>This action will:</strong>{effects.length ? <ul>{effects.map((effect) => <li key={String(effect)}>{String(effect)}</li>)}</ul> : <ul><li>write only the approved personal task</li><li>preserve other tasks and unrelated Markdown</li><li>record the change in Activity</li></ul>}</div>
+    {onAmend && <div className="task-proposal-edit-row"><button type="button" className="secondary-button" disabled={busy || saving} onClick={() => setEditing((current) => !current)}>{editing ? 'Close editor' : 'Edit proposal'}</button></div>}
+    {editing && <div className="coursework-editor task-proposal-editor">
+      <div className="coursework-editor-grid">
+        <label className="history-title-field"><span>Task</span><input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={300} /></label>
+        <label><span>Course <small>Optional</small></span><select value={courseId} onChange={(event) => setCourseId(event.target.value)}><option value="">Semester-wide</option>{courses.map((course) => <option value={course.id} key={course.id}>{course.code} · {course.name}</option>)}</select></label>
+        <label><span>Due date <small>Optional</small></span><input type="date" value={dueDate} onChange={(event) => { setDueDate(event.target.value); if (!event.target.value) setDueTime('') }} /></label>
+        <label><span>Due time <small>Optional</small></span><input type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)} disabled={!dueDate} /></label>
+      </div>
+      {error && <p className="task-grade-error" role="alert">{error}</p>}
+      <div className="coursework-editor-actions">
+        <button type="button" className="secondary-button" onClick={() => setEditing(false)} disabled={saving}>Cancel</button>
+        <button type="button" className="primary-button" onClick={() => void save()} disabled={saving || !title.trim() || !(dueDate || !dueTime)}>{saving ? 'Saving…' : 'Save proposal'}</button>
+      </div>
+    </div>}
+    {!editing && error && <p className="task-grade-error" role="alert">{error}</p>}
+    <div className="decision-row"><button className="secondary-button" disabled={busy || saving} onClick={() => void onDecision('reject_action')}>Keep task unchanged</button><button className="primary-button" disabled={busy || saving} onClick={() => void onDecision('approve_action')}>{approveLabel}</button></div>
+  </div>
 }
 
 function GenericReview({ details, onDecision, busy }: DecisionProps) {

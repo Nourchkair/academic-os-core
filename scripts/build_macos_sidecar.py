@@ -4,15 +4,115 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 TAURI = ROOT / "frontend" / "src-tauri"
+sys.path.insert(0, str(ROOT))
+
+
+def build_vision_helper(work_dir: Path) -> Path | None:
+    """Compile the macOS Vision OCR helper so packaged apps need no OCR install."""
+
+    if sys.platform != "darwin":
+        return None
+    compiler = shutil.which("swiftc")
+    if compiler is None:
+        print(
+            "warning: swiftc is unavailable; packaged OCR will require Tesseract without macOS Vision",
+            file=sys.stderr,
+        )
+        return None
+    from academia_os.macos_vision import HELPER_NAME, VISION_SWIFT_SOURCE
+
+    source = work_dir / f"{HELPER_NAME}.swift"
+    source.write_text(VISION_SWIFT_SOURCE, encoding="utf-8")
+    helper = work_dir / HELPER_NAME
+    compiled = subprocess.run(
+        [compiler, "-O", "-o", str(helper), str(source)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if compiled.returncode or not helper.is_file():
+        print(
+            f"warning: the macOS Vision helper did not compile: {compiled.stderr.strip()[-800:]}",
+            file=sys.stderr,
+        )
+        return None
+    probe = subprocess.run([str(helper)], capture_output=True, text=True, check=False)
+    if probe.returncode or probe.stdout.strip() != '{"images":[]}':
+        detail = probe.stderr.strip() or probe.stdout.strip() or f"exit code {probe.returncode}"
+        print(f"warning: the macOS Vision helper did not run correctly: {detail}", file=sys.stderr)
+        return None
+    return helper
+
+
+def google_oauth_client_config() -> dict[str, Any] | None:
+    """Read app-level Google OAuth config without printing or persisting secrets.
+
+    Release CI should provide ``ACADEMIA_GOOGLE_OAUTH_CLIENT_JSON_B64`` as a
+    repository secret. Local developers can use ``ACADEMIA_GOOGLE_CLIENT_JSON``
+    or the client already held in the macOS Keychain.
+    """
+    encoded = os.environ.get("ACADEMIA_GOOGLE_OAUTH_CLIENT_JSON_B64")
+    path = os.environ.get("ACADEMIA_GOOGLE_CLIENT_JSON")
+    value: Any = None
+    if encoded:
+        try:
+            raw = base64.b64decode(encoded, validate=True)
+            value = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("ACADEMIA_GOOGLE_OAUTH_CLIENT_JSON_B64 is not valid base64-encoded JSON") from exc
+    elif path:
+        try:
+            value = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("ACADEMIA_GOOGLE_CLIENT_JSON could not be read as JSON") from exc
+    else:
+        try:
+            import keyring
+
+            stored = keyring.get_password("academia-os-google-oauth", "client")
+            value = json.loads(stored) if stored else None
+        except ImportError:
+            value = None
+        except Exception as exc:
+            if os.environ.get("ACADEMIA_REQUIRE_GOOGLE_CLIENT") == "1":
+                raise ValueError("Google OAuth client could not be read from the system credential store") from exc
+            value = None
+
+    if value is None:
+        if os.environ.get("ACADEMIA_REQUIRE_GOOGLE_CLIENT") == "1":
+            raise ValueError("Google OAuth client is required for this packaged build")
+        return None
+    client = value.get("installed") if isinstance(value, dict) else None
+    if not isinstance(client, dict) and isinstance(value, dict):
+        client = value.get("web")
+    if not isinstance(client, dict):
+        client = value if isinstance(value, dict) else None
+    client_id = client.get("client_id") if isinstance(client, dict) else None
+    client_secret = client.get("client_secret") if isinstance(client, dict) else None
+    if not isinstance(client_id, str) or not client_id.strip() or not isinstance(client_secret, str) or not client_secret.strip():
+        raise ValueError("Google OAuth client JSON must contain a client id and client secret")
+    return {"installed": {"client_id": client_id.strip(), "client_secret": client_secret.strip()}}
+
+
+def stage_google_oauth_client(work_dir: Path, client: dict[str, Any]) -> Path:
+    """Write a private, build-temporary client resource for PyInstaller."""
+    path = Path(work_dir) / "google_client" / "client.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(client, separators=(",", ":")), encoding="utf-8")
+    path.chmod(0o600)
+    return path
 
 
 def main() -> int:
@@ -47,6 +147,14 @@ def main() -> int:
             (ROOT / "adapters", "adapters"),
             (ROOT / "docs" / "local-installation-handoff.md", "docs"),
         ]
+        try:
+            google_client = google_oauth_client_config()
+        except ValueError as exc:
+            parser.error(str(exc))
+        if google_client is not None:
+            client_resource = stage_google_oauth_client(work, google_client)
+            data_args.append((client_resource, "google_client"))
+        vision_helper = build_vision_helper(work)
         options = [
             str(ROOT / "scripts" / "academia_sidecar_entry.py"),
             "--name=academia",
@@ -60,9 +168,14 @@ def main() -> int:
             "--collect-submodules=installer",
             "--collect-submodules=adapters",
             "--hidden-import=zoneinfo",
+            "--collect-all=pypdfium2",
+            "--collect-all=pypdfium2_raw",
         ]
         for source, destination_name in data_args:
             options.append(f"--add-data={source}{os.pathsep}{destination_name}")
+        if vision_helper is not None:
+            # Binaries keep their executable bit; data files are not guaranteed to.
+            options.append(f"--add-binary={vision_helper}{os.pathsep}{Path('academia_os') / '_bin'}")
         import PyInstaller.__main__
 
         PyInstaller.__main__.run(options)

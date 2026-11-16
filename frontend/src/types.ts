@@ -10,6 +10,7 @@ export type Course = {
 
 export type Task = {
   id: string
+  task_id?: string
   title: string
   completed: boolean
   course?: string
@@ -17,11 +18,34 @@ export type Task = {
   source_location?: string | null
   confidence: string
   kind?: string
+  user_task?: boolean
+  provenance?: string
   due_date?: string | null
   due_time?: string | null
   weight?: string | null
   status?: string | null
   grade?: string | null
+}
+
+export type TaskInput = {
+  title: string
+  course_id?: string | null
+  due_date?: string | null
+  due_time?: string | null
+}
+
+export type TaskProposalAmendment = {
+  title?: string
+  course_id?: string | null
+  due_date?: string | null
+  due_time?: string | null
+}
+
+export type TaskListPayload = {
+  semester: string
+  path: string
+  tasks: Task[]
+  task_state_error: string | null
 }
 
 export type ProcessingRecord = {
@@ -81,6 +105,7 @@ export type WorkspaceSnapshot = {
   review_count: number
   workspace_exists: boolean
   workspace_recognized?: boolean
+  task_state_error?: string | null
 }
 
 export type ReviewItem = {
@@ -90,6 +115,7 @@ export type ReviewItem = {
   course?: string
   details: Record<string, unknown>
   status: string
+  action_status?: string | null
   priority: string
   created_at: string
   updated_at: string
@@ -119,6 +145,9 @@ export type CourseworkHistoryRecord = {
   due_date?: string | null
   submitted_on?: string | null
   grade?: string | null
+  score?: string | null
+  percentage?: string | null
+  letter_grade?: string | null
   task_title?: string | null
   artifact_paths: string[]
   notes?: string | null
@@ -136,6 +165,9 @@ export type CourseworkHistoryInput = {
   due_date?: string
   submitted_on?: string
   grade?: string
+  score?: string
+  percentage?: string
+  letter_grade?: string
   task_title?: string
   artifact_paths?: string[]
   notes?: string
@@ -318,8 +350,180 @@ export type AgentStatus = {
   dedicated_adapter?: string
 }
 
-export type StatusPayload = {
-  version: string
+export type AccountStatus = {
+  provider: string
+  available: boolean
+  authenticated: boolean
+  status: string
+  account: { email?: string | null; plan_type?: string | null; workspace_name?: string | null } | null
+  login_id?: string | null
+  verification_url?: string | null
+  user_code?: string | null
+  error?: string | null
+  notice?: string | null
+  updated_at?: string
+}
+
+export type ModelRole = 'default' | 'fast' | 'deep' | 'vision' | 'image'
+
+export type NotionStatus = {
+  schema_version: number
+  auth_status: 'not_configured' | 'connected' | 'error'
+  account_name: string | null
+  error: string | null
+  last_checked_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type NotionPage = {
+  id: string
+  object: string
+  title: string
+  url: string | null
+  last_edited_time: string | null
+  archived: boolean | null
+}
+
+export type NotionPageContent = {
+  page_id: string
+  text: string
+  block_count: number
+  truncated: boolean
+}
+
+export type ModelProviderCatalogEntry = {
+  id: string
+  name: string
+  kind: 'api' | 'local'
+  default_base_url: string
+  auth: string
+  models_path: string
+  docs: string
+}
+
+export type ModelInfo = {
+  id: string
+  name: string
+  capabilities: string[]
+}
+
+export type ModelProviderRecord = {
+  id: string
+  name: string
+  kind: 'api' | 'local'
+  base_url: string
+  auth: string
+  status: 'connected' | 'error'
+  enabled: boolean
+  models: ModelInfo[]
+  last_checked_at: string | null
+  error: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ModelConnectionsPayload = {
+  providers: ModelProviderRecord[]
+  preferences: Record<ModelRole, string | null>
+  catalog: ModelProviderCatalogEntry[]
+}
+
+export type ModelProviderInput = {
+  provider: string
+  api_key: string
+  base_url: string
+  name?: string
+}
+
+export type GoogleConnectorStatus = {
+  schema_version: number
+  client_id: string | null
+  scopes: string[]
+  auth_status: 'not_configured' | 'configured' | 'pending' | 'authorized' | 'error'
+  account_email: string | null
+  authorization_url: string | null
+  error: string | null
+  created_at: string
+  updated_at: string
+  last_checked_at: string | null
+}
+
+export type GoogleAuthorizationStart = {
+  authorization_url: string
+  auth_status: string
+  redirect_uri: string
+  expires_in: number
+  connection: GoogleConnectorStatus
+}
+
+export type GoogleAuthorizationStatus = {
+  auth_status: string
+  authorization_url: string | null
+  error: string | null
+  connection: GoogleConnectorStatus
+}
+
+export type GoogleCalendarEvent = {
+  id: string
+  summary: string | null
+  status: string | null
+  start: { dateTime?: string; date?: string; timeZone?: string }
+  end: { dateTime?: string; date?: string; timeZone?: string }
+  location?: string | null
+  description?: string | null
+  html_link?: string | null
+}
+
+export type GoogleCalendarProposalResult = {
+  proposal: Record<string, unknown>
+  review: ReviewItem
+  next_step: string
+}
+
+export type MCPTool = {
+  name: string
+  description: string
+  read_only: boolean
+  destructive: boolean
+  open_world: boolean
+}
+
+export type MCPConnection = {
+  id: string
+  name: string
+  transport: string
+  scope: string
+  trust: 'local' | 'remote_unverified' | 'remote_trusted'
+  command?: string | null
+  url?: string | null
+  args: string[]
+  cwd?: string | null
+  auth: { type: 'none' | 'oauth'; authorization_server?: string; token_endpoint?: string; client_id?: string; redirect_uri?: string; scopes?: string[] }
+  auth_status: 'none' | 'pending' | 'authorized' | 'error'
+  enabled: boolean
+  status: 'unchecked' | 'available' | 'error'
+  server_info?: { name?: string | null; version?: string | null } | null
+  tools: MCPTool[]
+  granted_tools: string[]
+  error?: string | null
+  created_at: string
+  updated_at: string
+  last_checked_at?: string | null
+}
+
+export type MCPConnectionInput = {
+  name: string
+  command: string
+  args: string[]
+  cwd?: string | null
+}
+
+export type MCPRemoteInput = { name: string; url: string }
+export type MCPAuthorizationStart = { connection_id: string; authorization_url: string; state: string; redirect_uri: string; auth_status: string; expires_in?: number }
+export type MCPAuthorizationStatus = { connection_id: string; auth_status: string; error?: string | null; session_status?: string; connection: MCPConnection }
+
+export type StatusPayload = {  version: string
   profile: string
   student: WorkspaceSnapshot['student']
   workspace: WorkspaceSnapshot

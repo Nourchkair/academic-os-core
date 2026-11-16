@@ -188,7 +188,7 @@ class WorkflowPreferencesStore:
         self.store = JsonStateStore(self.path)
 
     def _read_state(self) -> dict[str, Any]:
-        raw = self.store.read(_empty_state())
+        raw = self.store.read_strict(_empty_state())
         return _validate_state(raw)
 
     def list(self) -> list[dict[str, Any]]:
@@ -228,7 +228,7 @@ class WorkflowPreferencesStore:
                 return state
             return {"schema_version": WORKFLOW_PREFERENCES_SCHEMA_VERSION, "workflows": workflows}
 
-        self.store.update(_empty_state(), transition)
+        self.store.update_strict(_empty_state(), transition)
         return removed
 
     def set(
@@ -273,5 +273,5 @@ class WorkflowPreferencesStore:
             workflows.append(record)
             return {"schema_version": WORKFLOW_PREFERENCES_SCHEMA_VERSION, "workflows": workflows}
 
-        self.store.update(_empty_state(), transition)
+        self.store.update_strict(_empty_state(), transition)
         return copy.deepcopy(record)

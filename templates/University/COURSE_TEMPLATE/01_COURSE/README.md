@@ -38,7 +38,7 @@ Use the authority hierarchy in `../../ACADEMIC_OS_RULES.md`. Generated summaries
 
 ## Calendar and communications
 
-An authorized external agent may read selected calendar or forwarded academic communications after the student grants access through that agent. Academia OS does not connect to Calendar or Gmail. Record any agent-reported context and source in the local logs; calendar writes require confirmation and duplicate checks, and email must never be modified or sent by this workspace.
+An authorized external agent may read selected calendar or forwarded academic communications after the student grants access through that agent. Academia OS can connect one Google account for bounded Gmail and Calendar reads; Study chat only receives that external context after an explicit per-message grant. Calendar create/edit is available only through an exact Review proposal, duplicate checks, fresh approval, a separate execution step, and post-write verification. Academia OS never modifies or sends Gmail, and no calendar change occurs before that separate execution.
 
 ## Course-platform acquisition
 

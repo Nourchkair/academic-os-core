@@ -118,7 +118,7 @@ class ReviewQueue:
         self.store = JsonStateStore(path)
 
     def _items(self) -> list[ReviewItem]:
-        value = self.store.read([])
+        value = self.store.read_strict([])
         if not isinstance(value, list):
             return []
         return [ReviewItem.from_dict(item) for item in value if isinstance(item, dict) and "id" in item]
@@ -129,7 +129,7 @@ class ReviewQueue:
     def add(self, *, kind: str, title: str, course: str | None = None, details: dict[str, Any] | None = None, priority: str = "normal", action_proposal_id: str | None = None) -> ReviewItem:
         now = datetime.now(timezone.utc).isoformat()
         item = ReviewItem(str(uuid4()), kind, title, course, details or {}, ReviewStatus.OPEN, priority, now, now, action_proposal_id)
-        self.store.update([], lambda raw: [*raw, asdict(item)])
+        self.store.update_strict([], lambda raw: [*raw, asdict(item)])
         return item
 
     def list(self, *, include_resolved: bool = False) -> list[ReviewItem]:
@@ -147,7 +147,7 @@ class ReviewQueue:
     def find_by_action_proposal_id(self, proposal_id: str) -> ReviewItem | None:
         return next((item for item in self._items() if item.action_proposal_id == proposal_id), None)
 
-    def update(self, item_id: str, *, status: ReviewStatus | str | None = None, details: dict[str, Any] | None = None) -> ReviewItem:
+    def update(self, item_id: str, *, status: ReviewStatus | str | None = None, details: dict[str, Any] | None = None, title: str | None = None) -> ReviewItem:
         selected: list[ReviewItem] = []
 
         def transition(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -158,11 +158,13 @@ class ReviewQueue:
                 item.status = ReviewStatus(status) if status is not None else item.status
                 if details is not None:
                     item.details = details
+                if title is not None:
+                    item.title = title
                 item.updated_at = datetime.now(timezone.utc).isoformat()
                 items[index] = item
                 selected.append(item)
                 return [asdict(value) for value in items]
             raise KeyError(f"review item not found: {item_id}")
 
-        self.store.update([], transition)
+        self.store.update_strict([], transition)
         return selected[0]

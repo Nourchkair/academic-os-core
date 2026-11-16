@@ -1,0 +1,130 @@
+[
+  {
+    "name": "academia_status",
+    "required": []
+  },
+  {
+    "name": "academia_capabilities",
+    "required": []
+  },
+  {
+    "name": "academia_courses",
+    "required": []
+  },
+  {
+    "name": "academia_today",
+    "required": []
+  },
+  {
+    "name": "academia_tasks",
+    "required": []
+  },
+  {
+    "name": "academia_agent_context",
+    "required": []
+  },
+  {
+    "name": "academia_attention",
+    "required": []
+  },
+  {
+    "name": "academia_review_item",
+    "required": [
+      "review_id"
+    ]
+  },
+  {
+    "name": "academia_review_decide",
+    "required": [
+      "review_id",
+      "decision"
+    ]
+  },
+  {
+    "name": "academia_review_execute",
+    "required": [
+      "review_id"
+    ]
+  },
+  {
+    "name": "academia_activity_changes",
+    "required": []
+  },
+  {
+    "name": "academia_library",
+    "required": []
+  },
+  {
+    "name": "academia_read_library_item",
+    "required": [
+      "id"
+    ]
+  },
+  {
+    "name": "academia_search_passages",
+    "required": [
+      "query"
+    ]
+  },
+  {
+    "name": "academia_study_overview",
+    "required": []
+  },
+  {
+    "name": "academia_study_exam_scope",
+    "required": []
+  },
+  {
+    "name": "academia_grade_history",
+    "required": []
+  },
+  {
+    "name": "academia_processing_detail",
+    "required": [
+      "record_id"
+    ]
+  },
+  {
+    "name": "academia_processing_status",
+    "required": []
+  },
+  {
+    "name": "academia_import_targets",
+    "required": []
+  },
+  {
+    "name": "academia_import_file",
+    "required": [
+      "source_path",
+      "target_id"
+    ]
+  },
+  {
+    "name": "academia_propose_import",
+    "required": [
+      "source_path",
+      "target_id"
+    ]
+  },
+  {
+    "name": "academia_propose_task",
+    "required": [
+      "action",
+      "evidence_source",
+      "evidence_path"
+    ]
+  },
+  {
+    "name": "academia_propose_calendar",
+    "required": [
+      "action"
+    ]
+  },
+  {
+    "name": "academia_propose_action",
+    "required": [
+      "action_type",
+      "details"
+    ]
+  }
+]

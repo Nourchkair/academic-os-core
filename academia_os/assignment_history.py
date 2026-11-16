@@ -16,7 +16,7 @@ HISTORY_RELATIVE_PATH = Path("03_ASSIGNMENTS") / HISTORY_FILENAME
 KINDS = frozenset({"assignment", "essay", "project", "exam", "presentation", "quiz", "other"})
 STATUSES = frozenset({"planned", "in_progress", "submitted", "graded", "completed"})
 TERMINAL_STATUSES = frozenset({"submitted", "graded", "completed"})
-_FIELDS = frozenset({"kind", "title", "status", "due_date", "submitted_on", "grade", "task_title", "artifact_paths", "notes"})
+_FIELDS = frozenset({"kind", "title", "status", "due_date", "submitted_on", "grade", "score", "percentage", "letter_grade", "task_title", "artifact_paths", "notes"})
 
 
 def _text(value: Any, label: str, *, required: bool = False, limit: int = 200) -> str | None:
@@ -100,6 +100,12 @@ def validate_record_fields(course_root: Path, values: dict[str, Any], *, partial
         result["submitted_on"] = _date(values["submitted_on"], "submitted_on")
     if "grade" in values:
         result["grade"] = _text(values["grade"], "grade", limit=50)
+    if "score" in values:
+        result["score"] = _text(values["score"], "score", limit=50)
+    if "percentage" in values:
+        result["percentage"] = _text(values["percentage"], "percentage", limit=20)
+    if "letter_grade" in values:
+        result["letter_grade"] = _text(values["letter_grade"], "letter_grade", limit=20)
     if "task_title" in values:
         result["task_title"] = _text(values["task_title"], "task_title", limit=200)
     if "artifact_paths" in values:
@@ -176,7 +182,7 @@ def add_assignment_history(workspace_root: Path, semester: str, course_id: str, 
         records.append(record)
         return {**state, "semester": semester, "records": records}
 
-    JsonStateStore(path).update(default, append)
+    JsonStateStore(path).update_strict(default, append)
     return record
 
 
@@ -218,7 +224,7 @@ def update_assignment_history(workspace_root: Path, semester: str, course_id: st
             raise KeyError(f"assignment history record not found: {record_id}")
         return {**state, "semester": semester, "records": records}
 
-    JsonStateStore(path).update(default, transform)
+    JsonStateStore(path).update_strict(default, transform)
     return result
 
 
@@ -236,8 +242,11 @@ def apply_history_to_tasks(tasks: list[dict[str, Any]], records: list[dict[str, 
     closed_titles.discard("")
     result = []
     target_course = _match_text(course_name)
-    for task in tasks:
-        item = dict(task)
+    for task_item in tasks:
+        if task_item.get("user_task"):
+            result.append(dict(task_item))
+            continue
+        item = dict(task_item)
         same_course = not target_course or _match_text(item.get("course")) == target_course
         if same_course and _match_text(item.get("title")) in closed_titles:
             matching = next(record for record in records if task_is_closed(record) and _match_text(record.get("task_title") or record.get("title")) == _match_text(item.get("title")))

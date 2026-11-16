@@ -462,20 +462,31 @@ def test_static_files_have_spa_fallback_and_traversal_protection(tmp_path: Path)
     dist.mkdir()
     (dist / "index.html").write_text("<html>dashboard</html>", encoding="utf-8")
     (dist / "asset.txt").write_text("safe asset", encoding="utf-8")
+    (dist / "assets").mkdir()
+    (dist / "assets" / "index-abc123.css").write_text("body{}", encoding="utf-8")
     outside = tmp_path / "outside.txt"
     outside.write_text("do not serve", encoding="utf-8")
     (dist / "outside-link.txt").symlink_to(outside)
 
     with running_server(tmp_path, dist_dir=dist) as server:
         asset = request(server, "GET", "/asset.txt")
+        css = request(server, "GET", "/assets/index-abc123.css")
+        missing_asset = request(server, "GET", "/assets/index-old.css")
         spa = request(server, "GET", "/courses/123")
         traversal = request(server, "GET", "/%2e%2e/outside.txt")
         symlink = request(server, "GET", "/outside-link.txt")
 
     assert asset[0] == 200
     assert asset[2] == b"safe asset"
+    assert asset[1]["cache-control"] == "no-cache"
+    assert css[0] == 200
+    assert css[1]["content-type"].startswith("text/css")
+    assert "immutable" in css[1]["cache-control"]
+    assert missing_asset[0] == 404
+    assert missing_asset[1]["content-type"].startswith("text/plain")
     assert spa[0] == 200
     assert spa[2] == b"<html>dashboard</html>"
+    assert spa[1]["cache-control"] == "no-cache"
     assert traversal[0] in {403, 404}
     assert b"do not serve" not in traversal[2]
     assert symlink[0] in {403, 404}

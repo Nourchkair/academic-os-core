@@ -7,19 +7,20 @@ import { DashboardChat } from './DashboardChat'
 import { HomeView } from './HomeView'
 import { getTaskUrgency, urgencyLabel } from './lib/task-urgency'
 import { Onboarding } from './Onboarding'
+import { ReviewView } from './ReviewView'
 import { SettingsView } from './SettingsView'
 import { api, BridgeUnavailableError, isTauriEnvironment } from './lib/api'
 import type { StudyChatRequest } from './lib/chat-history'
-import type { ActivityEvent, Course, CourseworkHistoryRecord, CourseworkKind, LibraryItem, ProcessingRecord, StatusPayload, Task } from './types'
+import type { ActivityEvent, Course, CourseworkHistoryRecord, CourseworkKind, LibraryItem, ProcessingRecord, ReviewItem, StatusPayload, Task, TaskInput, TaskProposalAmendment } from './types'
 
 const nav = [
   { id: 'home', label: 'Home', icon: '⌂' },
-  { id: 'chat', label: 'Study chat', icon: 'study-chat' },
+  { id: 'review', label: 'Review', icon: '⚖' },
   { id: 'tasks', label: 'Tasks', icon: '✓' },
   { id: 'activity', label: 'Activity', icon: '◷' },
 ] as const
 
-type View = 'home' | 'courses' | 'chat' | 'tasks' | 'activity' | 'settings'
+type View = 'home' | 'courses' | 'review' | 'chat' | 'tasks' | 'activity' | 'settings'
 type StudyResumeRequest = { courseId: string; sessionId: string }
 
 type ActionMode = 'import' | 'migration'
@@ -148,8 +149,15 @@ function App() {
   const [status, setStatus] = useState<StatusPayload | null>(cachedStartup)
   const [courses, setCourses] = useState<Course[]>(cachedStartup?.workspace.courses || [])
   const [tasks, setTasks] = useState<Task[]>(cachedStartup?.workspace.tasks || [])
+  const [taskStateError, setTaskStateError] = useState<string | null>(cachedStartup?.workspace.task_state_error ?? null)
   const [activity, setActivity] = useState<ActivityEvent[]>([])
+  const [reviews, setReviews] = useState<ReviewItem[]>([])
+  const [reviewBusy, setReviewBusy] = useState(false)
+  const [reviewError, setReviewError] = useState('')
+  const [reviewFocusId, setReviewFocusId] = useState<string | null>(null)
+  const [reviewRevision, setReviewRevision] = useState(0)
   const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([])
+  const [libraryLoaded, setLibraryLoaded] = useState(false)
   const [inbox, setInbox] = useState<ProcessingRecord[]>([])
   const [selectedSemester, setSelectedSemester] = useState(cachedStartup?.workspace.semester || '')
   const [studyResumeRequest, setStudyResumeRequest] = useState<StudyResumeRequest | null>(null)
@@ -161,10 +169,13 @@ function App() {
   const [booting, setBooting] = useState(!cachedStartup)
   const [migrationBusy, setMigrationBusy] = useState(false)
   const [actionMode, setActionMode] = useState<ActionMode | null>(null)
+  const [droppedFiles, setDroppedFiles] = useState<File[]>([])
+  const [dropSequence, setDropSequence] = useState(0)
   const [actionCourseId, setActionCourseId] = useState<string | undefined>()
   const [courseOpenRequest, setCourseOpenRequest] = useState<{ id: string; courseId: string } | null>(null)
   const chatNavRef = useRef<HTMLDetailsElement>(null)
   const refreshSequence = useRef(0)
+  const reviewRefreshSequence = useRef(0)
   const loadingBackgroundData = useRef(false)
   const chatMenuItems: { view: View; label: string; icon: string }[] = [
     { view: 'home', label: 'Home', icon: '⌂' },
@@ -183,6 +194,16 @@ function App() {
       setError(reason instanceof BridgeUnavailableError ? reason.message : `Academia could not start its local service: ${reason instanceof Error ? reason.message : String(reason)}`)
     }
   }
+
+  const refreshReviews = useCallback(async () => {
+    const sequence = ++reviewRefreshSequence.current
+    try {
+      const reviewData = await api.reviewPendingExecution()
+      if (sequence === reviewRefreshSequence.current) setReviews(reviewData)
+    } catch (reason) {
+      if (sequence === reviewRefreshSequence.current) setReviewError(`Review decisions could not be loaded: ${String(reason)}`)
+    }
+  }, [])
 
   const refresh = async (allowDuringMigration = false, fastFirstPaint = false) => {
     if (migrationBusy && !allowDuringMigration) return
@@ -228,12 +249,14 @@ function App() {
       if (targetSemester === next.workspace.semester) {
         setCourses(next.workspace.courses)
         setTasks(next.workspace.tasks)
+        setTaskStateError(next.workspace.task_state_error ?? null)
       } else {
         const courseData = await api.courses(targetSemester)
         const taskData = await api.tasks(targetSemester)
         if (sequence !== refreshSequence.current) return
         setCourses(courseData)
-        setTasks(taskData)
+        setTasks(taskData.tasks)
+        setTaskStateError(taskData.task_state_error)
       }
       setOnboarding(false)
       setBooting(false)
@@ -253,8 +276,14 @@ function App() {
               if (targetSemester === fresh.workspace.semester) {
                 setCourses(fresh.workspace.courses)
                 setTasks(fresh.workspace.tasks)
+                setTaskStateError(fresh.workspace.task_state_error ?? null)
               }
             }
+          }
+          try {
+            await refreshReviews()
+          } catch (reason) {
+            if (sequence === refreshSequence.current) setReviewError(`Review decisions could not be loaded: ${String(reason)}`)
           }
           try {
             const activityData = await api.activity()
@@ -267,6 +296,7 @@ function App() {
             const libraryData = await api.library({ semester: targetSemester })
             if (sequence !== refreshSequence.current) return
             setLibraryItems(libraryData)
+            setLibraryLoaded(true)
           } catch (reason) {
             if (sequence === refreshSequence.current) setError(`Course materials could not be loaded: ${String(reason)}`)
           }
@@ -283,8 +313,11 @@ function App() {
     } catch (reason) {
       if (sequence !== refreshSequence.current) return
       if (allowDuringMigration) throw reason
+      // A failed read is not proof that setup is missing. Only the explicit
+      // workspace checks above may start onboarding; anything else is a
+      // transient local error the student can retry.
       if (reason instanceof BridgeUnavailableError) setError(reason.message)
-      else await beginOnboarding()
+      else setError(`Academia could not read its local workspace state. Retry in a moment. ${reason instanceof Error ? reason.message : String(reason)}`)
     } finally {
       if (sequence === refreshSequence.current) {
         setBooting(false)
@@ -299,6 +332,7 @@ function App() {
     try {
       setSemesterLoading(true)
       setError(null)
+      setLibraryLoaded(false)
       const courseData = await api.courses(semester)
       if (sequence !== refreshSequence.current) return
       const taskData = await api.tasks(semester)
@@ -307,8 +341,10 @@ function App() {
       if (sequence !== refreshSequence.current) return
       setSelectedSemester(semester)
       setCourses(courseData)
-      setTasks(taskData)
+      setTasks(taskData.tasks)
+      setTaskStateError(taskData.task_state_error)
       setLibraryItems(libraryData)
+      setLibraryLoaded(true)
     } catch (reason) {
       if (sequence === refreshSequence.current) setError(`The ${semester} workspace could not be loaded: ${String(reason)}`)
     } finally {
@@ -319,8 +355,68 @@ function App() {
     }
   }
 
+  const decideReview = async (itemId: string, decision: string) => {
+    setReviewBusy(true)
+    setReviewError('')
+    try {
+      const updated = await api.reviewDecision(itemId, decision)
+      reviewRefreshSequence.current += 1
+      setReviews((current) => updated.status === 'approved' && updated.action_proposal_id
+        ? current.map((item) => item.id === itemId ? updated : item)
+        : current.filter((item) => item.id !== itemId))
+      setReviewRevision((current) => current + 1)
+      try { setActivity(await api.activity()) } catch { /* Activity is a secondary audit refresh. */ }
+    } catch (reason) {
+      setReviewError(`The decision could not be recorded: ${String(reason)}`)
+    } finally {
+      setReviewBusy(false)
+    }
+  }
+
+  const executeReview = async (itemId: string) => {
+    setReviewBusy(true)
+    setReviewError('')
+    try {
+      await api.reviewExecute(itemId)
+      await refreshReviews()
+      setReviewRevision((current) => current + 1)
+      try { setActivity(await api.activity()) } catch { /* Activity is a secondary audit refresh. */ }
+    } catch (reason) {
+      setReviewError(`The approved action could not be executed: ${String(reason)}`)
+    } finally {
+      setReviewBusy(false)
+    }
+  }
+
+  const amendReview = async (itemId: string, fields: TaskProposalAmendment) => {
+    setReviewBusy(true)
+    setReviewError('')
+    try {
+      const updated = await api.amendReview(itemId, fields)
+      setReviews((current) => current.map((item) => item.id === itemId ? updated : item))
+      setReviewRevision((current) => current + 1)
+      try { setActivity(await api.activity()) } catch { /* Activity is a secondary audit refresh. */ }
+    } catch (reason) {
+      setReviewError(`The proposal could not be updated: ${String(reason)}`)
+      throw reason
+    } finally {
+      setReviewBusy(false)
+    }
+  }
+
+  const openReviewFromChat = async (reviewId: string) => {
+    setReviewFocusId(reviewId)
+    setView('review')
+    setReviewError('')
+    await refreshReviews()
+  }
+
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => { void refresh(false, true) }, [])
+
+  useEffect(() => {
+    if (view === 'review') void refreshReviews()
+  }, [view, refreshReviews])
 
   useEffect(() => {
     let mounted = true
@@ -381,12 +477,29 @@ function App() {
   if (onboarding) return <Onboarding candidates={setupCandidates} onComplete={refresh} onMigration={async () => { await refresh(); setOnboarding(false); setView('home'); setActionMode('migration') }} />
   if (error && !status) return <ConnectionNotice message={error} onRetry={() => void refresh()} />
 
-  const navigate = (next: View) => setView(next)
+  const navigate = (next: View) => {
+    setView(next)
+    if (next !== 'review') setReviewFocusId(null)
+  }
   const semesters = status ? Array.from(new Set([status.workspace.semester, ...status.workspace.available_semesters])) : []
   const openActionPanel = (mode: ActionMode, courseId?: string) => { setActionMode(mode); setActionCourseId(courseId); setError(null) }
-  const closeActionPanel = () => { if (!migrationBusy) setActionMode(null) }
+  const closeActionPanel = () => { if (!migrationBusy) { setActionMode(null); setDroppedFiles([]) } }
 
-  return <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'chat' ? 'chat-mode' : ''}`}>
+  const handleGlobalDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (view === 'chat') return
+    const files = Array.from(event.dataTransfer?.files ?? [])
+    if (!files.length) return
+    event.preventDefault()
+    setDroppedFiles(files)
+    setDropSequence((value) => value + 1)
+    setActionMode('import')
+  }
+
+  return <div
+    className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'chat' ? 'chat-mode' : ''}`}
+    onDragOver={(event) => { if (event.dataTransfer?.types.includes('Files')) event.preventDefault() }}
+    onDrop={handleGlobalDrop}
+  >
     {view !== 'chat' && <aside className="sidebar" aria-label="Application sidebar">
       <div className="sidebar-heading">
         <button className="brand" onClick={() => {
@@ -405,7 +518,7 @@ function App() {
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M9 4.5v15M15 9l-3 3 3 3" /></svg>
         </button>}
       </div>
-      <nav aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={`nav-item ${view === item.id || (item.id === 'home' && view === 'courses') ? 'active' : ''}`} onClick={() => navigate(item.id)} disabled={migrationBusy} data-tooltip={sidebarCollapsed ? item.label : undefined} data-tooltip-side={sidebarCollapsed ? 'right' : undefined}><span className="nav-icon">{item.id === 'chat' ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.2a8 8 0 0 1-8 8H5l1.4-3.1A8 8 0 1 1 20 11.2Z" /><path d="M8.5 9.5h7m-7 3h5" /></svg> : item.icon}</span><span className="nav-label">{item.label}</span></button>)}</nav>
+      <nav aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={`nav-item ${view === item.id || (item.id === 'home' && view === 'courses') ? 'active' : ''}`} onClick={() => navigate(item.id)} disabled={migrationBusy} data-tooltip={sidebarCollapsed ? item.label : undefined} data-tooltip-side={sidebarCollapsed ? 'right' : undefined}><span className="nav-icon">{item.icon}</span><span className="nav-label">{item.label}</span></button>)}</nav>
       <div className="sidebar-bottom">
         <button className={`profile-button ${view === 'settings' ? 'active' : ''}`} onClick={() => navigate('settings')} disabled={migrationBusy} aria-label="Open profile and settings" data-tooltip="Settings" data-tooltip-side="right">
           <span className="profile-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.2" /><path d="M5.5 19c.6-3.1 2.9-4.8 6.5-4.8s5.9 1.7 6.5 4.8" /></svg></span>
@@ -415,16 +528,21 @@ function App() {
       </div>
     </aside>}
     <main className="main-content">
-      {view === 'chat' && <header className="topbar topbar-study-chat"><details className="chat-nav-dropdown" ref={chatNavRef}><summary aria-label="Open navigation menu"><span aria-hidden="true">☰</span><strong>Menu</strong><span className="chat-menu-caret" aria-hidden="true">⌄</span></summary><div className="chat-nav-menu" role="menu" aria-label="Main navigation">{chatMenuItems.map((item) => <button key={item.view} role="menuitem" data-tooltip={item.label} data-tooltip-side="right" onClick={() => setView(item.view)}><span aria-hidden="true">{item.icon}</span>{item.label}</button>)}</div></details></header>}
+      
+      {view !== 'chat' && <div className="top-actions-pills">
+        <button className="top-pill" type="button" onClick={() => { setDroppedFiles([]); setActionMode('import') }} disabled={migrationBusy} aria-label="Import material"><span aria-hidden="true">＋</span><span>Import</span></button>
+        <button className="top-pill top-pill-agent" type="button" onClick={() => navigate('chat')} disabled={migrationBusy} aria-label="Open Agent"><span aria-hidden="true">✦</span><span>Open Agent</span></button>
+      </div>}
       {error && <p className="dashboard-inline-error" role="alert">{error}</p>}
       {view === 'home' && <HomeView status={status} courses={courses} tasks={tasks} activity={activity} inbox={inbox} semester={selectedSemester || status?.workspace.semester || ''} semesters={semesters} loading={semesterLoading} onSemesterChange={changeSemester} onOpenCourse={openCourse} onOpenIntake={() => openActionPanel('import')} onNavigate={navigate} />}
+      {view === 'review' && <ReviewView items={reviews} courses={courses} activity={activity} busy={reviewBusy} error={reviewError} focusId={reviewFocusId} onFocusConsumed={() => setReviewFocusId(null)} onDecision={decideReview} onExecute={executeReview} onAmend={amendReview} />}
       {view === 'courses' && <CoursesView semesters={semesters} semester={selectedSemester || status?.workspace.semester || ''} courses={courses} items={libraryItems} inbox={inbox} loading={semesterLoading} onSemesterChange={changeSemester} onOpenActions={openActionPanel} onHistoryChanged={() => refresh()} studyResumeRequest={studyResumeRequest} onStudyResumeConsumed={clearStudyResumeRequest} onOpenStudyConversation={openStudyConversation} onStartStudyChat={startStudyChat} courseOpenRequest={courseOpenRequest} onCourseOpenConsumed={clearCourseOpenRequest} onBackHome={() => setView('home')} />}
-      <div className={`chat-route-shell ${view === 'chat' ? 'active' : ''}`} aria-hidden={view !== 'chat'}><DashboardChat courses={courses} items={libraryItems} semester={selectedSemester || status?.workspace.semester || ''} onResumeStudySession={resumeStudySession} studyChatRequest={studyChatRequest} onStudyChatRequestConsumed={clearStudyChatRequest} /></div>
-      {view === 'tasks' && <Tasks tasks={tasks} courses={courses} semester={selectedSemester || status?.workspace.semester || ''} timezone={status?.workspace.timezone} onNavigate={navigate} onChanged={() => refresh()} />}
+      <div className={`chat-route-shell ${view === 'chat' ? 'active' : ''}`} aria-hidden={view !== 'chat'}><DashboardChat courses={courses} items={libraryItems} libraryLoaded={libraryLoaded} active={view === 'chat'} onReload={() => void refresh()} semester={selectedSemester || status?.workspace.semester || ''} activity={activity}  onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} onProposalCreated={() => void refreshReviews()} reviewRevision={reviewRevision} onResumeStudySession={resumeStudySession} studyChatRequest={studyChatRequest} onStudyChatRequestConsumed={clearStudyChatRequest} onGoHome={() => setView('home')} /></div>
+      {view === 'tasks' && <Tasks tasks={tasks} courses={courses} semester={selectedSemester || status?.workspace.semester || ''} timezone={status?.workspace.timezone} stateError={taskStateError} onNavigate={navigate} onChanged={() => refresh()} />}
       {view === 'activity' && <ActivityView activity={activity} processing={inbox} onNavigate={navigate} />}
-      {view === 'settings' && status && <SettingsView status={status} onSaved={() => refresh()} />}
+      {view === 'settings' && status && <SettingsView status={status} onSaved={() => refresh()} onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} />}
     </main>
-    {actionMode && status && <ActionPanel key={`${actionMode}:${actionCourseId || 'general'}`} mode={actionMode} status={status} courses={courses} semester={selectedSemester || status.workspace.semester} initialCourseId={actionCourseId} onModeChange={setActionMode} onClose={closeActionPanel} onImported={async () => { await refresh(true) }} onMigrated={async () => { await refresh(true) }} onBusyChange={setMigrationBusy} />}
+    {actionMode && status && <ActionPanel key={`${actionMode}:${actionCourseId || 'general'}:${dropSequence}`} mode={actionMode} status={status} courses={courses} semester={selectedSemester || status.workspace.semester} initialCourseId={actionCourseId} initialFiles={droppedFiles} onModeChange={setActionMode} onClose={closeActionPanel} onImported={async () => { await refresh(true) }} onMigrated={async () => { await refresh(true) }} onBusyChange={setMigrationBusy} />}
     <AppTooltipLayer />
   </div>
 }
@@ -445,7 +563,7 @@ function sortTasks(tasks: Task[]) {
 }
 
 function formatDue(task: Task) {
-  if (!task.due_date) return 'Date to confirm'
+  if (!task.due_date) return task.user_task ? 'No due date' : 'Date to confirm'
   // A syllabus date is a local calendar date, never midnight UTC.
   const date = new Date(`${task.due_date.slice(0, 10)}T12:00:00Z`)
   const label = new Intl.DateTimeFormat(undefined, { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).format(date)
@@ -454,22 +572,104 @@ function formatDue(task: Task) {
   return `Due ${label}${time ? ` at ${hour % 12 || 12}:${time[2]} ${hour >= 12 ? 'p.m.' : 'a.m.'}` : ''}`
 }
 
-function Tasks({ tasks, courses, semester, timezone = 'America/Toronto', onNavigate, onChanged }: { tasks: Task[]; courses: Course[]; semester: string; timezone?: string; onNavigate: (view: View) => void; onChanged: () => Promise<void> }) {
+export function Tasks({ tasks, courses, semester, timezone = 'America/Toronto', stateError, onNavigate, onChanged }: { tasks: Task[]; courses: Course[]; semester: string; timezone?: string; stateError?: string | null; onNavigate: (view: View) => void; onChanged: () => Promise<void> }) {
   const [filter, setFilter] = useState<'all' | 'week' | 'open' | 'completed'>('all')
+  const [creating, setCreating] = useState(false)
   const today = localDate(timezone)
   const end = new Date(`${today}T12:00:00Z`)
   end.setUTCDate(end.getUTCDate() + 7)
   const weekEnd = end.toISOString().slice(0, 10)
   const visible = sortTasks(tasks.filter((task) => filter === 'all' || (filter === 'week' ? !task.completed && Boolean(task.due_date && task.due_date >= today && task.due_date <= weekEnd) : filter === 'completed' ? task.completed : !task.completed)))
+  const create = async (input: TaskInput) => {
+    await api.createTask(semester, input)
+    setCreating(false)
+    await onChanged()
+  }
+  const editorOpen = creating && !stateError
   return <div className="page-stack">
-    <PageIntro eyebrow="Plan" title="Tasks & deadlines" subtitle={`Your course assessments and deadlines. Times use ${timezone}. Mark a task done here and add or update its grade whenever you have it.`} />
+    <PageIntro eyebrow="Plan" title="Tasks & deadlines" subtitle={`Your course assessments, deadlines, and personal tasks. Times use ${timezone}. Personal tasks are stored in this semester's SEMESTER_TASKS.md; course evidence remains read-only.`} />
+    <section className="task-toolbar">
+      <div><p className="eyebrow">Personal task queue</p><p>Add work you want to track yourself. Marking one done changes only that task; it never submits coursework or changes a syllabus deadline.</p></div>
+      <button type="button" className="primary-button" onClick={() => setCreating((value) => !value)} disabled={!semester || Boolean(stateError)}>{editorOpen ? 'Close editor' : 'Add task'}</button>
+    </section>
+    {stateError && <p className="setup-error" role="alert">SEMESTER_TASKS.md could not be read, so personal tasks are hidden and cannot be changed: {stateError}</p>}
+    {editorOpen && semester && <TaskEditor courses={courses} submitLabel="Add task" onSave={create} onCancel={() => setCreating(false)} />}
     <div className="filter-row">{(['all', 'week', 'open', 'completed'] as const).map((value) => <button key={value} className={`filter-pill ${filter === value ? 'active' : ''}`} onClick={() => setFilter(value)}>{value === 'all' ? 'All tasks' : value === 'week' ? 'Next 7 days' : value === 'open' ? 'Open' : 'Completed'}</button>)}</div>
     <div className="task-list">{visible.map((task) => { const urgency = getTaskUrgency(task, timezone); return <article className={`task-row ${task.completed ? 'done' : ''}`} data-tone={urgency} key={task.id}>
       <span className="task-check">{task.completed ? '✓' : ''}</span>
-      <div className="task-body"><h3>{task.title}{task.weight ? ` · ${task.weight} of grade` : ''}</h3><p>{task.course || 'Semester'} · {task.completed ? 'Completed' : task.due_date && task.due_date < today ? 'Past due date · completion unrecorded' : task.due_date === today ? 'Due today' : task.status || 'Completion unrecorded'}</p><details><summary>Source · {task.source.split('/').pop()}{task.source_location ? ` · ${task.source_location}` : ''}</summary><p>{task.confidence === 'likely' ? 'From local syllabus; later course updates have not been checked.' : task.confidence} · {task.source}</p></details></div>
+      <div className="task-body"><h3>{task.title}{task.weight ? ` · ${task.weight} of grade` : ''}</h3><p>{task.user_task ? `Your task${task.course ? ` · ${task.course}` : ''} · ${task.completed ? 'Completed' : task.due_date && task.due_date < today ? 'Past due date' : task.due_date === today ? 'Due today' : 'Open'}` : `${task.course || 'Semester'} · ${task.completed ? 'Completed' : task.due_date && task.due_date < today ? 'Past due date · completion unrecorded' : task.due_date === today ? 'Due today' : task.status || 'Completion unrecorded'}`}</p><details><summary>Source · {task.source.split('/').pop()}{task.source_location ? ` · ${task.source_location}` : ''}</summary><p>{task.confidence === 'likely' ? 'From local syllabus; later course updates have not been checked.' : task.confidence} · {task.source}</p></details></div>
       <span className="task-source"><span className={`status-pill tone-${urgency}`}>{urgencyLabel(urgency)}</span>{formatDue(task)}</span>
-      <TaskCompletionControl task={task} courses={courses} semester={semester} onChanged={onChanged} />
-    </article> })}{!visible.length && <EmptyCard title={filter === 'completed' ? 'No completed tasks recorded' : filter === 'week' ? 'No recorded deadlines in the next 7 days' : 'No tasks recorded'} body="Course deadlines appear after the syllabus has been indexed. An empty list does not confirm that no work is due." action="Go to Home" onClick={() => onNavigate('home')} />}</div>
+      {task.user_task
+        ? <UserTaskControl task={task} courses={courses} semester={semester} onChanged={onChanged} />
+        : <TaskCompletionControl task={task} courses={courses} semester={semester} onChanged={onChanged} />}
+    </article> })}{!visible.length && <EmptyCard title={filter === 'completed' ? 'No completed tasks recorded' : filter === 'week' ? 'No recorded deadlines in the next 7 days' : 'No tasks recorded'} body="Personal tasks appear here when you add them. Course deadlines appear after the syllabus has been indexed; an empty list does not confirm that no work is due." action="Go to Home" onClick={() => onNavigate('home')} />}</div>
+  </div>
+}
+
+function TaskEditor({ initial, courses, submitLabel, onSave, onCancel }: { initial?: Task; courses: Course[]; submitLabel: string; onSave: (input: TaskInput) => Promise<void>; onCancel: () => void }) {
+  const [title, setTitle] = useState(initial?.title || '')
+  const [courseId, setCourseId] = useState(initial?.course || '')
+  const [dueDate, setDueDate] = useState(initial?.due_date?.slice(0, 10) || '')
+  const [dueTime, setDueTime] = useState(initial?.due_time || '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const save = async () => {
+    if (!title.trim() || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await onSave({ title: title.trim(), course_id: courseId || null, due_date: dueDate || null, due_time: dueDate && dueTime ? dueTime : null })
+    } catch (reason) {
+      setError(`Could not save this task. ${String(reason)}`)
+      setBusy(false)
+    }
+  }
+  return <div className="coursework-editor task-editor">
+    <div className="coursework-editor-grid">
+      <label className="history-title-field"><span>Task</span><input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={300} placeholder="e.g. Draft the research essay outline" autoFocus /></label>
+      <label><span>Course <small>Optional</small></span><select value={courseId} onChange={(event) => setCourseId(event.target.value)}><option value="">Semester-wide</option>{courses.map((course) => <option value={course.id} key={course.id}>{course.code} · {course.name}</option>)}</select></label>
+      <label><span>Due date <small>Optional</small></span><input type="date" value={dueDate} onChange={(event) => { setDueDate(event.target.value); if (!event.target.value) setDueTime('') }} /></label>
+      <label><span>Due time <small>Optional</small></span><input type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)} disabled={!dueDate} /></label>
+    </div>
+    {error && <p className="task-grade-error" role="alert">{error}</p>}
+    <div className="coursework-editor-actions">
+      <button type="button" className="secondary-button" onClick={onCancel} disabled={busy}>Cancel</button>
+      <button type="button" className="primary-button" onClick={() => void save()} disabled={busy || !title.trim() || !(dueDate || !dueTime)}>{busy ? 'Saving…' : submitLabel}</button>
+    </div>
+  </div>
+}
+
+function UserTaskControl({ task, courses, semester, onChanged }: { task: Task; courses: Course[]; semester: string; onChanged: () => Promise<void> }) {
+  const [editing, setEditing] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const taskId = task.task_id || task.id
+  const toggle = async () => {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      if (task.completed) await api.reopenTask(semester, taskId)
+      else await api.completeTask(semester, taskId)
+      await onChanged()
+    } catch (reason) {
+      setError(`Could not update this task. ${String(reason)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const save = async (input: TaskInput) => {
+    await api.updateTask(semester, taskId, input)
+    setEditing(false)
+    await onChanged()
+  }
+  return <div className="task-completion-control">
+    <div className="task-user-actions">
+      <button type="button" className="task-done-trigger" onClick={() => void toggle()} disabled={busy}>{busy ? 'Saving…' : task.completed ? 'Reopen' : 'Mark done'}</button>
+      <button type="button" className="task-grade-trigger" onClick={() => setEditing((value) => !value)} disabled={busy}>{editing ? 'Close' : 'Edit'}</button>
+    </div>
+    {error && <p className="task-grade-error task-user-error" role="alert">{error}</p>}
+    {editing && <div className="task-user-editor"><TaskEditor initial={task} courses={courses} submitLabel="Save task" onSave={save} onCancel={() => setEditing(false)} /></div>}
   </div>
 }
 
@@ -545,7 +745,7 @@ function TaskCompletionControl({ task, courses, semester, onChanged }: { task: T
       ? <button type="button" className="task-grade-trigger" onClick={() => void openEditor()} data-tooltip="Add or edit the grade for this completed task">{savedGrade ? `Grade · ${savedGrade}` : 'Add grade'}</button>
       : <button type="button" className="task-done-trigger" onClick={() => void openEditor()} data-tooltip="Mark this task done and optionally record a grade">Mark done</button>}
     {open && <div className="task-grade-editor">
-      <label><span>{loadingHistory ? 'Loading course record…' : task.completed ? 'Grade' : 'Grade (optional)'}</span><input value={grade} onChange={(event) => setGrade(event.target.value)} maxLength={50} placeholder="e.g. 71/100" disabled={busy || loadingHistory || !taskCourse} /></label>
+      <label><span>{loadingHistory ? 'Loading course record…' : task.completed ? 'Grade' : 'Grade (optional)'}</span><input value={grade} onChange={(event) => setGrade(event.target.value)} maxLength={50} placeholder="e.g. 54/60 · 90% · A+" disabled={busy || loadingHistory || !taskCourse} /></label>
       {error && <p className="task-grade-error" role="alert">{error}</p>}
       {!taskCourse && <p className="task-grade-error">This task is not linked to a course, so it cannot be saved to course history.</p>}
       <div><button type="button" className="task-save-done" onClick={() => void save(true)} disabled={busy || loadingHistory || historyLoadFailed || !taskCourse || !grade.trim()}>{loadingHistory ? 'Loading…' : busy ? 'Saving…' : task.completed ? 'Save grade' : 'Mark done'}</button>{!task.completed && <button type="button" className="task-skip-grade" onClick={() => void save(false)} disabled={busy || loadingHistory || historyLoadFailed || !taskCourse}>{loadingHistory ? 'Loading…' : busy ? 'Saving…' : 'Skip grade'}</button>}<button type="button" className="task-close-editor" onClick={() => setOpen(false)} disabled={busy || loadingHistory}>Cancel</button></div>

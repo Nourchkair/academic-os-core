@@ -75,6 +75,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ steps.beta-sign.outputs.identity }}
+          ACADEMIA_GOOGLE_OAUTH_CLIENT_JSON_B64: ${{ secrets.ACADEMIA_GOOGLE_OAUTH_CLIENT_JSON_B64 }}
+          ACADEMIA_REQUIRE_GOOGLE_CLIENT: "1"
         with:
           projectPath: frontend
           tagName: ${{ inputs.release_tag || github.ref_name }}

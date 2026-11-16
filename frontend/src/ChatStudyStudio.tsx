@@ -6,7 +6,7 @@ import { FlashcardCard } from './FlashcardCard'
 import './chat-study-studio.css'
 
 export type ModeId = 'explain' | 'quiz' | 'flashcards' | 'guide' | 'map' | 'compare'
-export type ChatStudyRequest = { id: string; courseId: string; mode: ModeId; topic: string; count: number; difficulty: string; focus: string; provider?: 'codex'; model?: string; examId?: string }
+export type ChatStudyRequest = { id: string; courseId: string; mode: ModeId; topic: string; count: number; difficulty: string; focus: string; provider?: string; model?: string; examId?: string }
 type StudyMode = { id: ModeId; icon: string; title: string; detail: string; kind: string; defaultCount: number; topicLabel: string; placeholder: string; focusLabel: string }
 type Citation = { id: string; source_id: string; source_name: string; locator: string; text: string }
 type StudyItem = { id: string; kind: string; topic: string; prompt: string; options: string[]; answer?: string; explanation?: string; citations?: Citation[] }
@@ -16,7 +16,7 @@ type Session = { id: string; set_id: string; title: string; mode: string; status
 type Overview = { preferences: { instructions: string; preferred_kind: string; question_count: number }; sets: StudySet[]; exams?: { id: string; title: string; date?: string | null; topics: string[]; source_ids: string[] }[]; topics?: { topic: string; attempt_count: number; correct_count: number; needs_review: boolean }[] }
 type Coverage = { deep: boolean; selected_sources: number; scanned_sources: number; complete: boolean; pdf_pages_scanned: number; matching_chunks: number; returned_chunks: number }
 type GenerationAudit = { courseId: string; coverage?: Coverage; warnings: string[] }
-type Props = { courses: Course[]; course?: Course; items: LibraryItem[]; selectedSourceIds: string[]; semester: string; provider: 'codex'; model?: string; onCollapse: () => void; isVisible: boolean; chatRequest: ChatStudyRequest | null; onChatRequestComplete: (id: string, title?: string, error?: string) => void }
+type Props = { courses: Course[]; course?: Course; items: LibraryItem[]; selectedSourceIds: string[]; semester: string; provider: string; model?: string; onCollapse: () => void; isVisible: boolean; chatRequest: ChatStudyRequest | null; onChatRequestComplete: (id: string, title?: string, error?: string) => void }
 
 const modes: StudyMode[] = [
   { id: 'explain', icon: '◎', title: 'Explain', detail: 'Unpack an idea step by step.', kind: 'explanation', defaultCount: 4, topicLabel: 'What should we make sense of?', placeholder: 'e.g. Why does Plato divide the soul into three parts?', focusLabel: 'Explanation depth' },
@@ -192,6 +192,11 @@ export function ChatStudyStudio({ courses, course, items, selectedSourceIds, sem
       preferenceInstructions ? `Student’s saved study preferences: ${preferenceInstructions}` : '',
     ].filter(Boolean).join(' ').slice(0, 2000)
     const selectedProvider = chatRequest?.provider ?? provider
+    if (selectedProvider !== 'codex') {
+      const message = 'Study Studio currently uses Codex. Switch to the ChatGPT/Codex subscription to generate study material.'
+      setError(message)
+      throw new Error(message)
+    }
     const selectedModel = chatRequest?.model ?? model
     const args = [
       '--deep', '--limit', '128', ...studySourceIds.flatMap((id) => ['--source', id]), ...(focusTopic ? ['--query', focusTopic] : []),

@@ -8,15 +8,18 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import urllib.parse
 import webbrowser
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Sequence
+from uuid import uuid4
 
-from .config import SEMESTER_PATTERN, load_config
+from .config import SEMESTER_PATTERN, load_config, runtime_directory
 from .file_preview import FilePreviewError, IMAGE_EXTENSIONS, IMAGE_MIME_TYPES, MAX_IMAGE_PREVIEW_BYTES, TEXT_EXTENSIONS, preview_file, resolve_library_file
+from .transport_policy import SAFE_COMMANDS, validate_command
 from .workspace import build_workspace_snapshot
 
 DEFAULT_HOST = "127.0.0.1"
@@ -37,41 +40,9 @@ def default_profile_path() -> Path:
 
     return Path(os.environ.get("ACADEMIC_OS_CONFIG", str(Path.home() / ".academic-os" / "profile.json"))).expanduser().resolve()
 
-# Keep this in sync with the already-approved local Tauri command surface.  The
-# browser transport is intentionally narrower than a general CLI shell: the
-# command name is selected from this fixed set and arguments are passed without
-# shell interpretation.
-SAFE_COMMANDS = frozenset(
-    {
-        "status",
-        "courses",
-        "course",
-        "today",
-        "tasks",
-        "review",
-        "activity",
-        "workspace",
-        "semester",
-        "inbox",
-        "process",
-        "import",
-        "domain",
-        "history",
-        "study",
-        "library",
-        "file-preview",
-        "extract",
-        "migration",
-        "settings",
-        "capabilities",
-        "watch",
-        "verify",
-        "verify-source",
-        "agents",
-        "agent",
-        "workflow",
-    }
-)
+# The browser transport is intentionally narrower than a general CLI shell:
+# the command name is selected from the shared allowlist and arguments are
+# passed without shell interpretation.
 ALLOWED_ORIGINS = frozenset({"http://localhost:4173", "http://127.0.0.1:4173"})
 
 
@@ -216,6 +187,15 @@ class DashboardServer:
         self.dist_dir = (dist_dir or Path(__file__).resolve().parents[1] / "frontend" / "dist").expanduser()
         self.command_timeout = command_timeout
         self.runner = runner or self._default_runner
+        self.chat_runs: dict[str, Any] = {}
+        self._chat_runs_lock = threading.Lock()
+        from .assistant.account import CodexAccountManager
+        self.account_manager = CodexAccountManager()
+        self.mcp_manager: Any | None = None
+        self.google_connector: Any | None = None
+        self.notion_connector: Any | None = None
+        self.model_manager: Any | None = None
+        self.agent_sessions: Any | None = None
         server_class = _DashboardHTTPServerV6 if ":" in self.host else _DashboardHTTPServer
         self._httpd = server_class((self.host, port), _DashboardRequestHandler)
         self.allowed_origins = _allowed_origins(self.host, self.port)
@@ -243,10 +223,64 @@ class DashboardServer:
         timeout = max(self.command_timeout, 300.0) if command == "study" and "--deep" in args else self.command_timeout
         return run_cli_command(command, args, profile=self.profile, timeout=timeout)
 
+    def register_chat_run(self, run_id: str, cancel: Any) -> None:
+        with self._chat_runs_lock:
+            if len(self.chat_runs) >= 8:
+                raise ValueError("too many active chat runs; wait for one to finish or cancel it")
+            self.chat_runs[run_id] = cancel
+
+    def get_mcp_manager(self) -> Any:
+        if self.mcp_manager is None:
+            from .mcp_connections import MCPConnectionManager
+            config = load_config(self.profile)
+            self.mcp_manager = MCPConnectionManager(runtime_directory(config) / "mcp_connections.json")
+        return self.mcp_manager
+
+    def get_google_connector(self) -> Any:
+        if self.google_connector is None:
+            from .connectors.google import GoogleConnector
+            config = load_config(self.profile)
+            self.google_connector = GoogleConnector(runtime_directory(config) / "google_connector.json")
+        return self.google_connector
+
+    def get_notion_connector(self) -> Any:
+        if self.notion_connector is None:
+            from .connectors.notion import NotionConnector
+            config = load_config(self.profile)
+            self.notion_connector = NotionConnector(runtime_directory(config) / "notion_connector.json")
+        return self.notion_connector
+
+    def get_agent_session_store(self) -> Any:
+        if self.agent_sessions is None:
+            from .agent_sessions import AgentSessionStore
+            config = load_config(self.profile)
+            self.agent_sessions = AgentSessionStore(runtime_directory(config) / "agent_sessions")
+        return self.agent_sessions
+
+    def get_model_manager(self) -> Any:
+        if self.model_manager is None:
+            from .model_connections import ModelConnectionManager
+            config = load_config(self.profile)
+            self.model_manager = ModelConnectionManager(runtime_directory(config) / "model_connections.json")
+        return self.model_manager
+
+    def unregister_chat_run(self, run_id: str) -> None:
+        with self._chat_runs_lock:
+            self.chat_runs.pop(run_id, None)
+
+    def cancel_chat_run(self, run_id: str) -> bool:
+        with self._chat_runs_lock:
+            cancel = self.chat_runs.get(run_id)
+        if cancel is None:
+            return False
+        cancel.cancel()
+        return True
+
     def serve_forever(self) -> None:
         self._httpd.serve_forever()
 
     def shutdown(self) -> None:
+        self.account_manager.close()
         self._httpd.shutdown()
 
     def server_close(self) -> None:
@@ -393,8 +427,26 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 self._handle_file_preview(origin)
             elif self.request_path == "/api/v1/file":
                 self._handle_file(origin, head_only=False)
+            elif self.request_path == "/api/v1/actions/pending":
+                self._handle_actions(origin, "pending")
+            elif self.request_path == "/api/v1/agent/sessions":
+                self._handle_agent_sessions(origin, "list")
+            elif self.request_path == "/api/v1/agent/sessions/load":
+                self._handle_agent_sessions(origin, "load")
             elif self.request_path == "/api/v1/chat/providers":
                 self._handle_chat_providers(origin)
+            elif self.request_path == "/api/v1/account":
+                self._handle_account(origin)
+            elif self.request_path == "/api/v1/mcp/connections":
+                self._handle_mcp_connections(origin, "list")
+            elif self.request_path == "/api/v1/connectors/google":
+                self._handle_google_connector(origin, "status")
+            elif self.request_path == "/api/v1/models":
+                self._handle_models(origin, "list")
+            elif self.request_path == "/api/v1/connectors/notion":
+                self._handle_notion_connector(origin, "status")
+            elif self.request_path == "/api/v1/connectors/google/calendar/events":
+                self._handle_google_calendar_events(origin)
             else:
                 self._send_api_error(
                     DashboardRequestError(404, "NotFound", "API endpoint not found"),
@@ -429,6 +481,95 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             return
         if self.request_path == "/api/v1/chat":
             self._handle_chat(origin)
+            return
+        if self.request_path == "/api/v1/chat/stream":
+            self._handle_chat_stream(origin)
+            return
+        if self.request_path == "/api/v1/chat/cancel":
+            self._handle_chat_cancel(origin)
+            return
+        if self.request_path == "/api/v1/import/preflight":
+            self._handle_import_preflight(origin)
+            return
+        if self.request_path == "/api/v1/review/advice":
+            self._handle_review_advice(origin)
+            return
+        if self.request_path == "/api/v1/actions/propose":
+            self._handle_actions(origin, "propose")
+            return
+        if self.request_path == "/api/v1/actions/execute":
+            self._handle_actions(origin, "execute")
+            return
+        if self.request_path == "/api/v1/actions/discard":
+            self._handle_actions(origin, "discard")
+            return
+        if self.request_path == "/api/v1/agent/sessions/save":
+            self._handle_agent_sessions(origin, "save")
+            return
+        if self.request_path == "/api/v1/agent/sessions/delete":
+            self._handle_agent_sessions(origin, "delete")
+            return
+        if self.request_path == "/api/v1/agent/sessions/pin":
+            self._handle_agent_sessions(origin, "pin")
+            return
+        if self.request_path == "/api/v1/account/login":
+            self._handle_account_action(origin, "login")
+            return
+        if self.request_path == "/api/v1/account/login/cancel":
+            self._handle_account_action(origin, "cancel")
+            return
+        if self.request_path == "/api/v1/account/logout":
+            self._handle_account_action(origin, "logout")
+            return
+        mcp_actions = {
+            "/api/v1/mcp/connections": "add",
+            "/api/v1/mcp/connections/add-remote": "add-remote",
+            "/api/v1/mcp/connections/authorize": "authorize",
+            "/api/v1/mcp/connections/oauth-status": "oauth-status",
+            "/api/v1/mcp/connections/oauth-cancel": "oauth-cancel",
+            "/api/v1/mcp/connections/trust": "trust",
+            "/api/v1/mcp/connections/inspect": "inspect",
+            "/api/v1/mcp/connections/grant": "grant",
+            "/api/v1/mcp/connections/call": "call",
+            "/api/v1/mcp/connections/enable": "enable",
+            "/api/v1/mcp/connections/disable": "disable",
+            "/api/v1/mcp/connections/disconnect": "disconnect",
+        }
+        if self.request_path in mcp_actions:
+            self._handle_mcp_connections(origin, mcp_actions[self.request_path])
+            return
+        google_actions = {
+            "/api/v1/connectors/google/setup": "setup",
+            "/api/v1/connectors/google/authorize": "authorize",
+            "/api/v1/connectors/google/oauth-status": "oauth-status",
+            "/api/v1/connectors/google/oauth-cancel": "oauth-cancel",
+            "/api/v1/connectors/google/disconnect": "disconnect",
+            "/api/v1/connectors/google/calendar/propose-create": "calendar-propose-create",
+            "/api/v1/connectors/google/calendar/propose-update": "calendar-propose-update",
+        }
+        if self.request_path in google_actions:
+            self._handle_google_connector(origin, google_actions[self.request_path])
+            return
+        model_actions = {
+            "/api/v1/models/add": "add",
+            "/api/v1/models/test": "test",
+            "/api/v1/models/remove": "remove",
+            "/api/v1/models/enable": "enable",
+            "/api/v1/models/disable": "disable",
+            "/api/v1/models/set-preferences": "set-preferences",
+        }
+        if self.request_path in model_actions:
+            self._handle_models(origin, model_actions[self.request_path])
+            return
+        notion_actions = {
+            "/api/v1/connectors/notion/setup": "setup",
+            "/api/v1/connectors/notion/test": "test",
+            "/api/v1/connectors/notion/disconnect": "disconnect",
+            "/api/v1/connectors/notion/search": "search",
+            "/api/v1/connectors/notion/read": "read",
+        }
+        if self.request_path in notion_actions:
+            self._handle_notion_connector(origin, notion_actions[self.request_path])
             return
         if self.request_path != "/api/v1/command":
             if self._is_api_request():
@@ -599,16 +740,371 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
     def _handle_chat_providers(self, origin: str | None) -> None:
         try:
             from .dashboard_chat import providers
-            self._send_json(200, providers(), cors_origin=origin)
+            self._send_json(200, providers(profile=self.dashboard.profile), cors_origin=origin)
         except (OSError, subprocess.TimeoutExpired, ValueError):
             self._send_json(200, {"available": False, "models": [], "default_model": None,
                                   "provider": "Codex CLI using ChatGPT sign-in"}, cors_origin=origin)
+
+    def _handle_import_preflight(self, origin: str | None) -> None:
+        from .config import load_config
+        from .import_preflight import PreflightError, preflight
+
+        try:
+            body = self._small_json_body(maximum=512 * 1024)
+            paths = body.get("paths")
+            destination = body.get("destination")
+            if not isinstance(paths, list) or not paths or any(not isinstance(item, str) for item in paths):
+                raise DashboardRequestError(400, "InvalidImport", "paths must be a non-empty list of local file paths")
+            if not isinstance(destination, str) or not destination.strip():
+                raise DashboardRequestError(400, "InvalidImport", "destination is required")
+            config = load_config(self.dashboard.profile)
+            root = Path(str(config["academic"]["root_directory"]))
+            self._send_json(200, preflight(paths, destination, root), cors_origin=origin)
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except PreflightError as exc:
+            self._send_api_error(DashboardRequestError(422, "InvalidImport", str(exc)), cors_origin=origin)
+        except (OSError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(500, "ImportError", f"the selection could not be inspected: {exc}"), cors_origin=origin)
+
+    def _handle_review_advice(self, origin: str | None) -> None:
+        from .review_advice import ReviewAdviceError, advise
+
+        try:
+            body = self._small_json_body()
+            review_id = body.get("review_id")
+            if not isinstance(review_id, str) or not review_id.strip():
+                raise DashboardRequestError(400, "InvalidReview", "review_id is required")
+            self._send_json(200, advise(review_id, profile=self.dashboard.profile), cors_origin=origin)
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except KeyError:
+            self._send_api_error(DashboardRequestError(404, "NotFound", "that review item is not open"), cors_origin=origin)
+        except ReviewAdviceError as exc:
+            self._send_api_error(DashboardRequestError(422, "AdviceUnavailable", str(exc)), cors_origin=origin)
+        except (OSError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(500, "AdviceError", f"decision help failed: {exc}"), cors_origin=origin)
+
+    def _handle_actions(self, origin: str | None, action: str) -> None:
+        from .action_catalog import ActionFrameworkError
+        from .action_service import ActionService
+
+        try:
+            service = ActionService(self.dashboard.profile)
+            if action == "pending":
+                self._send_json(200, {"actions": service.pending()}, cors_origin=origin)
+                return
+            body = self._small_json_body(maximum=256 * 1024)
+            if action == "propose":
+                action_type = body.get("action_type")
+                details = body.get("details")
+                if not isinstance(action_type, str) or not isinstance(details, dict):
+                    raise DashboardRequestError(400, "InvalidAction", "action_type and details are required")
+                result = service.propose(action_type, details, title=body.get("title") if isinstance(body.get("title"), str) else None)
+                self._send_json(200, result, cors_origin=origin)
+                return
+            proposal_id = body.get("proposal_id")
+            if not isinstance(proposal_id, str) or not proposal_id:
+                raise DashboardRequestError(400, "InvalidAction", "proposal_id is required")
+            if action == "execute":
+                self._send_json(200, service.execute_inline(proposal_id), cors_origin=origin)
+                return
+            self._send_json(200, service.discard(proposal_id), cors_origin=origin)
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except PermissionError as exc:
+            self._send_api_error(DashboardRequestError(403, "ReviewRequired", str(exc)), cors_origin=origin)
+        except KeyError as exc:
+            self._send_api_error(DashboardRequestError(404, "NotFound", str(exc)), cors_origin=origin)
+        except (ActionFrameworkError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(422, "ActionError", str(exc)), cors_origin=origin)
+        except OSError as exc:
+            self._send_api_error(DashboardRequestError(500, "ActionError", f"the action could not be completed: {exc}"), cors_origin=origin)
+
+    def _handle_agent_sessions(self, origin: str | None, action: str) -> None:
+        from .agent_sessions import AgentSessionError, summarize
+
+        store = self.dashboard.get_agent_session_store()
+        try:
+            if action == "list":
+                self._send_json(200, {"sessions": store.list()}, cors_origin=origin)
+                return
+            if action == "load":
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query, keep_blank_values=True)
+                session_id = (query.get("id") or [""])[0]
+                self._send_json(200, {"session": store.load(session_id)}, cors_origin=origin)
+                return
+            if action == "save":
+                body = self._small_json_body(maximum=4 * 1024 * 1024)
+                session = body.get("session")
+                if not isinstance(session, dict):
+                    raise DashboardRequestError(400, "InvalidSession", "session is required")
+                saved = store.save(session)
+                self._send_json(200, {"session": summarize(saved)}, cors_origin=origin)
+                return
+            if action == "delete":
+                body = self._small_json_body()
+                session_id = body.get("id")
+                if not isinstance(session_id, str):
+                    raise DashboardRequestError(400, "InvalidSession", "session id is required")
+                store.delete(session_id)
+                self._send_json(200, {"deleted": True}, cors_origin=origin)
+                return
+            if action == "pin":
+                body = self._small_json_body()
+                session_id = body.get("id")
+                pinned = body.get("pinned")
+                if not isinstance(session_id, str) or not isinstance(pinned, bool):
+                    raise DashboardRequestError(400, "InvalidSession", "session id and pinned are required")
+                self._send_json(200, {"session": store.set_pinned(session_id, pinned)}, cors_origin=origin)
+                return
+            raise DashboardRequestError(404, "NotFound", "unknown session action")
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except FileNotFoundError:
+            self._send_api_error(DashboardRequestError(404, "NotFound", "that conversation is not saved"), cors_origin=origin)
+        except AgentSessionError as exc:
+            self._send_api_error(DashboardRequestError(400, "InvalidSession", str(exc)), cors_origin=origin)
+        except (OSError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(500, "SessionError", f"the conversation could not be saved: {exc}"), cors_origin=origin)
+
+    def _handle_account(self, origin: str | None) -> None:
+        try:
+            self._send_json(200, self.dashboard.account_manager.status(), cors_origin=origin)
+        except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError) as exc:
+            self._send_json(200, {"provider": "codex", "available": False, "authenticated": False, "status": "failed", "error": str(exc)}, cors_origin=origin)
+
+    def _handle_account_action(self, origin: str | None, action: str) -> None:
+        try:
+            manager = self.dashboard.account_manager
+            if action == "login":
+                value = manager.start_login()
+            elif action == "cancel":
+                value = manager.cancel_login()
+            else:
+                value = manager.logout()
+            self._send_json(200, value, cors_origin=origin)
+        except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(502, "AccountUnavailable", str(exc)), cors_origin=origin)
+
+    def _small_json_body(self, *, maximum: int = 64 * 1024) -> dict[str, Any]:
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.casefold().startswith("application/json"):
+            raise DashboardRequestError(415, "UnsupportedMediaType", "request must use application/json")
+        content_length = self.headers.get("Content-Length")
+        if content_length is None:
+            raise DashboardRequestError(400, "MissingContentLength", "request body is required")
+        try:
+            length = int(content_length)
+        except ValueError as exc:
+            raise DashboardRequestError(400, "InvalidContentLength", "Content-Length must be an integer") from exc
+        if length < 0 or length > maximum:
+            raise DashboardRequestError(400, "InvalidContentLength", "request body is too large")
+        try:
+            value = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise DashboardRequestError(400, "MalformedJSON", "request must be valid UTF-8 JSON") from exc
+        if not isinstance(value, dict):
+            raise DashboardRequestError(400, "MalformedJSON", "request must be a JSON object")
+        return value
+
+    def _handle_models(self, origin: str | None, action: str) -> None:
+        try:
+            manager = self.dashboard.get_model_manager()
+            if action == "list":
+                value: Any = manager.list()
+            else:
+                body = self._small_json_body()
+                if action == "add":
+                    value = manager.add(
+                        provider=body.get("provider"),
+                        api_key=body.get("api_key") if isinstance(body.get("api_key"), str) else "",
+                        base_url=body.get("base_url") if isinstance(body.get("base_url"), str) else "",
+                        name=body.get("name") if isinstance(body.get("name"), str) else "",
+                    )
+                elif action == "test":
+                    value = manager.test(body.get("provider"))
+                elif action == "remove":
+                    value = manager.remove(body.get("provider"))
+                elif action in {"enable", "disable"}:
+                    value = manager.set_enabled(body.get("provider"), action == "enable")
+                elif action == "set-preferences":
+                    value = manager.set_preferences({role: body.get(role) for role in ("default", "fast", "deep", "vision", "image")})
+                else:
+                    raise DashboardRequestError(404, "NotFound", "Model action not found")
+            self._send_json(200, value, cors_origin=origin)
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except (OSError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(422, "ModelConnectionError", str(exc)), cors_origin=origin)
+
+    def _handle_notion_connector(self, origin: str | None, action: str) -> None:
+        try:
+            connector = self.dashboard.get_notion_connector()
+            if action == "status":
+                value: Any = connector.status()
+            else:
+                body = self._small_json_body()
+                if action == "setup":
+                    value = connector.configure(body.get("token") if isinstance(body.get("token"), str) else "")
+                elif action == "test":
+                    value = connector.test()
+                elif action == "disconnect":
+                    value = connector.disconnect()
+                elif action == "search":
+                    value = connector.search(
+                        query=body.get("query") if isinstance(body.get("query"), str) else "",
+                        page_size=body.get("max") if isinstance(body.get("max"), int) else 10,
+                    )
+                elif action == "read":
+                    value = connector.read_page(
+                        body.get("page_id") if isinstance(body.get("page_id"), str) else "",
+                        max_blocks=body.get("max_blocks") if isinstance(body.get("max_blocks"), int) else 100,
+                    )
+                else:
+                    raise DashboardRequestError(404, "NotFound", "Notion connector action not found")
+            self._send_json(200, value, cors_origin=origin)
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except (OSError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(422, "NotionConnectorError", str(exc)), cors_origin=origin)
+
+    def _handle_google_connector(self, origin: str | None, action: str) -> None:
+        try:
+            connector = self.dashboard.get_google_connector()
+            if action == "status":
+                value: Any = connector.status()
+            elif action == "setup":
+                body = self._small_json_body()
+                value = connector.configure(
+                    client_id=body.get("client_id"),
+                    client_secret=body.get("client_secret"),
+                )
+            elif action == "authorize":
+                value = connector.begin_authorize()
+            elif action == "oauth-status":
+                value = connector.oauth_status()
+            elif action == "oauth-cancel":
+                value = connector.cancel_authorize()
+            elif action == "disconnect":
+                value = connector.disconnect()
+            elif action in {"calendar-propose-create", "calendar-propose-update"}:
+                body = self._small_json_body()
+                config = load_config(self.dashboard.profile)
+                workspace_root = Path(str(config["academic"]["root_directory"])).expanduser().resolve()
+                state_root = workspace_root / ".academia"
+                from .actions import ActionStore
+                from .activity import ActivityLog
+                from .connectors.google_actions import propose_calendar_create, propose_calendar_update
+                from .review import ReviewQueue
+                from .workflow import ApprovalWorkflow
+
+                workflow = ApprovalWorkflow(
+                    actions=ActionStore(state_root / "actions.json"),
+                    reviews=ReviewQueue(state_root / "review.json"),
+                    activity=ActivityLog(state_root / "activity.jsonl"),
+                )
+                if action == "calendar-propose-create":
+                    proposal, review = propose_calendar_create(workflow, connector, body)
+                else:
+                    event_id = body.get("event_id")
+                    patch = body.get("patch")
+                    if not isinstance(event_id, str) or not isinstance(patch, dict):
+                        raise ValueError("calendar edit requires an exact event id and field patch")
+                    proposal, review = propose_calendar_update(workflow, connector, event_id=event_id, patch=patch)
+                value = {
+                    "proposal": asdict(proposal),
+                    "review": asdict(review),
+                    "next_step": f"Review item {review.id}: decide, then execute as a separate step.",
+                }
+            else:
+                raise DashboardRequestError(404, "NotFound", "Google connector action not found")
+            self._send_json(200, value, cors_origin=origin)
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except (OSError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(422, "GoogleConnectorError", str(exc)), cors_origin=origin)
+
+    def _handle_google_calendar_events(self, origin: str | None) -> None:
+        try:
+            connector = self.dashboard.get_google_connector()
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            time_min = query.get("time_min", [None])[0]
+            time_max = query.get("time_max", [None])[0]
+            try:
+                max_results = int(query.get("max", ["20"])[0] or "20")
+            except ValueError as exc:
+                raise ValueError("calendar max must be an integer") from exc
+            value = connector.calendar_list(time_min=time_min, time_max=time_max, max_results=max_results)
+            self._send_json(200, value, cors_origin=origin)
+        except (OSError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(422, "GoogleConnectorError", str(exc)), cors_origin=origin)
+
+    def _handle_mcp_connections(self, origin: str | None, action: str) -> None:
+        try:
+            manager = self.dashboard.get_mcp_manager()
+            if action == "list":
+                value: Any = manager.list()
+            else:
+                body = self._small_json_body()
+                if action == "add":
+                    value = manager.add(
+                        name=body.get("name"),
+                        command=body.get("command"),
+                        args=body.get("args") if isinstance(body.get("args"), list) else [],
+                        cwd=body.get("cwd") if isinstance(body.get("cwd"), str) else None,
+                    )
+                elif action == "add-remote":
+                    value = manager.add_remote(
+                        name=body.get("name"),
+                        url=body.get("url"),
+                    )
+                else:
+                    connection_id = body.get("id")
+                    if not isinstance(connection_id, str) or not connection_id.strip():
+                        raise DashboardRequestError(400, "InvalidConnectionID", "an exact connection id is required")
+                    if action == "authorize":
+                        value = manager.begin_authorize(connection_id)
+                    elif action == "oauth-status":
+                        value = manager.oauth_status(connection_id)
+                    elif action == "oauth-cancel":
+                        value = manager.cancel_authorize(connection_id)
+                    elif action == "trust":
+                        value = manager.trust_remote(connection_id)
+                    elif action == "inspect":
+                        value = manager.inspect(connection_id)
+                    elif action == "grant":
+                        tools = body.get("tools")
+                        if not isinstance(tools, list) or any(not isinstance(item, str) for item in tools):
+                            raise DashboardRequestError(400, "InvalidTools", "tools must be a list of tool names")
+                        value = manager.grant(connection_id, tools)
+                    elif action == "call":
+                        tool = body.get("tool")
+                        arguments = body.get("arguments", {})
+                        if not isinstance(tool, str) or not tool.strip():
+                            raise DashboardRequestError(400, "InvalidTool", "an exact granted tool name is required")
+                        if not isinstance(arguments, dict):
+                            raise DashboardRequestError(400, "InvalidArguments", "arguments must be a JSON object")
+                        value = manager.call_read_tool(connection_id, tool, arguments)
+                    elif action == "enable":
+                        value = manager.enable(connection_id)
+                    elif action == "disable":
+                        value = manager.disable(connection_id)
+                    else:
+                        value = manager.disconnect(connection_id)
+            self._send_json(200, value, cors_origin=origin)
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+        except KeyError as exc:
+            self._send_api_error(DashboardRequestError(404, "NotFound", str(exc)), cors_origin=origin)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._send_api_error(DashboardRequestError(422, "MCPConnectionError", str(exc)), cors_origin=origin)
 
     def _handle_chat(self, origin: str | None) -> None:
         try:
             payload = self._chat_payload()
             from .dashboard_chat import respond
-            result = respond(payload)
+            result = respond(payload, profile=self.dashboard.profile)
             self._send_json(200, result, cors_origin=origin)
         except DashboardRequestError as exc:
             self._send_api_error(exc, cors_origin=origin)
@@ -616,6 +1112,79 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             self._send_api_error(DashboardRequestError(422, "ChatError", str(exc)), cors_origin=origin)
         except (OSError, subprocess.TimeoutExpired):
             self._send_api_error(DashboardRequestError(502, "ChatUnavailable", "Codex could not complete this chat request"), cors_origin=origin)
+
+    def _handle_chat_stream(self, origin: str | None) -> None:
+        try:
+            payload = self._chat_payload()
+        except DashboardRequestError as exc:
+            self._send_api_error(exc, cors_origin=origin)
+            return
+        from .assistant.providers.base import CancelToken
+        from .dashboard_chat import stream_chat
+
+        run_id = str(uuid4())
+        cancel = CancelToken()
+        try:
+            self.dashboard.register_chat_run(run_id, cancel)
+        except ValueError as exc:
+            self._send_api_error(DashboardRequestError(429, "TooManyRuns", str(exc)), cors_origin=origin)
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+        self.end_headers()
+        self.close_connection = True
+
+        def emit(value: dict[str, Any]) -> None:
+            body = (json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+            self.wfile.write(body)
+            self.wfile.flush()
+
+        try:
+            stream_chat(
+                payload,
+                profile=self.dashboard.profile,
+                run_id=run_id,
+                cancel=cancel,
+                emit=emit,
+            )
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            cancel.cancel()
+        finally:
+            self.dashboard.unregister_chat_run(run_id)
+
+    def _handle_chat_cancel(self, origin: str | None) -> None:
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.casefold().startswith("application/json"):
+            self._send_api_error(DashboardRequestError(415, "UnsupportedMediaType", "cancel requests must use application/json"), cors_origin=origin)
+            return
+        content_length = self.headers.get("Content-Length")
+        if content_length is None:
+            self._send_api_error(DashboardRequestError(400, "MissingContentLength", "cancel request body is required"), cors_origin=origin)
+            return
+        try:
+            length = int(content_length)
+        except ValueError:
+            self._send_api_error(DashboardRequestError(400, "InvalidContentLength", "Content-Length must be an integer"), cors_origin=origin)
+            return
+        if length < 0 or length > 4096:
+            self._send_api_error(DashboardRequestError(400, "InvalidContentLength", "cancel request body is too large"), cors_origin=origin)
+            return
+        try:
+            value = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._send_api_error(DashboardRequestError(400, "MalformedJSON", "cancel request must be valid UTF-8 JSON"), cors_origin=origin)
+            return
+        run_id = value.get("run_id") if isinstance(value, dict) else None
+        if not isinstance(run_id, str) or not run_id.strip() or len(run_id) > 80:
+            self._send_api_error(DashboardRequestError(400, "InvalidRunID", "run_id must be an exact active chat run id"), cors_origin=origin)
+            return
+        self._send_json(200, {"run_id": run_id, "cancelled": self.dashboard.cancel_chat_run(run_id)}, cors_origin=origin)
 
     def _handle_upload(self, origin: str | None) -> None:
         try:
@@ -770,25 +1339,27 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             raise DashboardRequestError(400, "InvalidCommand", "command must be a non-empty string")
         if command != "study" and length > MAX_BODY_BYTES:
             raise DashboardRequestError(413, "RequestTooLarge", "command request body is too large")
-        if command not in SAFE_COMMANDS:
-            raise DashboardRequestError(400, "CommandNotAllowed", f"dashboard command is not allowed: {command}")
-        if not isinstance(args, list) or any(not isinstance(arg, str) for arg in args):
-            raise DashboardRequestError(400, "InvalidArguments", "args must be an array of strings")
-        if command == "process" and args != ["status"]:
-            raise DashboardRequestError(400, "CommandNotAllowed", "the dashboard may only read processing status")
-        argument_count_limit = 620 if command == "study" else MAX_ARGUMENTS
-        if len(args) > argument_count_limit:
-            raise DashboardRequestError(400, "TooManyArguments", f"at most {argument_count_limit} command arguments are allowed")
-        for arg in args:
-            argument_limit = 48 * 1024 if command == "study" else MAX_ARGUMENT_LENGTH
-            if len(arg) > argument_limit:
-                raise DashboardRequestError(400, "ArgumentTooLong", f"command arguments are limited to {MAX_ARGUMENT_LENGTH} characters")
-            if "\x00" in arg:
-                raise DashboardRequestError(400, "InvalidArguments", "command arguments must not contain NUL bytes")
-            option = arg.split("=", 1)[0]
-            if option in {"--profile", "--json"}:
-                raise DashboardRequestError(400, "ArgumentNotAllowed", f"browser may not supply {option}")
-        return command, args
+        try:
+            validated_command, validated_args = validate_command(
+                command,
+                args,
+                max_arguments=620 if command == "study" else MAX_ARGUMENTS,
+                max_argument_length=48 * 1024 if command == "study" else MAX_ARGUMENT_LENGTH,
+            )
+        except ValueError as exc:
+            message = str(exc)
+            if message.startswith("at most"):
+                error_type = "TooManyArguments"
+            elif "limited to" in message:
+                error_type = "ArgumentTooLong"
+            elif "browser may not supply" in message:
+                error_type = "ArgumentNotAllowed"
+            elif message.startswith("args must") or "NUL" in message:
+                error_type = "InvalidArguments"
+            else:
+                error_type = "CommandNotAllowed"
+            raise DashboardRequestError(400, error_type, message) from exc
+        return validated_command, validated_args
 
     def _serve_static(self, *, head_only: bool, cors_origin: str | None = None) -> None:
         dist_dir = self.dashboard.dist_dir
@@ -799,6 +1370,7 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 "text/html; charset=utf-8",
                 cors_origin=cors_origin,
                 head_only=head_only,
+                extra_headers={"Cache-Control": "no-store"},
             )
             return
         root = dist_dir.resolve()
@@ -809,6 +1381,7 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
                 "text/html; charset=utf-8",
                 cors_origin=cors_origin,
                 head_only=head_only,
+                extra_headers={"Cache-Control": "no-store"},
             )
             return
 
@@ -843,10 +1416,21 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             self._send_bytes(404, b"Not Found\n", "text/plain; charset=utf-8", cors_origin=cors_origin, head_only=head_only)
             return
         content_type, _encoding = mimetypes.guess_type(candidate.name)
+        # Hashed build assets never change under the same name; the HTML shell
+        # and every unhashed file must revalidate so a rebuilt bundle cannot
+        # keep pointing at deleted assets.
+        hashed_asset = len(parts) >= 2 and parts[0] == "assets"
         self._send_bytes(
             200,
             body,
             content_type or "application/octet-stream",
             cors_origin=cors_origin,
             head_only=head_only,
+            extra_headers={
+                "Cache-Control": (
+                    "public, max-age=31536000, immutable"
+                    if hashed_asset
+                    else "no-cache"
+                )
+            },
         )

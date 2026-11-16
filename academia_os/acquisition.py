@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-import shutil
+import hashlib
+import os
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,6 +10,7 @@ from typing import Any
 
 from .config import SEMESTER_PATTERN, validate_config
 from .processing import ProcessingStore, source_signature
+from .source_identity import SourceIdentityError, fingerprint
 from .state import JsonStateStore
 
 
@@ -59,7 +62,9 @@ def capability_report() -> dict[str, Any]:
             {"id": "create_non_destructive_index", "label": "Create or rebuild non-destructive local indexes", "mode": "direct"},
             {"id": "study", "label": "Create cited study sets, run practice, record student answers and review progress through academia study", "mode": "shared_cli_api"},
             {"id": "read_activity_changes", "label": "Read append-only Activity changes with a cursor", "mode": "direct"},
+            {"id": "import_browser_download", "label": "Download a source through a granted browser and import it into a recognized inbox", "mode": "explicit_student_request_staging_only"},
             {"id": "record_user_confirmed_coursework", "label": "Record and update user-confirmed assignment and project history", "mode": "user_confirmed_workspace_record"},
+            {"id": "manage_user_tasks", "label": "Create, update, complete, or reopen personal tasks in SEMESTER_TASKS.md", "mode": "user_confirmed_workspace_record"},
         ],
         "study": {"status": "available", "interface": "academia study", "dashboard_required": False,
                   "generation": ["external_agent", "codex_chatgpt_plan", "local_model"],
@@ -70,6 +75,7 @@ def capability_report() -> dict[str, Any]:
             {"id": "destructive_structural_change", "label": "Delete or structurally reorganize academic material", "mode": "explicit_approval_and_verification"},
             {"id": "calendar_update", "label": "Change a calendar event", "mode": "explicit_approval_duplicate_check_and_verification"},
             {"id": "confirmed_academic_state_change", "label": "Change confirmed academic state after conflicting evidence", "mode": "Review_then_approved_action_then_verification"},
+            {"id": "agent_task_change", "label": "Create or update a personal task proposed by an agent", "mode": "Review_then_approved_action_then_verification"},
         ],
         "prohibited": [
             {"id": "school_submission", "label": "Submit coursework, quizzes, exams, forms, or discussions"},
@@ -84,12 +90,24 @@ def capability_report() -> dict[str, Any]:
             "mode": "copy_and_background_extract",
             "description": "academia import and the local MCP import tool copy a student-confirmed file into a recognized direct workspace inbox and automatically extract supported local text formats in a background worker; originals are preserved and PDFs without extractable text are reported as needing OCR.",
         },
+        "download_intake": {
+            "status": "available",
+            "mode": "browser_download_staging_then_verified_inbox_copy",
+            "description": "When the chat agent has a granted browser tool, it downloads a student-requested file and posts the bytes to a one-time localhost intake URL, which stores them in a private Academia staging folder. The import tool then copies that file into a recognized semester or course 00_INBOX, records provenance, starts supported local extraction, removes the staged copy, and appends Activity. The intake tools are exposed only for that grant-scoped chat run; arbitrary local paths and unauthenticated uploads are rejected.",
+        },
         "mcp": {
             "status": "available",
             "transport": "local_stdio",
-            "read_tools": ["workspace", "courses", "tasks", "agent_context", "attention", "review_item", "activity", "library", "file_preview", "processing_status", "import_targets"],
-            "write_tools": ["review_decide_after_student_confirmation", "review_execute_after_approval", "import_file_after_student_confirmation"],
-            "external_connectors": "not_provided_by_core_mcp",
+            "read_tools": ["status", "capabilities", "courses", "today", "tasks", "agent_context", "attention", "review_item", "activity_changes", "library", "read_library_item", "search_passages", "study_overview", "study_exam_scope", "grade_history", "processing_status", "processing_detail", "import_targets"],
+            "write_tools": ["review_decide", "review_execute", "import_file"],
+            "proposal_tools": ["propose_import", "propose_task", "propose_calendar", "propose_action"],
+            "external_connectors": "optional_google_calendar_proposal_requires_local_google_authorization",
+            "trusted_actions": {
+                "status": "opt_in",
+                "flag": "--allow-action",
+                "categories": ["tasks", "history", "study", "imports", "downloads", "files", "calendar", "structure"],
+                "description": "Trusted action categories auto-apply without creating a Review item. The server hides Review decision/execution tools in trusted mode so an agent cannot approve its own proposals. Activity records agent:mcp.",
+            },
         },
         "watched_folders": {
             "status": "available",
@@ -169,7 +187,62 @@ def _record_acquisition(workspace_root: Path, destination: Path, metadata: dict[
         state["records"] = records
         return state
 
-    JsonStateStore(path).update({"schema_version": 1, "records": {}}, transition)
+    JsonStateStore(path).update_strict({"schema_version": 1, "records": {}}, transition)
+
+
+def _source_digest(source: Path) -> str:
+    try:
+        return fingerprint(source, max_bytes=1024 * 1024 * 1024)
+    except SourceIdentityError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _find_duplicate(destination_inbox: Path, digest: str, size: int) -> Path | None:
+    """Find an identical destination file without reading files of other sizes.
+
+    Hashing every existing inbox file made imports wait on large or iCloud-backed
+    sources that could never be duplicates. A matching SHA-256 implies a matching
+    size, so different-size candidates are skipped before any read.
+    """
+
+    for candidate in sorted(destination_inbox.iterdir()):
+        if candidate.is_symlink() or not candidate.is_file() or candidate.name.startswith("."):
+            continue
+        try:
+            if candidate.stat().st_size != size:
+                continue
+            if _source_digest(candidate) == digest:
+                return candidate
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _copy_atomic(source: Path, destination: Path, digest: str) -> None:
+    stat = source.stat()
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{destination.name}.", dir=destination.parent)
+    temporary = Path(temporary_name)
+    copied_digest = hashlib.sha256()
+    try:
+        with source.open("rb") as source_handle, os.fdopen(descriptor, "wb") as target_handle:
+            descriptor = -1
+            while chunk := source_handle.read(1024 * 1024):
+                target_handle.write(chunk)
+                copied_digest.update(chunk)
+            target_handle.flush()
+            os.fsync(target_handle.fileno())
+        if copied_digest.hexdigest() != digest:
+            raise ValueError("source file changed during import; no destination file was committed")
+        os.chmod(temporary, stat.st_mode & 0o777)
+        os.utime(temporary, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        try:
+            os.link(temporary, destination, follow_symlinks=False)
+        except FileExistsError as exc:
+            raise ValueError("import destination appeared during copy; choose a new import") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
 
 
 def import_file(
@@ -190,12 +263,29 @@ def import_file(
     if not source.is_file():
         raise FileNotFoundError(source)
     destination_inbox.mkdir(parents=True, exist_ok=True)
+    # Fail before copying anything if provenance state is already damaged.
+    acquisition_store = JsonStateStore(Path(workspace_root).expanduser().resolve() / ".academia" / "acquisition.json")
+    acquisition_store.read_strict({"schema_version": 1, "records": {}})
+    digest = _source_digest(source)
+    duplicate = _find_duplicate(destination_inbox, digest, source.stat().st_size)
+    if duplicate is not None:
+        return {
+            "source_type": "browser_upload" if source_label is not None and source_label.startswith("browser-upload:") else "manual_file",
+            "original_file": source_label if source_label is not None else str(source),
+            "acquired_at": datetime.now(timezone.utc).isoformat(),
+            "destination": str(duplicate),
+            "provenance": "EXTERNAL",
+            "confidence": "unverified",
+            "source_sha256": digest,
+            "duplicate": True,
+            "duplicate_of": duplicate.relative_to(Path(workspace_root).expanduser().resolve()).as_posix(),
+        }
     destination = destination_inbox / source.name
     counter = 1
     while destination.exists():
         destination = destination_inbox / f"{source.stem} (import {counter}){source.suffix}"
         counter += 1
-    shutil.copy2(source, destination)
+    _copy_atomic(source, destination, digest)
     metadata = {
         "source_type": "browser_upload" if source_label is not None and source_label.startswith("browser-upload:") else "manual_file",
         "original_file": source_label if source_label is not None else str(source),
@@ -203,10 +293,15 @@ def import_file(
         "destination": str(destination),
         "provenance": "EXTERNAL",
         "confidence": "unverified",
+        "source_sha256": digest,
     }
     if source_label is not None:
         metadata["source_label"] = source_label
-    _record_acquisition(workspace_root, destination, metadata)
+    try:
+        _record_acquisition(workspace_root, destination, metadata)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
     if processing is not None:
         record = processing.detect(destination, signature=source_signature(destination))
         metadata["processing_record_id"] = record.id

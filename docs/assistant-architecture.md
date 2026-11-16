@@ -4,7 +4,7 @@
 
 Academia OS remains a local-first academic system. It supports two ways to use an assistant:
 
-1. **In-app Study chat:** The dashboard invokes the user's installed Codex CLI session. The student selects a model and only explicitly submitted context is sent to that provider. Claude subscription OAuth is not offered in Academia because Anthropic reserves it for Claude Code and other native Anthropic apps; Claude Code can connect as a separate external agent. External MCP connections are not wired into Study chat yet.
+1. **In-app Study chat:** The dashboard invokes the user's installed Codex CLI session for ordinary study chat. When the student enables Proposal mode, it uses the Codex app-server with Academia's MCP server in proposal-only mode, so it can create exact Review/Action proposals for a local import or personal-task create/update but cannot approve, execute, or write. The student selects a model and only explicitly submitted context is sent to that provider. Claude subscription OAuth is not offered in Academia because Anthropic reserves it for Claude Code and other native Anthropic apps; Claude Code can connect as a separate external agent. External MCP connections are not wired into Study chat yet.
 2. **External agent:** Codex, Claude, or another compatible host connects to Academia OS through its local CLI/MCP interface and uses its own provider and tools.
 
 Both paths must use the same academic context, import, Study, Review, provenance, and Activity contracts. There must not be separate academic logic or a second academic database for the assistant.
@@ -13,7 +13,7 @@ Both paths must use the same academic context, import, Study, Review, provenance
 
 ```text
 Dashboard assistant UI
-  ├─ Study chat → signed-in Codex CLI
+  ├─ Study chat → Codex CLI ordinary / app-server proposal-only
   ├─ bounded context retrieval and Study generation
   └─ future MCP client/connection manager (user-enabled services only)
           │
@@ -29,11 +29,11 @@ Shared Academia CLI/API/services  ◀── Codex / Claude / other external host
 Local workspace files + local `.academia/` state
 ```
 
-The assistant host chooses when to call tools. MCP servers expose tools and data; they do not supply a model. A single host can coordinate Academia and other user-enabled MCP servers. Academia's own MCP server does not automatically acquire browser, Gmail, calendar, or portal access.
+The assistant host chooses when to call tools. MCP servers expose tools and data; they do not supply a model. A single host can coordinate Academia and other user-enabled MCP servers. Academia's own MCP server does not automatically acquire browser, Gmail, or portal access. Its Calendar proposal tool is available only in proposal-only mode when the student explicitly grants it and Google is configured; it does not directly write events.
 
 ## Local-first and provider boundaries
 
-- Academic files and structured state stay on the student's computer. Study chat history stays in browser IndexedDB on that device/profile.
+- Academic files and structured state stay on the student's computer. Agent conversations stay in `<install_directory>/agent_sessions/` on that computer, written by the local API.
 - Codex subscription-backed CLI requests receive only the current conversation, selected context/excerpts, and attached files submitted for that turn. The UI identifies the provider and describes the submitted context.
 - Local-model requests use explicitly configured loopback endpoints. Academia does not silently download a model or start a model server.
 - Codex credentials remain in the official CLI's local credential store. Academia does not read, copy, or store them. Do not put secrets in `profile.json`, workflow preferences, workspace files, app logs, the repository, or MCP tool output. Claude subscription credentials are not routed through Academia; use Claude Code directly as an external agent.
@@ -63,7 +63,7 @@ The intended workflow is:
 4. After the student confirms, the Academia import action copies the file into the exact returned semester/course `00_INBOX`, preserves the original, records acquisition provenance, starts supported local extraction, and returns the processing record.
 5. The assistant checks processing status and reports success or a retryable failure. It does not mark a source verified or authoritative solely because it downloaded or extracted successfully.
 
-The portal browser connector and in-app tool orchestration are future work. The shared MCP currently offers `academia_import_targets` and `academia_import_file` for an already-downloaded local file. The server cannot verify that the host showed a confirmation dialog, so each host must obtain explicit student confirmation of the exact file and destination before calling the write tool.
+The portal browser connector remains future work. The in-app agent can reach explicitly granted external MCP tools through Academia's proxy; background MCP orchestration and automatic grants remain future work. The shared MCP currently offers `academia_import_targets` and `academia_import_file` for an already-downloaded local file. The server cannot verify that the host showed a confirmation dialog, so each host must obtain explicit student confirmation of the exact file and destination before calling the write tool.
 
 ## Implementation stages
 
@@ -75,15 +75,15 @@ Remaining within this stage: ensure import/artefact actions have clear student c
 
 ### Stage 2 — In-app assistant host
 
-**Partially implemented.** Study chat invokes the installed Codex CLI with bounded context and browser-local chat persistence. Claude subscription routing is disabled pending an Anthropic-approved path. The Codex request disables model tools and runs in a temporary directory; requests are not stored by the Academia API. The chat can create source-linked Study material through the shared Study contracts. Still needed: the documented ChatGPT sign-in/app-server path for a downloadable first-party connection, provider-neutral MCP tool orchestration, explicit per-tool confirmation, progress streaming, and write routing through shared Academia contracts. Do not imply current Study chat can call external tools.
+**Partially implemented.** Study chat invokes the installed Codex CLI with bounded context and browser-local chat persistence. Proposal mode additionally uses the Codex app-server with `academia mcp serve --proposal-only`; task and import proposal grants are enabled independently, and the assistant cannot approve, execute, copy, or write. Proposal runs stream progress and expose a Stop control in both the browser dashboard and the packaged Tauri shell; task proposals can be edited before approval. Proposal summaries, statuses, and Review ids are saved with browser-local chat history. Settings provides an app-level ChatGPT device-code sign-in using Codex's official login flow in the browser dashboard and the Tauri shell; Academia never reads or stores credentials. The provider-neutral `RunController` now validates exact `ToolGrant` permissions and routes import/study/domain/task writes: approval-gated tools create Review items, create-only writes require host confirmation, and read tools remain scope-bound. Claude subscription routing is disabled pending an Anthropic-approved path. Still needed: broader provider adapters using the shared grant loop, background MCP orchestration, and per-tool grant management beyond the current per-conversation selection. Study chat can call only the exact external MCP tools the student grants for that conversation, through Academia's proxy.
 
 ### Stage 3 — Provider and connection management
 
-**Partially implemented.** Study chat checks the local Codex CLI sign-in and offers model choices; Claude appears as unavailable with its Anthropic authorization reason. The app does not store provider secrets. Still needed: a provider connection page using an approved ChatGPT sign-in/app-server flow and an MCP connection manager with explicit add, inspect, grant, disable, and disconnect flows. Start external services as read-only and verify each advertised integration against its actual tool list and granted scopes.
+**Partially implemented.** Study chat checks the local Codex CLI sign-in and offers model choices; Claude appears as unavailable with its Anthropic authorization reason. Settings provides an app-level ChatGPT device-code sign-in in both the browser dashboard and the Tauri shell through the official Codex app-server, and reports the signed-in account summary without storing credentials. Settings is a Connections hub for AI models, apps, and MCP tools. It manages the ChatGPT/Codex subscription, API model providers with keys in Keychain and task-based model routing, one Google account for Gmail/Calendar reads, a read-only Notion integration, and explicit local or remote MCP connections. Proposal mode exposes task, import, and Google Calendar proposal tools only for the exact grants selected by the student. Calendar proposals check duplicates and enter Review; Review approval and execution remain separate, and execution reads the event back to verify the result. Google OAuth client credentials and tokens are stored in the macOS Keychain. Remote MCP servers use OAuth authorization-code + PKCE with dynamic client registration; their tokens are stored in the macOS Keychain and connection records keep only authorization metadata in the runtime directory. A remote MCP server starts untrusted: its declared read-only tools cannot be granted until the student inspects them and explicitly trusts the server. Server-declared `readOnlyHint` is a trust boundary, not a sandbox. Still needed: real external-provider verification, service-specific scope review, and wiring arbitrary remote MCP tools into Study chat. Do not interpret a playbook preference as a connection or authorization.
 
 ### Stage 4 — Integrations and automation
 
-**Not implemented.** Add browser acquisition and Google services incrementally. Begin with visible portal read/download and read-only calendar/email/document access. Add calendar edits only through approval, duplicate checks, and verification. Never submit schoolwork or send school-account messages. Background jobs require a separate, visible opt-in and local audit trail.
+**Partially implemented.** Study chat can explicitly enable Codex's built-in live web search for a conversation; this is a Codex host capability, not an Academia search connector, and results remain external evidence that must be cited. Settings connects one Google account with Gmail/Calendar read access and one read-only Notion integration. API model providers use separate provider account keys and their own billing; provider keys, Google OAuth client credentials, Notion tokens, and user tokens are kept in the macOS Keychain. The Google OAuth client can be bundled into the signed CLI sidecar during app builds. Study chat can include bounded Gmail/Calendar/Notion context only when the student enables the corresponding per-message grant. API-backed chat uses read-only Academia tools in this slice; a tool-free answer streams as it is generated, while a turn that needs tools returns one finished answer. Task, import, and Calendar proposals remain Codex-only; API providers can propose catalog actions. With the separate Calendar proposal grant, Study chat may create exact duplicate-checked Review proposals; an approved create/edit is executed separately and verified against Google. Calendar events are not changed before that execution step. Portal read/download and external-service automation remain unimplemented. Never submit schoolwork or send school-account messages. Background jobs require a separate, visible opt-in and local audit trail.
 
 ## Completion criteria
 
