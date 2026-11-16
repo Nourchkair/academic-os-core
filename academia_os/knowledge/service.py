@@ -492,6 +492,8 @@ class KnowledgeService:
 
     def _supersede_open_proposals(self, assessment_id: str, *, actor: str, channel: str) -> None:
         for raw in self.store.list_changesets():
+            if raw.get("semester") != self.semester:
+                continue
             if raw.get("status") not in {"proposed", "approved", "executing"}:
                 continue
             assessment_operation = next(
@@ -792,6 +794,8 @@ class KnowledgeService:
     def list_changesets(self, *, course_id: str | None = None, status: str | None = None) -> dict[str, Any]:
         values = []
         for item in self.store.list_changesets():
+            if item.get("semester") != self.semester:
+                continue
             if course_id is not None and item.get("course_id") != course_id:
                 continue
             if status is not None and item.get("status") != status:
@@ -858,17 +862,30 @@ class KnowledgeService:
         return self.get_changeset(changeset.id)
 
     def execute_changeset(self, changeset_id: str, *, actor: str = "user", channel: str = "cli_user") -> dict[str, Any]:
+        service = self._service_for_changeset(changeset_id)
+        if service is not self:
+            return service.execute_changeset(changeset_id, actor=actor, channel=channel)
         from .executor import ChangeExecutor
 
         return ChangeExecutor(self).execute(changeset_id, actor=actor, channel=channel)
 
     def retry_changeset(self, changeset_id: str, *, actor: str = "user", channel: str = "cli_user") -> dict[str, Any]:
+        service = self._service_for_changeset(changeset_id)
+        if service is not self:
+            return service.retry_changeset(changeset_id, actor=actor, channel=channel)
         raw = self.store.get_changeset(changeset_id)
         if raw.get("status") not in {"failed", "partially_applied"}:
             raise ValueError(f"changeset has no failed operations to retry: {raw.get('status')}")
         from .executor import ChangeExecutor
 
         return ChangeExecutor(self).execute(changeset_id, actor=actor, channel=channel, retry=True)
+
+    def _service_for_changeset(self, changeset_id: str) -> "KnowledgeService":
+        raw = self.store.get_changeset(changeset_id)
+        semester = str(raw.get("semester") or self.semester)
+        if semester != self.semester:
+            return KnowledgeService(self.root, semester)
+        return self
 
     def amend_deadline_change(
         self,
@@ -880,6 +897,9 @@ class KnowledgeService:
         channel: str = "cli_user",
     ) -> dict[str, Any]:
         self._require_user(actor, channel)
+        service = self._service_for_changeset(changeset_id)
+        if service is not self:
+            return service.amend_deadline_change(changeset_id, new_date=new_date, note=note, actor=actor, channel=channel)
         if new_date is None and note is None:
             raise ValueError("provide a new date or a note to amend the proposal")
         changeset = ChangeSet.from_dict(self.store.get_changeset(changeset_id))
@@ -1033,6 +1053,9 @@ class KnowledgeService:
 
     def reverse_changeset(self, changeset_id: str, *, actor: str = "user", channel: str = "cli_user") -> dict[str, Any]:
         self._require_user(actor, channel)
+        service = self._service_for_changeset(changeset_id)
+        if service is not self:
+            return service.reverse_changeset(changeset_id, actor=actor, channel=channel)
         from .executor import ChangeExecutor
 
         return ChangeExecutor(self).reverse(changeset_id, actor=actor, channel=channel)

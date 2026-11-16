@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from ..assignment_history import HISTORY_FILENAME, HISTORY_RELATIVE_PATH, list_assignment_history
-from ..course_identity import course_code, course_records
+from ..course_identity import course_code, course_records, resolve_course_identifier
 from ..domain import DomainProjection
 from .model import normalize, sha256_json
 from .store import KnowledgeStore
@@ -329,9 +329,7 @@ def build_assessments(store: KnowledgeStore, root: Path, semester: str, course_i
         raise KeyError(f"semester not found: {semester}")
     courses = course_records(semester_root)
     if course_id:
-        selected = next((course for course in courses if course["id"] == course_id or course["code"] == course_id or course["name"] == course_id), None)
-        if selected is None:
-            raise KeyError(f"course not found: {course_id}")
+        selected = resolve_course_identifier(courses, course_id)
         courses = [selected]
     all_assessments: list[dict[str, Any]] = []
     all_deadlines: list[dict[str, Any]] = []

@@ -49,7 +49,10 @@ class ChangeExecutor:
             self.store.save_changeset(changeset)
             self.store.append_event(changeset_id=changeset.id, event_type="changeset.execution_started", actor=actor, channel=channel)
             for operation in _topological(changeset):
-                if operation.status in {"verified", "skipped", "reversed", "already_reversed"}:
+                if operation.status in {"verified", "reversed", "already_reversed"}:
+                    continue
+                if operation.status == "skipped":
+                    self._apply_pending_skip_effect(changeset, operation, actor=actor, channel=channel)
                     continue
                 if operation.status == "conflict":
                     continue
@@ -81,7 +84,9 @@ class ChangeExecutor:
                 changeset = ChangeSet.from_dict(raw)
                 if not any(operation.status == "executing" for operation in changeset.operations):
                     continue
-                self._recover_changeset(changeset)
+                semester = str(raw.get("semester") or self.service.semester)
+                service = self.service if semester == self.service.semester else KnowledgeService(self.service.root, semester)
+                ChangeExecutor(service)._recover_changeset(changeset)
                 recovered.append(changeset.id)
         if recovered:
             self.service._activity().append(
@@ -272,6 +277,12 @@ class ChangeExecutor:
                 operation.status = "conflict"
                 operation.last_error = "the target changed during recovery"
                 changed = True
+        for operation in changeset.operations:
+            if operation.status == "skipped" and operation.skip_effect and not operation.skip_effect_applied:
+                dependencies = [next(item for item in changeset.operations if item.id == dependency) for dependency in operation.depends_on]
+                if all(dependency.status == "verified" for dependency in dependencies):
+                    self._apply_pending_skip_effect(changeset, operation, actor="system", channel="internal")
+                    changed = True
         if not changed:
             return
         changeset.status = derive_changeset_status(changeset)
@@ -579,6 +590,25 @@ class ChangeExecutor:
         }
 
     # Terminal states
+
+    def _apply_pending_skip_effect(self, changeset: ChangeSet, operation: Operation, *, actor: str, channel: str) -> None:
+        if not operation.skip_effect or operation.skip_effect_applied:
+            return
+        dependencies = [next(item for item in changeset.operations if item.id == dependency) for dependency in operation.depends_on]
+        if not all(dependency.status == "verified" for dependency in dependencies):
+            return
+        self.service.apply_skip_effect(changeset.id, operation, actor=actor, channel=channel)
+        operation.skip_effect_applied = True
+        changeset.updated_at = now()
+        self.store.save_changeset(changeset)
+        self.store.append_event(
+            changeset_id=changeset.id,
+            event_type="operation.skip_effect_applied",
+            actor=actor,
+            channel=channel,
+            operation_id=operation.id,
+            details={"skip_effect": operation.skip_effect},
+        )
 
     def _mark_skipped(self, changeset: ChangeSet, operation: Operation, *, actor: str, channel: str) -> None:
         operation.status = "skipped"

@@ -7,7 +7,7 @@ import pytest
 from academia_os.assignment_history import add_assignment_history, list_assignment_history, update_assignment_history
 from academia_os.domain import Assignment, Deadline, DomainProjection, Evidence
 from academia_os.knowledge import KnowledgeService
-from academia_os.knowledge.model import Assertion, new_id, now
+from academia_os.knowledge.model import Assertion, ChangeSet, new_id, now
 from academia_os.tasks import TaskStore
 
 
@@ -696,6 +696,76 @@ def test_approved_change_blocks_a_competing_new_proposal(tmp_path: Path) -> None
     service.approve_changeset(first["id"])
     with pytest.raises(ValueError, match="approved change already exists"):
         service.propose_deadline_change(course_id=course.name, assessment_id=_assessment_id(record), new_date="2026-11-21")
+
+
+def test_course_identifiers_resolve_like_the_shared_cli_contract(tmp_path: Path) -> None:
+    root, course = _workspace(tmp_path)
+    record = _history(root, course)
+    service = KnowledgeService(root, "Fall 2026")
+    assert service.course_view("pol 2103")["course"]["id"] == course.name
+    assert service.course_view("politics")["course"]["id"] == course.name
+    resolved = service.assessment_view(_assessment_id(record), course_id="POL 2103")
+    assert resolved["assessment"]["title"] == "Second Essay"
+
+    other = root / "Fall 2026" / "POL 2103 - Other Section"
+    (other / "01_COURSE").mkdir(parents=True)
+    with pytest.raises(ValueError, match="ambiguous"):
+        service.assessment_view(_assessment_id(record), course_id="POL 2103")
+
+
+def test_recovery_uses_the_changeset_recorded_semester(tmp_path: Path) -> None:
+    root, course = _workspace(tmp_path)
+    winter = root / "Winter 2027" / "POL 2103 - Politics"
+    (winter / "01_COURSE").mkdir(parents=True)
+    record = _history(root, course)
+    fall = KnowledgeService(root, "Fall 2026")
+    changeset = fall.propose_deadline_change(course_id=course.name, assessment_id=_assessment_id(record), new_date="2026-11-20")
+    fall.approve_changeset(changeset["id"])
+    raw = fall.get_changeset(changeset["id"])
+    raw["status"] = "executing"
+    raw["operations"][0]["status"] = "executing"
+    fall.store.save_changeset(ChangeSet.from_dict(raw))
+    fall.update_history_deadline(course_id=course.name, record_id=record["id"], before="2026-11-12", after="2026-11-20", actor="user")
+
+    winter_service = KnowledgeService(root, "Winter 2027")
+    assert winter_service.list_changesets()["changesets"] == []
+    recovered = winter_service.recover_incomplete()
+    assert recovered["recovered_changesets"] == 1
+    assert fall.get_changeset(changeset["id"])["status"] == "verified"
+    assert list_assignment_history(root, "Fall 2026", course.name)[0]["due_date"] == "2026-11-20"
+
+
+def test_deferred_skip_effect_runs_after_the_dependency_verifies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, course = _workspace(tmp_path)
+    record = _history(root, course)
+    task = TaskStore(root, "Fall 2026").create(title="Finish Second Essay", course_id=course.name, due_date="2026-11-12")
+    service = KnowledgeService(root, "Fall 2026")
+    _link(service, course, record, task)
+    changeset = service.propose_deadline_change(course_id=course.name, assessment_id=_assessment_id(record), new_date="2026-11-20")
+    required = next(operation for operation in changeset["operations"] if operation["required"])
+    service.approve_changeset(changeset["id"], operation_ids=[required["id"]])
+
+    original = service.update_history_deadline
+    calls = {"count": 0}
+
+    def flaky(**kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("simulated assessment write failure")
+        return original(**kwargs)
+
+    monkeypatch.setattr(service, "update_history_deadline", flaky)
+    first = service.execute_changeset(changeset["id"])
+    assert first["status"] == "failed"
+    link = service.links(course.name)["links"][0]
+    assert link["status"] == "active"
+
+    retried = service.retry_changeset(changeset["id"])
+    assert retried["status"] == "verified"
+    link = service.links(course.name)["links"][0]
+    assert link["status"] == "paused"
+    task_operation = next(item for item in retried["result"]["operation_results"] if item["type"] == "task.set_due")
+    assert task_operation["skip_effect_applied"] is True
 
 
 def test_evidence_path_must_be_academic_material(tmp_path: Path) -> None:
