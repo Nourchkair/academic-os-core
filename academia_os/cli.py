@@ -1098,6 +1098,8 @@ def build_parser() -> argparse.ArgumentParser:
     notion_read.add_argument("--json", action="store_true")
     from .study.cli import add_parser as add_study_parser
     add_study_parser(sub)
+    from .knowledge.cli import add_parser as add_knowledge_parser
+    add_knowledge_parser(sub)
     dashboard_chat = sub.add_parser("chat", help=argparse.SUPPRESS)
     dashboard_chat.add_argument("--input-file", required=True)
     actions_parser = sub.add_parser("actions", help=argparse.SUPPRESS)
@@ -1190,7 +1192,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"process", "study", "chat", "chat-providers", "chat-stream", "chat-cancel", "account", "models", "connectors", "courses", "today", "tasks", "task", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard", "mcp-connections", "sessions", "actions", "import-preflight"}:
+        if args.command in {"process", "study", "chat", "chat-providers", "chat-stream", "chat-cancel", "account", "models", "connectors", "courses", "today", "tasks", "task", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard", "mcp-connections", "sessions", "actions", "import-preflight", "knowledge", "change"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -1202,6 +1204,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def dispatch(args: argparse.Namespace) -> int:
+    if args.command in {"knowledge", "change"}:
+        from .knowledge.cli import run as run_knowledge
+
+        return run_knowledge(args, _profile_path(args))
     if args.command == "models":
         _emit(_models(args), as_json=args.json)
         return 0

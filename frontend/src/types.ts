@@ -610,3 +610,133 @@ export type MigrationExecuteResult = {
   plan_path: string
   report_path: string
 }
+
+export type KnowledgeField = {
+  value: string | null
+  resolution: string
+  confidence: string
+  verification: string
+  source_kind: string | null
+  source?: Record<string, unknown> | null
+  evidence: Array<Record<string, unknown>>
+  alternatives: Array<Record<string, unknown>>
+  conflicts: Array<Record<string, unknown>>
+  warnings: string[]
+}
+
+export type KnowledgeTaskLink = {
+  id: string
+  course_id: string
+  assessment_id: string
+  task_id: string
+  mode: 'mirror_deadline' | 'related'
+  status: 'active' | 'paused' | 'removed'
+  task_title?: string | null
+  task_due_date?: string | null
+  task_status?: string | null
+  diverged?: boolean
+  paused_by_change_id?: string | null
+  [key: string]: unknown
+}
+
+export type KnowledgeAssessment = {
+  id: string
+  course_id: string
+  semester: string
+  title: string
+  kind: string
+  status?: string | null
+  owner: Record<string, unknown>
+  source: Record<string, unknown>
+  fields: { due_date: KnowledgeField; weight?: KnowledgeField }
+  aliases: Array<Record<string, unknown>>
+  external_values: Array<Record<string, unknown>>
+  links: KnowledgeTaskLink[]
+  warnings: string[]
+}
+
+export type KnowledgeCourseView = {
+  semester: string
+  course: Course
+  assessments: KnowledgeAssessment[]
+  standalone_deadlines: Array<Record<string, unknown>>
+  conflicts: Array<Record<string, unknown>>
+  warnings: string[]
+  migration: Record<string, unknown>
+}
+
+export type ChangeOperation = {
+  id: string
+  type: string
+  target: Record<string, unknown>
+  before: string | null
+  after: string | null
+  depends_on: string[]
+  required: boolean
+  default_selected: boolean
+  reversible: boolean
+  sync_basis?: string | null
+  skip_effect?: string | null
+  expected_revision?: string | null
+  idempotency_key?: string | null
+  evidence_ids: string[]
+  status: string
+  attempts: number
+  last_error?: string | null
+  error_class?: string | null
+  result?: Record<string, unknown> | null
+  label?: string | null
+  target_title?: string | null
+  started_at?: string | null
+  completed_at?: string | null
+  skip_effect_applied?: boolean
+}
+
+export type ChangeOperationResult = {
+  operation_id: string
+  type: string
+  target: Record<string, unknown>
+  label?: string | null
+  target_title?: string | null
+  status: string
+  before: string | null
+  after: string | null
+  attempts: number
+  error?: string | null
+  skip_effect_applied?: boolean
+  projection_results?: Array<Record<string, unknown>>
+}
+
+export type ChangeSet = {
+  id: string
+  version: number
+  title: string
+  course_id: string
+  semester: string
+  origin: string
+  status: string
+  created_at: string
+  updated_at: string
+  created_by: string
+  summary: string
+  evidence_ids: string[]
+  operations: ChangeOperation[]
+  conflicts: Array<Record<string, unknown>>
+  warnings: string[]
+  impact: {
+    required_operations: string[]
+    optional_operations: string[]
+    irreversible_operations: string[]
+    affected_entities: Array<Record<string, unknown>>
+    summary: string
+  }
+  approval: Record<string, unknown>
+  execution: Record<string, unknown>
+  result: {
+    state: string
+    operation_results: ChangeOperationResult[]
+    summary?: string | null
+  }
+  reversal: Record<string, unknown>
+  evidence?: Array<Record<string, unknown>>
+}

@@ -1135,3 +1135,109 @@ button { -webkit-tap-highlight-color: transparent; }
   .codex-connect-warning { background: #332a1f; border-color: #55452f; color: #dcc29e; }
   .codex-connect-badge.connected { background: #283b2d; border-color: #3c5e45; color: #93d0a1; }
 }
+
+.history-card-actions { align-items: center; display: flex; gap: 14px; margin-top: 12px; }
+.history-change-button { background: #eef3ec; border: 1px solid #d9e3d6; border-radius: 7px; color: #4f6b50; font-size: 10px; font-weight: 700; padding: 5px 9px; }
+.history-change-button:hover { background: #e4ede1; }
+.deadline-change-backdrop { align-items: center; background: rgba(32, 32, 32, .46); display: flex; inset: 0; justify-content: center; padding: 24px; position: fixed; z-index: 30; }
+.deadline-change-dialog { background: #ffffff; border: 1px solid #e6e6e6; border-radius: 18px; box-shadow: 0 28px 90px rgba(29, 29, 29, .28); display: flex; flex-direction: column; max-height: min(88vh, 900px); max-width: 760px; overflow: auto; width: min(100%, 760px); }
+.deadline-change-heading { align-items: flex-start; border-bottom: 1px solid #efefef; display: flex; gap: 16px; justify-content: space-between; padding: 22px 24px 16px; }
+.deadline-change-heading h2 { color: #3e3e3e; font-size: 18px; margin: 2px 0 4px; }
+.deadline-change-heading p { color: #8a8a8a; font-size: 11px; margin: 0; }
+.deadline-change-form { display: grid; gap: 14px; padding: 20px 24px 24px; }
+.deadline-change-form > label { display: grid; gap: 6px; }
+.deadline-change-form > label > span { color: #777777; font-size: 10px; font-weight: 700; }
+.deadline-change-form label small { color: #a1a1a1; font-size: 9px; font-weight: 400; }
+.deadline-change-form input,.deadline-change-form select,.deadline-change-form textarea { background: #ffffff; border: 1px solid #e6e6e6; border-radius: 8px; color: #545454; font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; min-height: 36px; padding: 8px 10px; width: 100%; }
+.deadline-change-form textarea { line-height: 1.45; resize: vertical; }
+.deadline-change-wide { grid-column: 1 / -1; }
+.deadline-change-links { background: #fafafa; border: 1px solid #ededed; border-radius: 11px; padding: 13px 14px; }
+.deadline-change-links h3 { color: #555555; font-size: 12px; margin: 0 0 7px; }
+.deadline-change-hint { color: #8d8d8d; font-size: 10px; line-height: 1.5; margin: 7px 0; }
+.deadline-change-task { align-items: flex-start; background: #ffffff; border: 1px solid #ececec; border-radius: 8px; cursor: pointer; display: flex; gap: 10px; margin-top: 7px; padding: 9px 10px; }
+.deadline-change-task input { accent-color: #6f876f; margin: 2px 0 0; width: auto; }
+.deadline-change-task > span { color: #5f7a60; font-size: 12px; }
+.deadline-change-task div { display: grid; gap: 2px; }
+.deadline-change-task strong { color: #4b4b4b; font-size: 11px; }
+.deadline-change-task small { color: #999999; font-size: 9px; line-height: 1.4; }
+.deadline-change-task.linked { cursor: default; }
+.deadline-change-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+.deadline-change-actions button:disabled { cursor: wait; opacity: .6; }
+.deadline-change-preview, .deadline-change-result { display: grid; gap: 14px; padding: 20px 24px 24px; }
+.deadline-change-summary h3 { color: #3f3f3f; font-size: 16px; margin: 3px 0 5px; }
+.deadline-change-summary p { color: #7d7d7d; font-size: 11px; line-height: 1.5; margin: 0; }
+.deadline-change-summary .deadline-change-selection-summary { color: #5c6f5c; font-weight: 650; margin-top: 6px; }
+.deadline-change-operation-list { display: grid; gap: 8px; }
+.deadline-change-operation { align-items: center; background: #fafafa; border: 1px solid #ececec; border-radius: 10px; display: flex; gap: 12px; justify-content: space-between; padding: 11px 12px; }
+.deadline-change-operation.required { background: #f6faf5; border-color: #dce8d8; }
+.deadline-change-operation > div:first-of-type { display: grid; gap: 2px; }
+.deadline-change-operation strong { color: #4a4a4a; font-size: 11px; }
+.deadline-change-operation small { color: #939393; font-size: 9px; }
+.deadline-change-operation input { accent-color: #6f876f; }
+.deadline-change-required, .deadline-change-optional { color: #5f7a60; font-size: 8px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.deadline-change-optional { color: #8c8c8c; }
+.deadline-change-values { align-items: center; display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; }
+.deadline-change-values b { color: #4a4a4a; font-size: 11px; }
+.deadline-change-values span { color: #a5a5a5; }
+.deadline-change-values em { background: #eef3ec; border-radius: 5px; color: #557056; font-size: 8px; font-style: normal; font-weight: 700; padding: 3px 6px; text-transform: capitalize; }
+.deadline-change-operation.result-failed,.deadline-change-operation.result-blocked,.deadline-change-operation.result-conflict { background: #fff6ee; border-color: #ecdcc9; }
+.deadline-change-operation.result-skipped { opacity: .72; }
+.deadline-change-evidence { background: #fafafa; border: 1px solid #ededed; border-radius: 10px; padding: 12px 13px; }
+.deadline-change-evidence h4 { color: #555555; font-size: 11px; margin: 0 0 7px; }
+.deadline-change-evidence-row { display: grid; gap: 2px; }
+.deadline-change-evidence-row strong { color: #4f4f4f; font-size: 10px; }
+.deadline-change-evidence-row span { color: #8f8f8f; font-size: 9px; text-transform: capitalize; }
+.deadline-change-evidence-row p { color: #6f6f6f; font-size: 10px; line-height: 1.5; margin: 4px 0 0; }
+.deadline-change-warning { background: #fff7ec; border: 1px solid #ebdcc4; border-radius: 8px; color: #86653f; font-size: 10px; line-height: 1.5; padding: 9px 10px; }
+.deadline-change-warning.soft { background: #f7f7f7; border-color: #e7e7e7; color: #777777; }
+.deadline-change-result-banner { background: #f4f8f2; border: 1px solid #dce8d8; border-radius: 11px; padding: 14px 15px; }
+.deadline-change-result-banner.status-partially_applied,.deadline-change-result-banner.status-failed,.deadline-change-result-banner.status-partially_reverted { background: #fff7ec; border-color: #ebdcc4; }
+.deadline-change-result-banner.status-reversal_conflict { background: #fff0ee; border-color: #efd2cd; }
+.deadline-change-result-banner h3 { color: #405b42; font-size: 15px; margin: 2px 0 4px; }
+.deadline-change-result-banner.status-partially_applied h3,.deadline-change-result-banner.status-failed h3,.deadline-change-result-banner.status-partially_reverted h3 { color: #86653f; }
+.deadline-change-result-banner p { color: #6f7d6d; font-size: 10px; line-height: 1.5; margin: 0; }
+.deadline-change-error { color: #a4584d; font-size: 9px; grid-column: 1 / -1; margin: 0; }
+.deadline-change-link-state { color: #8a6a42 !important; }
+@media (max-width: 760px) { .deadline-change-backdrop { padding: 10px; }.deadline-change-dialog { max-height: 92vh; }.deadline-change-operation { align-items: flex-start; flex-direction: column; }.deadline-change-values { justify-content: flex-start; }.history-card-actions { align-items: flex-start; flex-direction: column; gap: 8px; } }
+@media (prefers-color-scheme: dark) {
+  .deadline-change-dialog { background: #20201f; border-color: #3c3c39; color: #e4e4e4; }
+  .deadline-change-heading { border-bottom-color: #343432; }
+  .deadline-change-heading h2 { color: #f0f0f0; }
+  .deadline-change-heading p { color: #a8a8a5; }
+  .deadline-change-form > label > span { color: #b6b6b2; }
+  .deadline-change-form input, .deadline-change-form select, .deadline-change-form textarea { background: #2a2a28; border-color: #44443f; color: #ededeb; }
+  .deadline-change-links { background: #262624; border-color: #3a3a36; }
+  .deadline-change-links h3 { color: #e0e0dd; }
+  .deadline-change-hint { color: #a7a7a2; }
+  .deadline-change-task { background: #2d2d2a; border-color: #40403b; }
+  .deadline-change-task strong { color: #ececea; }
+  .deadline-change-task small { color: #a7a7a2; }
+  .deadline-change-summary h3 { color: #f0f0f0; }
+  .deadline-change-summary p { color: #b6b6b0; }
+  .deadline-change-summary .deadline-change-selection-summary { color: #c4d6c2; }
+  .deadline-change-operation { background: #2a2a27; border-color: #3a3a36; }
+  .deadline-change-operation.required { background: #263026; border-color: #3c5e45; }
+  .deadline-change-operation strong { color: #ececea; }
+  .deadline-change-operation small { color: #a7a7a2; }
+  .deadline-change-values b { color: #ececea; }
+  .deadline-change-values span { color: #8e8e89; }
+  .deadline-change-values em { background: #2f3b2f; color: #b8dcb8; }
+  .deadline-change-evidence { background: #262624; border-color: #3a3a36; }
+  .deadline-change-evidence h4 { color: #e0e0dd; }
+  .deadline-change-evidence-row strong { color: #ececea; }
+  .deadline-change-evidence-row span { color: #a7a7a2; }
+  .deadline-change-evidence-row p { color: #c0c0ba; }
+  .deadline-change-warning { background: #332a1f; border-color: #55452f; color: #dcc29e; }
+  .deadline-change-warning.soft { background: #2c2c29; border-color: #3c3c38; color: #b6b6b0; }
+  .deadline-change-result-banner { background: #263026; border-color: #3c5e45; }
+  .deadline-change-result-banner.status-partially_applied, .deadline-change-result-banner.status-failed, .deadline-change-result-banner.status-partially_reverted { background: #332a1f; border-color: #55452f; }
+  .deadline-change-result-banner.status-reversal_conflict { background: #382421; border-color: #5d3a33; }
+  .deadline-change-result-banner h3 { color: #b8dcb8; }
+  .deadline-change-result-banner.status-partially_applied h3, .deadline-change-result-banner.status-failed h3, .deadline-change-result-banner.status-partially_reverted h3 { color: #dcc29e; }
+  .deadline-change-result-banner p { color: #b8c8b6; }
+  .deadline-change-link-state { color: #dcc29e !important; }
+  .deadline-change-dialog .secondary-button { background: #2f2f2c; border-color: #45453f; color: #e0e0dd; }
+  .deadline-change-dialog .primary-button { background: #d5d5d5; color: #2f2f2f; }
+  .deadline-change-dialog .primary-button:disabled { background: #3a3a37; color: #8f8f8a; }
+  .deadline-change-operation.result-failed, .deadline-change-operation.result-blocked, .deadline-change-operation.result-conflict { background: #332a1f; border-color: #55452f; }
+}

@@ -186,7 +186,16 @@ def add_assignment_history(workspace_root: Path, semester: str, course_id: str, 
     return record
 
 
-def update_assignment_history(workspace_root: Path, semester: str, course_id: str, record_id: str, values: dict[str, Any], *, actor: str = "user") -> dict[str, Any]:
+def update_assignment_history(
+    workspace_root: Path,
+    semester: str,
+    course_id: str,
+    record_id: str,
+    values: dict[str, Any],
+    *,
+    actor: str = "user",
+    expected_due_date: Any = ...,
+) -> dict[str, Any]:
     course_root = resolve_course_directory(workspace_root, semester, course_id)
     path = _history_path(course_root)
     default = _load_existing_for_write(path, course_root.name, semester)
@@ -210,6 +219,8 @@ def update_assignment_history(workspace_root: Path, semester: str, course_id: st
             record = dict(raw_record)
             if record.get("id") == record_id:
                 found = True
+                if expected_due_date is not ... and record.get("due_date") != expected_due_date:
+                    raise ValueError("coursework deadline changed before the approved update")
                 old_status = record.get("status")
                 record.update(fields)
                 record["updated_at"] = now
