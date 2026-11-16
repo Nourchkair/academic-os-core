@@ -33,7 +33,9 @@ For a packaged macOS app installed at `/Applications/Academia OS.app`, Tauri pla
 ls "/Applications/Academia OS.app/Contents/MacOS"/academia-*
 ```
 
-For Codex, add the sidecar path it prints to `~/.codex/config.toml`:
+The easiest setup is Academia **Settings → Codex → Connect Codex**. It locates the installed sidecar, writes or updates only the `[mcp_servers.academia]` entry, keeps a timestamped `config.toml` backup, and sets `default_tools_approval_mode = "approve"`. You can choose the trusted action categories in the card, then restart Codex.
+
+To configure it manually, add the sidecar path to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.academia]

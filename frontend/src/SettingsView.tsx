@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, isTauriEnvironment } from './lib/api'
+import { CodexConnectionCard } from './CodexConnectionCard'
 import { ConnectionsHub } from './ConnectionsHub'
 import type { SettingsPreview, StatusPayload } from './types'
 import type { Update } from '@tauri-apps/plugin-updater'
@@ -150,6 +151,9 @@ export function SettingsView({ status, onSaved, onOpenReview }: SettingsViewProp
     </> : <div className="loading-card">Loading your local settings…</div>}
     <SettingsSection title="Connections" description="Choose how Academia reaches AI models, academic apps, and optional external tools. Each connection is explicit and can be removed locally.">
       <ConnectionsHub onOpenReview={onOpenReview} />
+    </SettingsSection>
+    <SettingsSection title="Codex" description="Connect Codex on this Mac to Academia's local MCP server. Codex can read your courses and sources and take only the actions you allow.">
+      <CodexConnectionCard />
     </SettingsSection>
     <SettingsSection title="App updates" description="Check for signed Academia OS updates and install them on this device. Your academic workspace stays in place.">
       {isTauriEnvironment() ? <>
