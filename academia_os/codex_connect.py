@@ -28,6 +28,12 @@ def codex_config_path() -> Path:
     return Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser().resolve() / "config.toml"
 
 
+def _codex_installed() -> bool:
+    paths = [os.environ.get("PATH", "")]
+    paths.extend(["/opt/homebrew/bin", "/usr/local/bin", str(Path.home() / ".local" / "bin")])
+    return shutil.which("codex", path=os.pathsep.join(path for path in paths if path)) is not None
+
+
 def _toml_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
@@ -190,7 +196,7 @@ def status(profile: Path | None = None, *, config_path: Path | None = None) -> d
         "approval_mode": server.get("default_tools_approval_mode") if isinstance(server, dict) else None,
         "expected_command": command,
         "expected_args": expected_args,
-        "codex_installed": shutil.which("codex") is not None,
+        "codex_installed": _codex_installed(),
         "matches_current_install": bool(
             connected
             and server.get("command") == command

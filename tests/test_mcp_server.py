@@ -568,3 +568,17 @@ def test_processing_detail_returns_failure_context(tmp_path: Path) -> None:
         assert value["failure_reason"] == "synthetic extraction failure"
     finally:
         server.close()
+
+
+def test_unknown_course_returns_error_without_killing_the_server(tmp_path: Path) -> None:
+    _, _root, profile = prepared_workspace(tmp_path)
+    server = McpServer(profile)
+    try:
+        message = call_error(server, "academia_grade_history", {"course": "LSR"})
+        assert "course not found" in message
+
+        # The same process must still answer the next request.
+        status = call_json(server, "academia_status")
+        assert status["workspace"]["academic_root"]
+    finally:
+        server.close()

@@ -101,3 +101,9 @@ def test_command_keeps_the_virtual_environment_symlink(tmp_path: Path, monkeypat
     assert command.endswith("python")
     assert args[:2] == ["-m", "academia_os"]
     assert environment["PYTHONPATH"]
+
+
+def test_codex_installed_checks_common_gui_paths(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setattr(codex_connect.shutil, "which", lambda command, path=None: "/opt/homebrew/bin/codex" if path and "/opt/homebrew/bin" in path else None)
+    assert codex_connect._codex_installed() is True

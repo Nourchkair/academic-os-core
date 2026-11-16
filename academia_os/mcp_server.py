@@ -1680,7 +1680,7 @@ def _handle(
         try:
             result = _call_tool(name, params.get("arguments", {}), profile, read_only=read_only, proposal_only=proposal_only, proposal_tools=proposal_tools, mcp_grants=mcp_grants, download_intake=download_intake, allow_actions=allow_actions, scope=scope)
             return _response(request_id, {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]})
-        except (McpError, OSError, subprocess.TimeoutExpired, TypeError, ValueError) as exc:
+        except (McpError, OSError, subprocess.TimeoutExpired, TypeError, ValueError, KeyError) as exc:
             error = exc if isinstance(exc, McpError) else McpError(str(exc), -32000)
             return _response(request_id, {
                 "content": [{"type": "text", "text": str(error)}],
@@ -1716,7 +1716,12 @@ def serve(
         else:
             try:
                 request = json.loads(line)
-                message = _handle(request, profile, read_only=read_only, proposal_only=proposal_only, proposal_tools=proposal_tools, mcp_grants=mcp_grants, download_intake=download_intake, allow_actions=allow_actions, scope=scope)
+                try:
+                    message = _handle(request, profile, read_only=read_only, proposal_only=proposal_only, proposal_tools=proposal_tools, mcp_grants=mcp_grants, download_intake=download_intake, allow_actions=allow_actions, scope=scope)
+                except Exception as exc:
+                    # A tool argument error must never terminate the stdio server.
+                    request_id = request.get("id") if isinstance(request, dict) else None
+                    message = {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32603, "message": f"Academia tool failed: {exc}"}}
             except json.JSONDecodeError:
                 message = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error."}}
         if message is not None:
