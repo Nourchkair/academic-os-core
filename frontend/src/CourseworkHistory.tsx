@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
+import { DeadlineChangeDialog } from './DeadlineChange'
 import { api, fileUrl, isTauriEnvironment } from './lib/api'
 import { composeGrade, gradeParts, gradePartsList } from './lib/grades'
 import type { Course, CourseworkHistoryRecord, CourseworkHistoryInput } from './types'
@@ -22,16 +23,28 @@ export function CourseworkHistoryView({ course, semester, onHistoryChanged }: { 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [previewPath, setPreviewPath] = useState<string | null>(null)
+  const [changeRecord, setChangeRecord] = useState<CourseworkHistoryRecord | null>(null)
 
   useEffect(() => {
     let active = true
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     setError(null)
-    void api.courseworkHistory(course.id, semester)
-      .then((value) => { if (active) setRecords(value) })
-      .catch((reason) => { if (active) setError(String(reason)) })
-      .finally(() => { if (active) setLoading(false) })
+    void (async () => {
+      try {
+        await api.recoverChangeSets?.(semester)
+      } catch {
+        // Recovery is best-effort; the History read below still works.
+      }
+      try {
+        const value = await api.courseworkHistory(course.id, semester)
+        if (active) setRecords(value)
+      } catch (reason) {
+        if (active) setError(String(reason))
+      } finally {
+        if (active) setLoading(false)
+      }
+    })()
     return () => { active = false }
   }, [course.id, semester])
 
@@ -64,10 +77,11 @@ export function CourseworkHistoryView({ course, semester, onHistoryChanged }: { 
         {record.notes && <p className="coursework-history-notes">{record.notes}</p>}
         {!!record.artifact_paths.length && <div className="history-artifacts"><strong>Files</strong>{record.artifact_paths.map((path) => <button type="button" className="history-artifact-link" key={path} onClick={() => setPreviewPath(path)}>{path.split('/').pop()} <span>Preview</span></button>)}</div>}
         {!!record.status_history.length && <details className="history-status-log"><summary>Status log</summary><ol>{record.status_history.map((event, index) => <li key={`${event.recorded_at}-${index}`}><strong>{labelForStatus(event.status)}</strong> · {formatDateTime(event.recorded_at)} · {event.basis}</li>)}</ol></details>}
-        <button type="button" className="history-edit-button" onClick={() => { setEditingId(record.id); setAdding(false) }}>Edit record</button>
+        <div className="history-card-actions">{record.due_date && <button type="button" className="history-change-button" onClick={() => setChangeRecord(record)}>Change deadline</button>}<button type="button" className="history-edit-button" onClick={() => { setEditingId(record.id); setAdding(false) }}>Edit record</button></div>
       </>}
     </article>)}</div> : !adding && <article className="course-material-empty"><strong>No coursework history yet</strong><p>Add an assignment, essay, project, or exam to keep its status and related files with this class.</p><button type="button" className="secondary-button" onClick={() => setAdding(true)}>Add the first item <span>+</span></button></article>}
     {previewPath && <HistoryFilePreview course={course} semester={semester} relativePath={previewPath} onClose={() => setPreviewPath(null)} />}
+    {changeRecord && <DeadlineChangeDialog course={course} semester={semester} record={changeRecord} onClose={() => setChangeRecord(null)} onChanged={async () => { const value = await api.courseworkHistory(course.id, semester); setRecords(value); await onHistoryChanged() }} />}
   </section>
 }
 

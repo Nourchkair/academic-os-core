@@ -177,8 +177,8 @@ applies a second write.
 
 ### Expected revision
 
-`expected_revision` is a content hash of the target record's canonical fields at
-proposal time. The executor recomputes it before writing.
+`expected_revision` is a content hash of the target field and the target's
+stable identity at proposal time. The executor recomputes it before writing.
 
 - If the revision matches, the operation may proceed.
 - If it does not match and the target already equals `after`, the operation is

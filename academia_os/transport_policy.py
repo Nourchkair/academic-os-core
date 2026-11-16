@@ -39,6 +39,8 @@ SAFE_COMMANDS = frozenset(
         "agents",
         "agent",
         "workflow",
+        "knowledge",
+        "change",
     }
 )
 
@@ -72,4 +74,8 @@ def validate_command(
         raise ValueError("the dashboard may only read processing status")
     if command == "task" and (not values or values[0] not in {"list", "create", "update", "complete", "reopen"}):
         raise ValueError("the dashboard may only list, create, update, complete, or reopen user tasks")
+    if command == "knowledge" and (not values or values[0] not in {"view", "assessment", "conflicts", "links"}):
+        raise ValueError("the dashboard may only read knowledge views")
+    if command == "change" and (not values or values[0] not in {"list", "show", "amend", "propose-deadline", "link-task", "pause-link", "resume-link", "approve", "execute", "retry", "cancel", "reverse", "recover"}):
+        raise ValueError("unsupported dashboard change command")
     return command, values

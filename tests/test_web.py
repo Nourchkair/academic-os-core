@@ -146,6 +146,55 @@ def test_agent_command_is_allowed_by_local_transport_without_shell_interpretatio
     assert calls == [("agent", ["attention", "--json"])]
 
 
+def test_knowledge_and_change_commands_are_allowed_by_local_transport(tmp_path: Path) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    def runner(command: str, args: list[str]) -> CommandResult:
+        calls.append((command, args))
+        return CommandResult(0, json.dumps({"schema_version": 1, "ok": True}), "")
+
+    with running_server(tmp_path, runner=runner) as server:
+        for command, args in (
+            ("knowledge", ["view", "--course", "POL 2103 - Politics", "--semester", "Fall 2026"]),
+            ("change", ["show", "changeset:one", "--semester", "Fall 2026"]),
+        ):
+            status, _headers, payload = request(
+                server,
+                "POST",
+                "/api/v1/command",
+                body=command_body(command, args),
+                headers={"Content-Type": "application/json"},
+            )
+            assert status == 200, payload
+            assert json.loads(payload)["ok"] is True
+
+    assert calls == [
+        ("knowledge", ["view", "--course", "POL 2103 - Politics", "--semester", "Fall 2026", "--json"]),
+        ("change", ["show", "changeset:one", "--semester", "Fall 2026", "--json"]),
+    ]
+
+
+def test_knowledge_migration_is_not_available_to_the_dashboard_transport(tmp_path: Path) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    def runner(command: str, args: list[str]) -> CommandResult:
+        calls.append((command, args))
+        return CommandResult(0, "{}", "")
+
+    with running_server(tmp_path, runner=runner) as server:
+        status, _headers, payload = request(
+            server,
+            "POST",
+            "/api/v1/command",
+            body=command_body("knowledge", ["migrate"]),
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert status == 400
+    assert calls == []
+    assert "read knowledge views" in payload.decode("utf-8")
+
+
 def test_cors_allows_only_the_local_frontend_origins(tmp_path: Path) -> None:
     with running_server(tmp_path) as server:
         allowed_status, allowed_headers, _ = request(

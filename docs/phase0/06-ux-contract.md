@@ -113,7 +113,7 @@ Skipped:
 
 ```text
 Task: Print submission was not changed.
-Its deadline link is paused. [Resume link]
+Its deadline link is paused. The task stays independent until you link it again.
 ```
 
 Partial failure:
@@ -151,8 +151,8 @@ Proposed: Nov 20
 - Undo revalidates every target. If a later student edit changed a target, undo
   stops and explains which record changed.
 - Undo preserves the original audit history and adds reversal entries.
-- Paused links are not silently reactivated; **Resume link** is a separate
-  action.
+- Paused links are not silently reactivated. Re-linking is a separate explicit
+  student action and is not performed by the result screen.
 
 ## Component contract
 

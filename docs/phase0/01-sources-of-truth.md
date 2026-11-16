@@ -148,13 +148,13 @@ field-specific. For `assessment.due_date`, the resolver uses these ordered rules
 1. **Scope must match.** An assertion whose `authority_scope` does not include
    `assessment.due_date` is not a candidate for this field.
 2. **Owner record wins when present.** Approval is required to change it.
-3. **Verification before recency.** A verified assertion outranks an unverified
-   one; corroborated outranks unverified.
-4. **Source authority for dates.** A professor announcement or verified external
-   source outranks an original syllabus for a changed date; the syllabus remains
-   authoritative for its published version. A student report is current but
-   unverified. AI extraction points to evidence and never outranks a human
-   source or an original document by itself.
+3. **Source authority for the field.** A professor announcement or verified
+   external source outranks an original syllabus for a changed date; the
+   syllabus remains authoritative for its published version. A student report is
+   current but unverified. AI extraction points to evidence and never outranks a
+   human source or an original document by itself.
+4. **Verification.** Among sources with the same authority, verified outranks
+   corroborated, which outranks unverified; disputed is lowest.
 5. **Specificity.** An exact date outranks an approximate or partial date.
 6. **Recency within the same authority and verification.** A newer assertion
    wins only after the earlier rules tie.

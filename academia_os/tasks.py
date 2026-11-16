@@ -388,3 +388,35 @@ class TaskStore:
 
     def reopen(self, task_id: str, *, actor: str = "user") -> dict[str, Any]:
         return self.update(task_id, status="open", actor=actor)
+
+    def update_due_date_if_unchanged(self, task_id: str, *, before: str | None, after: str | None, actor: str = "user") -> dict[str, Any]:
+        """Update one task deadline only when it still matches the approved value."""
+        raw_id = task_id[5:] if task_id.startswith("task:") else task_id
+        updated_task: dict[str, Any] | None = None
+
+        def transform(existing: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+            nonlocal updated_task
+            tasks: list[dict[str, Any]] = []
+            for task in existing:
+                if task["id"] != raw_id:
+                    tasks.append(task)
+                    continue
+                if task.get("due_date") != before:
+                    raise ValueError("task deadline changed before the approved update")
+                updated_task = self._apply_fields(task, due_date=after)
+                tasks.append(updated_task)
+            if updated_task is None:
+                raise KeyError(f"task not found: {task_id}")
+            return tasks, updated_task
+
+        updated_task = self._mutate(transform)
+        self._activity().append(
+            event_type="task.updated",
+            title=f"Task updated: {updated_task['title']}",
+            course=updated_task.get("course_id"),
+            source=f"{self.semester}/SEMESTER_TASKS.md",
+            confidence="user-confirmed" if updated_task["provenance"] == "USER-CREATED" else "unverified",
+            actor=actor,
+            details={"task_id": updated_task["id"], "status": updated_task["status"], "due_date": updated_task.get("due_date"), "due_time": updated_task.get("due_time")},
+        )
+        return updated_task

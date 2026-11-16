@@ -145,12 +145,16 @@ unknown
 ### Status
 
 ```text
+candidate
 active
 superseded
 rejected
 retracted
 ```
 
+- `candidate` is a proposed value attached to a pending ChangeSet. It is
+  recorded but excluded from effective-value resolution until applied.
+- `active` is a current source claim.
 - Assertions are never deleted.
 - Superseding an assertion appends `superseded_by` on the old record and
   `supersedes` on the new one.
@@ -159,6 +163,12 @@ retracted
 - `retracted` means the source withdrew the claim.
 - `applied_change_id` records that the assertion was used to update an owner
   record. It does not change verification.
+- Applying a value marks the candidate `active`, supersedes earlier owner
+  projections and prior applied values with a different value, and preserves
+  all of them for audit. Independent source claims remain active so a
+  disagreement stays visible.
+- Reversing a value supersedes the applied assertion and appends a
+  `system_projection` assertion for the restored value.
 
 ### Authority scope
 

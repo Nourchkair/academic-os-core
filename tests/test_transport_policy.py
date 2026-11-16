@@ -59,3 +59,15 @@ def test_task_transport_allows_only_supported_user_actions() -> None:
     for args in (["delete", "one"], ["propose", "--title", "Read"], ["import", "x"], []):
         with pytest.raises(ValueError, match="user tasks"):
             validate_command("task", args)
+
+
+def test_knowledge_transport_is_read_only_and_change_transport_is_bounded() -> None:
+    assert validate_command("knowledge", ["view", "--course", "POL 2103"])[1] == ["view", "--course", "POL 2103"]
+    for args in (["migrate"], ["delete", "x"], []):
+        with pytest.raises(ValueError, match="read knowledge views"):
+            validate_command("knowledge", args)
+    assert validate_command("change", ["show", "changeset:one"])[1] == ["show", "changeset:one"]
+    assert validate_command("change", ["approve", "changeset:one"])[1] == ["approve", "changeset:one"]
+    for args in (["delete", "x"], ["migrate"], []):
+        with pytest.raises(ValueError, match="dashboard change command"):
+            validate_command("change", args)

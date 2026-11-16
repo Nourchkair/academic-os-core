@@ -1,6 +1,6 @@
 # 09 — Phase 1 implementation plan
 
-Status: **ready to implement**
+Status: **implemented on `next/academic-engine`; validated locally, not merged or released**
 
 ## Goal
 
@@ -106,6 +106,7 @@ academia change link-task --course COURSE --assessment ID --task TASK_ID \
 academia change pause-link LINK_ID --actor user --json
 academia change list --semester TERM --json
 academia change show CHANGESET_ID --json
+academia change amend CHANGESET_ID --new-date YYYY-MM-DD --note TEXT --actor user --json
 academia change approve CHANGESET_ID --operations OP_ID... --actor user --json
 academia change execute CHANGESET_ID --json
 academia change retry CHANGESET_ID --json
@@ -207,6 +208,7 @@ frontend/src/CourseworkHistory.tsx     entry point and refresh
 frontend/src/lib/api.ts                typed calls
 frontend/src/types.ts                  ChangeSet/preview types
 frontend/src/styles.css                dialog and result styles
+frontend/src-tauri/src/lib.rs          desktop command allowlist
 tests/test_web.py                      route coverage
 ```
 

@@ -20,7 +20,8 @@ channel: dashboard | cli_user | mcp | assistant | internal
 
 - `user`/`student` on `dashboard` or `cli_user` is a user-authorized path.
 - `agent:*` on `mcp` or `assistant` is an agent path.
-- `system` is used only for migration, recovery, and automatic audit events.
+- `system` is used only for migration, recovery, automatic skip effects, and
+  audit events.
 
 The core cannot cryptographically prove that a human clicked a dashboard button.
 It can enforce that agent channels never approve, and that every approval,

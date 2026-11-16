@@ -1,6 +1,6 @@
 # Phase 0 — Academic knowledge and change-coordination contracts
 
-Status: **approved direction, contracts frozen for Phase 1 implementation**
+Status: **implemented and locally validated on `next/academic-engine`; not merged or released**
 
 This directory defines the contracts for the first Academic Intelligence Engine
 slice. It is deliberately narrower than the five-phase product roadmap.
@@ -80,3 +80,18 @@ partial-approval, crash-recovery, and reversal-conflict cases.
 
 These are durable workflow records, not rebuildable indexes. The human-readable
 academic workspace remains readable without Academia OS.
+
+## Phase 1 status
+
+The local deadline-change slice is implemented on `next/academic-engine` and
+validated with:
+
+- Python knowledge, ChangeSet, migration, recovery, and permission tests;
+- frontend typecheck, component tests, and production build;
+- a real browser walkthrough on a copied workspace: preview, partial approval,
+  skipped mirrored task, paused link, verified result, and conditional reversal;
+- an end-to-end dashboard command-bridge walkthrough;
+- a read-only check against a real workspace copy.
+
+It is **not merged, released, or installed** into `/Applications/AcademiaOS.app`.
+The installed app and the `academia` launcher still use the existing release.
