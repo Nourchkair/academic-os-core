@@ -78,6 +78,7 @@ export type LibraryItem = {
   source_type?: string
   processing_status?: 'DETECTED' | 'PENDING' | 'PROCESSING' | 'VERIFIED' | 'ACKNOWLEDGED' | 'FAILED'
   extraction_status?: string | null
+  source_note?: boolean
 }
 
 export type FilePreview = {
@@ -766,6 +767,8 @@ export type IntakeCandidate = {
   confidence: string
   specificity: string
   status: string
+  display_status?: string
+  changeset_status?: string | null
   resolution: Record<string, unknown>
   proposed_change_id?: string | null
   warnings: string[]

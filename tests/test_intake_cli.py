@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from tests.test_cli import run_cli
 
@@ -90,3 +91,30 @@ def test_intake_agent_cannot_resolve(tmp_path) -> None:
     )
     assert result.returncode == 2
     assert json.loads(result.stdout)["type"] == "PermissionError"
+
+
+def test_intake_document_cli_scans_an_imported_markdown_file(tmp_path) -> None:
+    added = run_cli(
+        tmp_path,
+        "history", "add", "--course", "POL 2103 - Politics", "--kind", "essay", "--title", "Second Essay",
+        "--status", "planned", "--due-date", "2026-11-12", "--semester", "Fall 2026", "--json",
+    )
+    assert added.returncode == 0, added.stderr
+    record = json.loads(added.stdout)
+    root = tmp_path / "University OS"
+    document = root / "Fall 2026" / "POL 2103 - Politics" / "00_INBOX" / "announcement.md"
+    document.parent.mkdir(parents=True, exist_ok=True)
+    document.write_text("The professor moved the Second Essay deadline to November 20.\n", encoding="utf-8")
+    relative = document.relative_to(root).as_posix()
+
+    result = run_cli(
+        tmp_path,
+        "intake", "document", "--course", "POL 2103 - Politics",
+        "--source", relative, "--semester", "Fall 2026", "--json",
+    )
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    candidate = value["candidates"][0]
+    assert value["intake"]["source_kind"] == "imported_document"
+    assert candidate["status"] == "resolved"
+    assert candidate["resolution"]["assessment_id"] == f"assessment:history:{record['id']}"

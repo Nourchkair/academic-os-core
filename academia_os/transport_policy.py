@@ -79,6 +79,6 @@ def validate_command(
         raise ValueError("the dashboard may only read knowledge views")
     if command == "change" and (not values or values[0] not in {"list", "show", "amend", "propose-deadline", "link-task", "pause-link", "resume-link", "approve", "execute", "retry", "cancel", "reverse", "recover"}):
         raise ValueError("unsupported dashboard change command")
-    if command == "intake" and (not values or values[0] not in {"paste", "list", "show", "resolve", "propose", "reject"}):
+    if command == "intake" and (not values or values[0] not in {"paste", "document", "list", "show", "resolve", "propose", "reject"}):
         raise ValueError("unsupported dashboard intake command")
     return command, values

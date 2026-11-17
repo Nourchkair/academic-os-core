@@ -57,8 +57,10 @@ def validate(workspace: Path, semester: str, profile: Path) -> dict[str, Any]:
     if next(item for item in history if item["title"] == TITLE)["due_date"] != "2026-11-20":
         _fail("the assessment owner did not update")
     shown = service.show_candidate(candidate["id"])
-    if shown["candidate"]["status"] != "proposed" or shown["changeset"]["status"] != "verified":
+    if shown["candidate"]["status"] != "proposed" or shown["candidate"]["display_status"] != "applied" or shown["changeset"]["status"] != "verified":
         _fail("the candidate did not retain its verified ChangeSet link")
+    if service.list_candidates(course_id=COURSE)["candidates"][0]["display_status"] != "applied":
+        _fail("the candidate inbox did not report the applied status")
 
     duplicate = service.submit_paste(text_value=text, course_id=COURSE, source_kind="professor_announcement")
     if duplicate["intake"]["id"] != intake["id"] or len(duplicate["candidates"]) != 1:
@@ -91,6 +93,20 @@ def validate(workspace: Path, semester: str, profile: Path) -> dict[str, Any]:
     if not (root / no_change["intake"]["source_path"]).is_file():
         _fail("a non-deadline paste did not preserve its source")
 
+    document = root / "Fall 2026" / COURSE / "00_INBOX" / "announcement.md"
+    document.parent.mkdir(parents=True, exist_ok=True)
+    document.write_text("The professor moved the Second Essay deadline to November 26.\n", encoding="utf-8")
+    document_relative = document.relative_to(root).as_posix()
+    scanned = service.submit_document(source_path=document_relative, course_id=COURSE)
+    if scanned["intake"]["source_kind"] != "imported_document":
+        _fail("the document scan did not create an imported-document intake")
+    scanned_candidate = scanned["candidates"][0]
+    if scanned_candidate["status"] != "resolved" or scanned_candidate["value"] != "2026-11-26":
+        _fail(f"the document candidate was not resolved: {scanned_candidate}")
+    if not scanned_candidate["source_locator"].startswith("line"):
+        _fail("the document candidate did not retain a passage locator")
+    service.reject_candidate(scanned_candidate["id"])
+
     return {
         "status": "passed",
         "workspace": str(root),
@@ -100,11 +116,14 @@ def validate(workspace: Path, semester: str, profile: Path) -> dict[str, Any]:
         "changeset_id": changeset["id"],
         "assessment_due": next(item for item in history if item["title"] == TITLE)["due_date"],
         "candidate_status": shown["candidate"]["status"],
+        "candidate_display_status": shown["candidate"]["display_status"],
         "changeset_status": shown["changeset"]["status"],
         "duplicate_intake_reused": True,
         "ambiguous_candidate": ambiguous_candidate["status"],
         "inferred_course": inferred_candidate["course_id"],
         "no_candidate_source_preserved": True,
+        "document_candidate": scanned_candidate["status"],
+        "document_source_kind": scanned["intake"]["source_kind"],
     }
 
 

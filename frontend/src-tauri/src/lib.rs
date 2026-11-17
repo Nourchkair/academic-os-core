@@ -210,7 +210,7 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
     }
     if command == "intake" {
         let action = args.first().map(String::as_str).unwrap_or("");
-        if !["paste", "list", "show", "resolve", "propose", "reject"].contains(&action) {
+        if !["paste", "document", "list", "show", "resolve", "propose", "reject"].contains(&action) {
             return Err("Unsupported Academia intake action".to_string());
         }
     }

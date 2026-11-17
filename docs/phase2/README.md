@@ -1,6 +1,6 @@
 # Phase 2 — Universal academic intake
 
-Status: **first paste slice implemented on `next/intake`; validated locally, not merged or released**
+Status: **pasted and imported-document intake implemented on `next/intake`; validated locally, not merged or released**
 
 This branch begins Phase 2 on top of the merged and tagged Phase 1 engine.
 
@@ -226,10 +226,11 @@ record.
 8. Tests for ambiguity, duplicates, conflicts, and permissions.
 9. Manual validation on a copied real workspace.
 
-## Implemented paste slice
+## Implemented intake slice
 
 ```text
 academia intake paste --course COURSE --text "..." --semester TERM --json
+academia intake document --course COURSE --source PATH --semester TERM --json
 academia intake list --semester TERM --json
 academia intake show CANDIDATE_ID --semester TERM --json
 academia intake resolve CANDIDATE_ID --assessment ASSESSMENT_ID --semester TERM --json
@@ -238,23 +239,35 @@ academia intake reject CANDIDATE_ID --semester TERM --json
 ```
 
 The dashboard adds **Paste announcement** in the course workspace. It preserves
-the exact text in the course `00_INBOX/`, shows candidate facts, resolves an
-exact assessment, and opens the existing Phase 1 preview/approval dialog.
+the exact text in the course `00_INBOX/`, shows a persistent candidate inbox,
+resolves an exact assessment, and opens the existing Phase 1 preview/approval
+dialog.
 
-The deterministic parser handles explicit dates, date changes with `from … to`,
-month-name and ISO dates, quoted titles, and common deadline-change verbs. It
-returns `needs_entity` or `needs_confirmation` instead of guessing.
+The same dialog can scan an imported PDF, DOCX, PPTX, Markdown, or text document
+already in the course. The original document is preserved; candidates retain the
+document path and passage locator. The deterministic parser handles explicit
+dates, date changes with `from … to`, month-name and ISO dates, quoted titles, and
+common deadline-change verbs. It returns `needs_entity` or `needs_confirmation`
+instead of guessing.
+
+Candidate display states follow the linked ChangeSet: **Proposed**, **Applied**,
+**Reverted**, **Needs attention**, or **Cancelled**. Preserved announcement notes
+appear in Course material as **Preserved source**, not as queued imports.
 
 Validation performed on a copied real three-course workspace:
 
 - exact source preservation;
 - resolved candidate and ChangeSet creation;
 - approval and verified execution;
-- duplicate paste reuse;
+- duplicate paste and duplicate document reuse;
 - ambiguous assessment requiring student resolution;
 - course-code inference from pasted text;
 - no-candidate text preserving its source;
-- browser walkthrough from paste to verified change.
+- imported-document candidate with passage locator;
+- candidate inbox showing applied status after execution;
+- browser walkthrough from paste → candidate inbox → verified change;
+- browser walkthrough scanning an imported document and leaving its candidate
+  unapproved.
 
 Lint has no new findings versus the Phase 1 baseline (35 pre-existing problems).
 Imported-document intake remains the next Phase 2 task.

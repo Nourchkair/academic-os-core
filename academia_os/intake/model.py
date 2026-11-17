@@ -26,7 +26,7 @@ CANDIDATE_STATUSES = frozenset({
     "rejected",
     "no_change",
 })
-SOURCE_KINDS = frozenset({"student_report", "professor_announcement"})
+SOURCE_KINDS = frozenset({"student_report", "professor_announcement", "imported_document"})
 
 
 def now() -> str:

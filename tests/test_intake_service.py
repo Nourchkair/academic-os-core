@@ -7,6 +7,7 @@ import pytest
 from academia_os.assignment_history import add_assignment_history, list_assignment_history
 from academia_os.intake import IntakeService
 from academia_os.knowledge import KnowledgeService
+from academia_os.library import list_material
 
 
 def _workspace(tmp_path: Path) -> tuple[Path, Path, dict]:
@@ -37,6 +38,9 @@ def test_paste_preserves_source_resolves_candidate_and_bridges_to_changeset(tmp_
     assert "My professor moved the Second Essay deadline to November 20." in source.read_text()
     assert intake["status"] == "candidates_found"
     assert source.parent == course / "00_INBOX"
+    library_item = next(item for item in list_material(root, "Fall 2026") if item["name"] == source.name)
+    assert library_item["source_note"] is True
+    assert library_item["source_type"] == "Preserved intake source"
 
     candidate = result["candidates"][0]
     assert candidate["status"] == "resolved"
@@ -53,7 +57,11 @@ def test_paste_preserves_source_resolves_candidate_and_bridges_to_changeset(tmp_
     executed = knowledge.execute_changeset(changeset["id"])
     assert executed["status"] == "verified"
     assert list_assignment_history(root, "Fall 2026", course.name)[0]["due_date"] == "2026-11-20"
-    assert service.show_candidate(candidate["id"])["candidate"]["status"] == "proposed"
+    shown = service.show_candidate(candidate["id"])
+    assert shown["candidate"]["status"] == "proposed"
+    assert shown["candidate"]["display_status"] == "applied"
+    assert shown["changeset"]["status"] == "verified"
+    assert service.list_candidates(course_id=course.name)["candidates"][0]["display_status"] == "applied"
     assert service.propose_candidate(candidate["id"])["status"] == "verified"
 
 
@@ -137,3 +145,51 @@ def test_agent_can_propose_but_cannot_resolve_or_reject(tmp_path: Path) -> None:
         service.reject_candidate(candidate["id"], actor="agent:codex", channel="assistant")
     changeset = service.propose_candidate(candidate["id"], actor="agent:codex", channel="assistant")
     assert changeset["status"] == "proposed"
+
+
+def test_imported_document_scan_creates_candidate_and_changeset(tmp_path: Path) -> None:
+    root, course, record = _workspace(tmp_path)
+    inbox = course / "00_INBOX"
+    inbox.mkdir(parents=True, exist_ok=True)
+    document = inbox / "announcement.md"
+    document.write_text("The professor moved the Second Essay deadline to November 20.\n", encoding="utf-8")
+    relative = document.relative_to(root).as_posix()
+    service = IntakeService(root, "Fall 2026")
+    result = service.submit_document(source_path=relative, course_id=course.name)
+
+    assert result["intake"]["source_kind"] == "imported_document"
+    assert result["intake"]["source_path"] == relative
+    candidate = result["candidates"][0]
+    assert candidate["status"] == "resolved"
+    assert candidate["source_path"] == relative
+    assert candidate["source_locator"].startswith("line")
+    assert candidate["resolution"]["assessment_id"] == f"assessment:history:{record['id']}"
+    duplicate = service.submit_document(source_path=relative, course_id=course.name)
+    assert duplicate["intake"]["id"] == result["intake"]["id"]
+
+    changeset = service.propose_candidate(candidate["id"])
+    assert changeset["status"] == "proposed"
+    assert changeset["evidence"][0]["source_path"] == relative
+    assert changeset["evidence"][0]["source_kind"] == "original_document"
+    knowledge = KnowledgeService(root, "Fall 2026")
+    knowledge.approve_changeset(changeset["id"])
+    assert knowledge.execute_changeset(changeset["id"])["status"] == "verified"
+    assert list_assignment_history(root, "Fall 2026", course.name)[0]["due_date"] == "2026-11-20"
+
+
+def test_document_scan_rejects_other_course_and_unsupported_format(tmp_path: Path) -> None:
+    root, course, _record = _workspace(tmp_path)
+    other = root / "Fall 2026" / "HIS 101 - History"
+    (other / "01_COURSE").mkdir(parents=True)
+    (other / "00_INBOX").mkdir()
+    other_doc = other / "00_INBOX" / "announcement.md"
+    other_doc.write_text("The essay moved to November 20.", encoding="utf-8")
+    service = IntakeService(root, "Fall 2026")
+    with pytest.raises(ValueError, match="different course"):
+        service.submit_document(source_path=other_doc.relative_to(root).as_posix(), course_id=course.name)
+
+    unsupported = course / "00_INBOX" / "announcement.xyz"
+    unsupported.parent.mkdir(parents=True, exist_ok=True)
+    unsupported.write_text("The essay moved to November 20.", encoding="utf-8")
+    with pytest.raises(ValueError, match="could not be extracted"):
+        service.submit_document(source_path=unsupported.relative_to(root).as_posix(), course_id=course.name)

@@ -9,7 +9,8 @@ from typing import Any
 
 from ..activity import ActivityLog
 from ..config import SEMESTER_PATTERN
-from ..course_identity import course_records, resolve_course_identifier
+from ..course_identity import course_records, resolve_course_identifier, source_course_id
+from ..extraction import ExtractionStatus, extract_source_document
 from ..knowledge import KnowledgeService
 from ..knowledge.model import AGENT_ACTOR_PREFIX, AGENT_CHANNELS, USER_ACTORS, USER_CHANNELS, normalize, now
 from .model import Candidate, Intake, SOURCE_KINDS, new_id, text
@@ -168,11 +169,45 @@ class IntakeService:
             return "needs_confirmation"
         return "candidates_found"
 
-    def _public_candidate(self, candidate: dict[str, Any]) -> dict[str, Any]:
+    def _public_candidate(self, candidate: dict[str, Any], changeset_status: str | None = None) -> dict[str, Any]:
         value = dict(candidate)
         course_id = value.get("course_id")
         value["available_assessments"] = self._assessment_options(course_id)
+        if value.get("status") == "proposed" and value.get("proposed_change_id"):
+            if changeset_status is None:
+                try:
+                    changeset_status = str(self.knowledge.get_changeset(str(value["proposed_change_id"])).get("status"))
+                except KeyError:
+                    changeset_status = None
+            value["changeset_status"] = changeset_status
+            value["display_status"] = {
+                "proposed": "proposed",
+                "approved": "proposed",
+                "executing": "proposed",
+                "verified": "applied",
+                "partially_applied": "needs_attention",
+                "failed": "needs_attention",
+                "cancelled": "cancelled",
+                "superseded": "cancelled",
+                "reverted": "reverted",
+                "partially_reverted": "reverted",
+                "reversal_conflict": "needs_attention",
+            }.get(changeset_status or "", "proposed")
+        else:
+            value["display_status"] = value.get("status")
         return value
+
+    def _existing_result(self, existing: dict[str, Any], message: str) -> dict[str, Any]:
+        candidates = [
+            self._public_candidate(self.store.get_candidate(candidate_id))
+            for candidate_id in existing.get("candidate_ids", [])
+        ]
+        return {
+            "intake": existing,
+            "candidates": candidates,
+            "available_assessments": self._assessment_options(existing.get("course_id")),
+            "warnings": [message],
+        }
 
     def submit_paste(
         self,
@@ -184,8 +219,8 @@ class IntakeService:
         force: bool = False,
     ) -> dict[str, Any]:
         value = text(text_value, "announcement text", required=True, maximum=20000)
-        if source_kind not in SOURCE_KINDS:
-            raise ValueError("source kind must be student_report or professor_announcement")
+        if source_kind not in {"student_report", "professor_announcement"}:
+            raise ValueError("pasted intake source kind must be student_report or professor_announcement")
         course = self._course(course_id)
         warnings: list[str] = []
         if course is None:
@@ -196,16 +231,7 @@ class IntakeService:
         if not force:
             existing = self.store.find_by_dedupe_key(dedupe)
             if existing is not None:
-                candidates = [
-                    self._public_candidate(self.store.get_candidate(candidate_id))
-                    for candidate_id in existing.get("candidate_ids", [])
-                ]
-                return {
-                    "intake": existing,
-                    "candidates": candidates,
-                    "available_assessments": self._assessment_options(existing.get("course_id")),
-                    "warnings": ["This exact announcement was already captured; the existing intake was returned."],
-                }
+                return self._existing_result(existing, "This exact announcement was already captured; the existing intake was returned.")
         source_path = self._source_note(value, course, source_kind)
         relative_path = source_path.relative_to(self.root).as_posix()
         parsed_candidates, parse_warnings = parse_announcement(value, self.semester)
@@ -271,22 +297,145 @@ class IntakeService:
             "warnings": warnings,
         }
 
+    def submit_document(
+        self,
+        *,
+        source_path: str,
+        course_id: str | None = None,
+        actor: str = "user",
+        force: bool = False,
+    ) -> dict[str, Any]:
+        requested = Path(source_path).expanduser()
+        if not requested.is_absolute():
+            requested = self.root / requested
+        resolved = requested.resolve()
+        try:
+            relative = resolved.relative_to(self.root)
+        except ValueError as exc:
+            raise ValueError("document must remain inside the academic workspace") from exc
+        if ".academia" in relative.parts:
+            raise ValueError("document must be academic material, not operational state")
+        if not resolved.is_file():
+            raise ValueError(f"document not found: {source_path}")
+        course = self._course(course_id) if course_id else None
+        try:
+            owner = source_course_id(self.root, resolved)
+        except ValueError as exc:
+            raise ValueError("document must be inside a recognized semester or course inbox") from exc
+        if owner is not None:
+            if course is not None and str(course["id"]) != owner:
+                raise ValueError("document belongs to a different course")
+            if course is None:
+                course = self._course(owner)
+        document = extract_source_document(resolved)
+        if document.status is not ExtractionStatus.SUPPORTED:
+            reason = "; ".join(document.warnings) or document.status.value
+            raise ValueError(f"document text could not be extracted: {reason}")
+        full_text = document.full_text
+        if not full_text.strip():
+            raise ValueError("document contains no extractable text")
+        warnings = list(document.warnings)
+        text_value = full_text[:20000]
+        if len(full_text) > 20000:
+            warnings.append("Document text was truncated for the intake record; the original document remains preserved.")
+        dedupe = _sha256(f"document\n{relative.as_posix()}\n{document.content_hash}\n{course['id'] if course else ''}")
+        if not force:
+            existing = self.store.find_by_dedupe_key(dedupe)
+            if existing is not None:
+                return self._existing_result(existing, "This exact document was already scanned; the existing intake was returned.")
+        intake_id = new_id("intake")
+        candidates: list[Candidate] = []
+        for segment in document.segments:
+            parsed_candidates, parse_warnings = parse_announcement(segment.text, self.semester)
+            for warning in parse_warnings:
+                if warning not in warnings:
+                    warnings.append(warning)
+            for parsed in parsed_candidates:
+                status, resolution = self._candidate_status(parsed, course)
+                candidate_warnings = list(parsed.warnings)
+                if status == "no_change":
+                    candidate_warnings.append("The proposed date already matches the current recorded deadline.")
+                candidates.append(Candidate(
+                    id=new_id("candidate"),
+                    intake_id=intake_id,
+                    semester=self.semester,
+                    course_id=str(course["id"]) if course else None,
+                    entity_type="assessment",
+                    entity_title=parsed.entity_title,
+                    field="due_date",
+                    value=parsed.value,
+                    value_type="date",
+                    source_path=relative.as_posix(),
+                    source_locator=segment.source_location,
+                    source_excerpt=parsed.excerpt,
+                    source_kind="imported_document",
+                    confidence=parsed.confidence,
+                    specificity=parsed.specificity,
+                    status=status,
+                    resolution=resolution,
+                    warnings=candidate_warnings,
+                    created_by=actor,
+                ))
+        if not candidates and not warnings:
+            warnings.append("No deadline-change sentence was recognized in the document.")
+        intake = Intake(
+            id=intake_id,
+            semester=self.semester,
+            course_id=str(course["id"]) if course else None,
+            source_kind="imported_document",
+            text_sha256=_sha256(full_text),
+            source_path=relative.as_posix(),
+            text=text_value,
+            status=self._intake_status(candidates),
+            candidate_ids=[candidate.id for candidate in candidates],
+            warnings=warnings,
+            created_by=actor,
+            dedupe_key=dedupe,
+        )
+        self.store.create_intake(intake)
+        if candidates:
+            self.store.add_candidates(candidates)
+        self._activity().append(
+            event_type="intake.source.preserved",
+            title="Academic document scanned for intake",
+            course=str(course["id"]) if course else None,
+            source=relative.as_posix(),
+            confidence="unverified",
+            actor=actor,
+            details={"intake_id": intake.id, "candidates": len(candidates), "source_kind": "imported_document"},
+        )
+        return {
+            "intake": intake.to_dict(),
+            "candidates": [self._public_candidate(candidate.to_dict()) for candidate in candidates],
+            "available_assessments": self._assessment_options(str(course["id"]) if course else None),
+            "warnings": warnings,
+        }
+
     def list_candidates(self, *, course_id: str | None = None, status: str | None = None) -> dict[str, Any]:
         values = self.store.list_candidates(semester=self.semester, course_id=course_id, status=status)
+        changeset_statuses = {
+            str(item.get("id")): str(item.get("status"))
+            for item in self.knowledge.store.list_changesets()
+            if isinstance(item, dict) and item.get("id")
+        }
         return {
             "semester": self.semester,
-            "candidates": [self._public_candidate(item) for item in values],
+            "candidates": [
+                self._public_candidate(item, changeset_statuses.get(str(item.get("proposed_change_id"))))
+                for item in values
+            ],
         }
 
     def show_candidate(self, candidate_id: str) -> dict[str, Any]:
         candidate = self.store.get_candidate(candidate_id)
-        result = {
-            "candidate": self._public_candidate(candidate),
-            "intake": self.store.get_intake(str(candidate["intake_id"])),
-            "changeset": None,
-        }
+        changeset = None
         if candidate.get("proposed_change_id"):
-            result["changeset"] = self.knowledge.get_changeset(str(candidate["proposed_change_id"]))
+            changeset = self.knowledge.get_changeset(str(candidate["proposed_change_id"]))
+        result = {
+            "candidate": self._public_candidate(candidate, str(changeset.get("status")) if changeset else None),
+            "intake": self.store.get_intake(str(candidate["intake_id"])),
+            "changeset": changeset,
+        }
         return result
 
     def resolve_candidate(
@@ -372,14 +521,16 @@ class IntakeService:
         assessment_id = resolution.get("assessment_id")
         if not course_id or not assessment_id or not candidate.get("value"):
             raise ValueError("candidate is missing a resolved course, assessment, or date")
+        candidate_source_kind = str(candidate.get("source_kind") or "student_report")
+        imported_document = candidate_source_kind == "imported_document"
         changeset = self.knowledge.propose_deadline_change(
             course_id=str(course_id),
             assessment_id=str(assessment_id),
             new_date=str(candidate["value"]),
-            source_kind=str(candidate.get("source_kind") or "student_report"),
-            source_label="Pasted academic announcement",
+            source_kind="original_document" if imported_document else candidate_source_kind,
+            source_label="Imported academic document" if imported_document else "Pasted academic announcement",
             evidence_path=str(candidate.get("source_path")),
-            evidence_locator=str(candidate.get("source_locator") or "pasted text"),
+            evidence_locator=str(candidate.get("source_locator") or ("document" if imported_document else "pasted text")),
             evidence_excerpt=str(candidate.get("source_excerpt") or ""),
             note="Created from academic intake.",
             actor=actor,

@@ -24,6 +24,14 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     paste.add_argument("--force", action="store_true")
     paste.add_argument("--json", action="store_true")
 
+    document = intake_sub.add_parser("document", help="Scan one imported academic document for deadline candidates")
+    document.add_argument("--source", required=True, help="Workspace-relative or absolute academic document path")
+    document.add_argument("--course", dest="course_id")
+    document.add_argument("--semester")
+    document.add_argument("--actor", default="user")
+    document.add_argument("--force", action="store_true")
+    document.add_argument("--json", action="store_true")
+
     listing = intake_sub.add_parser("list", help="List intake candidates")
     listing.add_argument("--course", dest="course_id")
     listing.add_argument("--status", choices=tuple(sorted(CANDIDATE_STATUSES)))
@@ -75,6 +83,13 @@ def run(args: argparse.Namespace, profile_path: Path | None = None) -> int:
         )
     elif args.intake_command == "list":
         value = service.list_candidates(course_id=args.course_id, status=args.status)
+    elif args.intake_command == "document":
+        value = service.submit_document(
+            source_path=args.source,
+            course_id=args.course_id,
+            actor=args.actor,
+            force=bool(args.force),
+        )
     elif args.intake_command == "show":
         value = service.show_candidate(args.candidate_id)
     elif args.intake_command == "resolve":
