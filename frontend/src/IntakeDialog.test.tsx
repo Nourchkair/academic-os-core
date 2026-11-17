@@ -16,6 +16,7 @@ vi.mock('./lib/api', async (importOriginal) => {
       intakeReject: vi.fn(),
       approveChangeSet: vi.fn(),
       executeChangeSet: vi.fn(),
+      showChangeSet: vi.fn(),
       cancelChangeSet: vi.fn(),
     },
   }
@@ -69,6 +70,23 @@ function changeset(): ChangeSet {
   }
 }
 
+function verifiedChangeset(): ChangeSet {
+  const base = changeset()
+  return {
+    ...base,
+    status: 'verified',
+    operations: base.operations.map((operation) => ({ ...operation, status: 'verified' })),
+    result: {
+      state: 'verified',
+      operation_results: [{
+        operation_id: 'op:assessment', type: 'assessment.set_deadline', target: {}, label: 'Assessment deadline',
+        target_title: 'Second Essay', status: 'verified', before: '2026-11-12', after: '2026-11-20', attempts: 1,
+      }],
+      summary: '1 verified',
+    },
+  }
+}
+
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
@@ -92,5 +110,42 @@ describe('IntakeDialog', () => {
     await waitFor(() => expect(api.intakePropose).toHaveBeenCalledWith('candidate:one', 'Fall 2026'))
     await waitFor(() => expect(screen.getByText('Review before applying')).toBeInTheDocument())
     expect(screen.getByRole('button', { name: 'Approve selected and apply' })).toBeInTheDocument()
+  })
+
+  it('opens an already verified intake change as a result, not a pending approval', async () => {
+    vi.mocked(api.intakePaste).mockResolvedValue(pasted())
+    vi.mocked(api.intakePropose).mockResolvedValue(verifiedChangeset())
+    const onClose = vi.fn()
+    render(<IntakeDialog course={course} semester="Fall 2026" onClose={onClose} onChanged={vi.fn().mockResolvedValue(undefined)} />)
+
+    fireEvent.change(screen.getByLabelText('Announcement text'), { target: { value: 'My professor moved the Second Essay deadline to November 20.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Find deadline changes' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Second Essay' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare change review' }))
+
+    await waitFor(() => expect(screen.getByText('Change applied and verified')).toBeInTheDocument())
+    expect(screen.queryByText('Review before applying')).not.toBeInTheDocument()
+    expect(api.approveChangeSet).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('recovers from a double approval by loading the already verified changeset', async () => {
+    vi.mocked(api.intakePaste).mockResolvedValue(pasted())
+    vi.mocked(api.intakePropose).mockResolvedValue(changeset())
+    vi.mocked(api.approveChangeSet).mockRejectedValue(new Error('changeset is not awaiting approval: verified'))
+    vi.mocked(api.showChangeSet).mockResolvedValue(verifiedChangeset())
+    render(<IntakeDialog course={course} semester="Fall 2026" onClose={vi.fn()} onChanged={vi.fn().mockResolvedValue(undefined)} />)
+
+    fireEvent.change(screen.getByLabelText('Announcement text'), { target: { value: 'My professor moved the Second Essay deadline to November 20.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Find deadline changes' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Second Essay' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare change review' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve selected and apply' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Approve selected and apply' }))
+
+    await waitFor(() => expect(screen.getByText('Change applied and verified')).toBeInTheDocument())
+    expect(api.showChangeSet).toHaveBeenCalledWith('changeset:intake', 'Fall 2026')
+    expect(api.executeChangeSet).not.toHaveBeenCalled()
   })
 })

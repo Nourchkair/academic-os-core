@@ -54,6 +54,7 @@ def test_paste_preserves_source_resolves_candidate_and_bridges_to_changeset(tmp_
     assert executed["status"] == "verified"
     assert list_assignment_history(root, "Fall 2026", course.name)[0]["due_date"] == "2026-11-20"
     assert service.show_candidate(candidate["id"])["candidate"]["status"] == "proposed"
+    assert service.propose_candidate(candidate["id"])["status"] == "verified"
 
 
 def test_duplicate_paste_returns_the_existing_intake_without_duplicate_candidates(tmp_path: Path) -> None:

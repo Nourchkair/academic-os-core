@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './lib/api'
 import type { ChangeOperation, ChangeSet, Course, CourseworkHistoryRecord, KnowledgeTaskLink, Task } from './types'
 
@@ -14,7 +14,10 @@ type DeadlineChangeProps = {
 }
 
 export function DeadlineChangeDialog({ course, semester, record, initialChangeset, onClose, onChanged }: DeadlineChangeProps) {
-  const [step, setStep] = useState<'form' | 'preview' | 'result'>(initialChangeset ? 'preview' : 'form')
+  const initialStep: 'form' | 'preview' | 'result' = initialChangeset
+    ? (['proposed', 'approved'].includes(initialChangeset.status) ? 'preview' : 'result')
+    : 'form'
+  const [step, setStep] = useState<'form' | 'preview' | 'result'>(initialStep)
   const [newDate, setNewDate] = useState('')
   const [sourceKind, setSourceKind] = useState<SourceKind>('student_report')
   const [sourceLabel, setSourceLabel] = useState('')
@@ -27,6 +30,7 @@ export function DeadlineChangeDialog({ course, semester, record, initialChangese
   const [selectedOperationIds, setSelectedOperationIds] = useState<string[]>(initialChangeset ? initialChangeset.operations.filter((operation) => operation.required || operation.default_selected).map((operation) => operation.id) : [])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const submittingRef = useRef(false)
 
   const assessmentId = `assessment:history:${record.id}`
   const initialAssessmentOperation = initialChangeset?.operations.find((operation) => operation.type === 'assessment.set_deadline')
@@ -95,7 +99,12 @@ export function DeadlineChangeDialog({ course, semester, record, initialChangese
   }
 
   const approveAndApply = async () => {
-    if (!changeset) return
+    if (!changeset || submittingRef.current) return
+    if (!['proposed', 'approved'].includes(changeset.status)) {
+      setStep('result')
+      return
+    }
+    submittingRef.current = true
     setBusy(true); setError(null)
     try {
       const approved = changeset.status === 'approved' ? changeset : await api.approveChangeSet(changeset.id, semester, selectedOperationIds)
@@ -105,8 +114,20 @@ export function DeadlineChangeDialog({ course, semester, record, initialChangese
       setStep('result')
       await onChanged()
     } catch (reason) {
+      try {
+        const current = await api.showChangeSet(changeset.id, semester)
+        if (!['proposed', 'approved'].includes(current.status)) {
+          setChangeset(current)
+          setStep('result')
+          await onChanged()
+          return
+        }
+      } catch {
+        // Keep the original error when the current state cannot be read.
+      }
       setError(String(reason))
     } finally {
+      submittingRef.current = false
       setBusy(false)
     }
   }
