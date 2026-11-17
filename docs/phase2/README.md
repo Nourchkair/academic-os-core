@@ -1,6 +1,6 @@
 # Phase 2 — Universal academic intake
 
-Status: **started from the validated Phase 1 baseline; contracts are draft**
+Status: **first paste slice implemented on `next/intake`; validated locally, not merged or released**
 
 This branch begins Phase 2 on top of the merged and tagged Phase 1 engine.
 
@@ -225,6 +225,39 @@ record.
 7. Imported-document candidate path.
 8. Tests for ambiguity, duplicates, conflicts, and permissions.
 9. Manual validation on a copied real workspace.
+
+## Implemented paste slice
+
+```text
+academia intake paste --course COURSE --text "..." --semester TERM --json
+academia intake list --semester TERM --json
+academia intake show CANDIDATE_ID --semester TERM --json
+academia intake resolve CANDIDATE_ID --assessment ASSESSMENT_ID --semester TERM --json
+academia intake propose CANDIDATE_ID --semester TERM --json
+academia intake reject CANDIDATE_ID --semester TERM --json
+```
+
+The dashboard adds **Paste announcement** in the course workspace. It preserves
+the exact text in the course `00_INBOX/`, shows candidate facts, resolves an
+exact assessment, and opens the existing Phase 1 preview/approval dialog.
+
+The deterministic parser handles explicit dates, date changes with `from … to`,
+month-name and ISO dates, quoted titles, and common deadline-change verbs. It
+returns `needs_entity` or `needs_confirmation` instead of guessing.
+
+Validation performed on a copied real three-course workspace:
+
+- exact source preservation;
+- resolved candidate and ChangeSet creation;
+- approval and verified execution;
+- duplicate paste reuse;
+- ambiguous assessment requiring student resolution;
+- course-code inference from pasted text;
+- no-candidate text preserving its source;
+- browser walkthrough from paste to verified change.
+
+Lint has no new findings versus the Phase 1 baseline (35 pre-existing problems).
+Imported-document intake remains the next Phase 2 task.
 
 ## Baseline
 

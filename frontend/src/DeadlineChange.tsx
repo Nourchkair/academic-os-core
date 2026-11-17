@@ -8,12 +8,13 @@ type DeadlineChangeProps = {
   course: Course
   semester: string
   record: CourseworkHistoryRecord
+  initialChangeset?: ChangeSet
   onClose: () => void
   onChanged: () => Promise<void>
 }
 
-export function DeadlineChangeDialog({ course, semester, record, onClose, onChanged }: DeadlineChangeProps) {
-  const [step, setStep] = useState<'form' | 'preview' | 'result'>('form')
+export function DeadlineChangeDialog({ course, semester, record, initialChangeset, onClose, onChanged }: DeadlineChangeProps) {
+  const [step, setStep] = useState<'form' | 'preview' | 'result'>(initialChangeset ? 'preview' : 'form')
   const [newDate, setNewDate] = useState('')
   const [sourceKind, setSourceKind] = useState<SourceKind>('student_report')
   const [sourceLabel, setSourceLabel] = useState('')
@@ -22,15 +23,17 @@ export function DeadlineChangeDialog({ course, semester, record, onClose, onChan
   const [links, setLinks] = useState<KnowledgeTaskLink[]>([])
   const [candidateTaskIds, setCandidateTaskIds] = useState<string[]>([])
   const [newLinkIds, setNewLinkIds] = useState<string[]>([])
-  const [changeset, setChangeset] = useState<ChangeSet | null>(null)
-  const [selectedOperationIds, setSelectedOperationIds] = useState<string[]>([])
+  const [changeset, setChangeset] = useState<ChangeSet | null>(initialChangeset ?? null)
+  const [selectedOperationIds, setSelectedOperationIds] = useState<string[]>(initialChangeset ? initialChangeset.operations.filter((operation) => operation.required || operation.default_selected).map((operation) => operation.id) : [])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const assessmentId = `assessment:history:${record.id}`
-  const currentDueDate = record.due_date ?? ''
+  const initialAssessmentOperation = initialChangeset?.operations.find((operation) => operation.type === 'assessment.set_deadline')
+  const currentDueDate = record.due_date ?? initialAssessmentOperation?.before ?? ''
 
   useEffect(() => {
+    if (initialChangeset) return
     let active = true
     void Promise.all([api.tasks(semester), api.knowledgeLinks(course.id, semester)])
       .then(([taskPayload, linkPayload]) => {
@@ -41,7 +44,7 @@ export function DeadlineChangeDialog({ course, semester, record, onClose, onChan
       })
       .catch((reason) => { if (active) setError(String(reason)) })
     return () => { active = false }
-  }, [assessmentId, course.code, course.id, currentDueDate, semester])
+  }, [assessmentId, course.code, course.id, currentDueDate, initialChangeset, semester])
 
   const alreadyLinkedTaskIds = useMemo(() => new Set(links.map((link) => link.task_id)), [links])
   const candidateTasks = tasks.filter((task) => !alreadyLinkedTaskIds.has(task.task_id || task.id))
@@ -219,7 +222,7 @@ export function DeadlineChangeDialog({ course, semester, record, onClose, onChan
         {changeset.status === 'verified' && <p className="deadline-change-hint">Every approved operation was read back and verified. The evidence remains unverified until a source confirms it.</p>}
         {changeset.result.operation_results.some((operation) => operation.status === 'conflict') && <p className="deadline-change-warning">A record changed after this preview was created. Nothing was overwritten. Close this dialog and start a new change preview to use the current value.</p>}
         {canRetry && <button type="button" className="secondary-button" onClick={() => void retry()} disabled={busy}>{busy ? 'Retrying…' : 'Retry failed operations'}</button>}
-        <div className="deadline-change-actions">{reversible && ['verified', 'partially_applied'].includes(changeset.status) && <button type="button" className="secondary-button" onClick={() => void undo()} disabled={busy}>{busy ? 'Reversing…' : 'Undo this change'}</button>}<button type="button" className="primary-button" onClick={() => void cancel()} disabled={busy}>Done</button></div>
+        <div className="deadline-change-actions">{reversible && ['verified', 'partially_applied'].includes(changeset.status) && <button type="button" className="secondary-button" onClick={() => void undo()} disabled={busy}>{busy ? 'Please wait…' : 'Undo this change'}</button>}<button type="button" className="primary-button" onClick={() => void cancel()} disabled={busy}>Done</button></div>
       </div>}
     </section>
   </div>

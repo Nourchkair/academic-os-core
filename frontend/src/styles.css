@@ -1241,3 +1241,51 @@ button { -webkit-tap-highlight-color: transparent; }
   .deadline-change-dialog .primary-button:disabled { background: #3a3a37; color: #8f8f8a; }
   .deadline-change-operation.result-failed, .deadline-change-operation.result-blocked, .deadline-change-operation.result-conflict { background: #332a1f; border-color: #55452f; }
 }
+
+.intake-dialog { background: #ffffff; border: 1px solid #e6e6e6; border-radius: 18px; box-shadow: 0 28px 90px rgba(29, 29, 29, .28); display: flex; flex-direction: column; max-height: min(88vh, 900px); max-width: 780px; overflow: auto; width: min(100%, 780px); }
+.intake-form { display: grid; gap: 12px; padding: 18px 24px 22px; }
+.intake-form > label { display: grid; gap: 6px; }
+.intake-form > label > span { color: #777777; font-size: 10px; font-weight: 700; }
+.intake-form textarea, .intake-form select, .intake-candidate select { background: #ffffff; border: 1px solid #e6e6e6; border-radius: 8px; color: #545454; font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; min-height: 38px; padding: 9px 10px; width: 100%; }
+.intake-form textarea { line-height: 1.5; resize: vertical; }
+.intake-form-actions, .intake-candidate-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.intake-results { border-top: 1px solid #efefef; display: grid; gap: 12px; padding: 18px 24px 24px; }
+.intake-source { background: #fafafa; border: 1px solid #ededed; border-radius: 10px; display: grid; gap: 5px; padding: 12px 13px; }
+.intake-source code { color: #6a6a6a; font: 9px ui-monospace, SFMono-Regular, monospace; overflow-wrap: anywhere; }
+.intake-source-text summary { color: #777777; cursor: pointer; font-size: 10px; font-weight: 650; }
+.intake-source-text p { color: #6f6f6f; font-size: 11px; line-height: 1.55; margin: 8px 0 0; white-space: pre-wrap; }
+.intake-candidate { background: #fafafa; border: 1px solid #ececec; border-radius: 12px; display: grid; gap: 9px; padding: 14px 15px; }
+.intake-candidate.status-resolved, .intake-candidate.status-proposed { background: #f6faf5; border-color: #dce8d8; }
+.intake-candidate.status-needs_entity, .intake-candidate.status-needs_course, .intake-candidate.status-needs_confirmation { background: #fff8ee; border-color: #ebdcc4; }
+.intake-candidate.status-no_change, .intake-candidate.status-rejected { opacity: .78; }
+.intake-candidate-heading { align-items: flex-start; display: flex; gap: 12px; justify-content: space-between; }
+.intake-candidate-heading h3 { color: #3f3f3f; font-size: 15px; margin: 3px 0 0; }
+.intake-candidate-heading > strong { color: #4c5e4c; font-size: 12px; white-space: nowrap; }
+.intake-status { color: #5f7a60; font-size: 9px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.intake-candidate blockquote { border-left: 2px solid #d8d8d2; color: #777777; font-size: 10px; line-height: 1.5; margin: 0; padding-left: 10px; }
+.intake-warning, .intake-empty { color: #8a6a42; font-size: 10px; line-height: 1.5; margin: 0; }
+.intake-empty { color: #858585; }
+.intake-candidate-resolution { border-top: 1px solid #e9e9e4; display: grid; gap: 8px; padding-top: 9px; }
+.intake-candidate-resolution > p { color: #6b6b6b; font-size: 10px; line-height: 1.5; margin: 0; }
+.intake-candidate select { max-width: 360px; }
+@media (max-width: 760px) { .intake-dialog { max-height: 92vh; }.intake-results { padding-inline: 15px; }.intake-form { padding-inline: 15px; }.intake-candidate-heading { flex-direction: column; }.intake-candidate-actions { justify-content: flex-start; } }
+@media (prefers-color-scheme: dark) {
+  .intake-dialog { background: #20201f; border-color: #3c3c39; color: #e4e4e4; }
+  .intake-form > label > span { color: #b6b6b2; }
+  .intake-form textarea, .intake-form select, .intake-candidate select { background: #2a2a28; border-color: #44443f; color: #ededeb; }
+  .intake-results { border-top-color: #343432; }
+  .intake-source { background: #262624; border-color: #3a3a36; }
+  .intake-source code, .intake-source-text p { color: #c0c0ba; }
+  .intake-source-text summary { color: #b6b6b2; }
+  .intake-candidate { background: #2a2a27; border-color: #3a3a36; }
+  .intake-candidate.status-resolved, .intake-candidate.status-proposed { background: #263026; border-color: #3c5e45; }
+  .intake-candidate.status-needs_entity, .intake-candidate.status-needs_course, .intake-candidate.status-needs_confirmation { background: #332a1f; border-color: #55452f; }
+  .intake-candidate-heading h3 { color: #f0f0f0; }
+  .intake-candidate-heading > strong { color: #b8dcb8; }
+  .intake-status { color: #b8dcb8; }
+  .intake-candidate blockquote { border-left-color: #4a4a44; color: #b6b6b0; }
+  .intake-warning { color: #dcc29e; }
+  .intake-empty { color: #b0b0aa; }
+  .intake-candidate-resolution { border-top-color: #3a3a36; }
+  .intake-candidate-resolution > p { color: #d0d0ca; }
+}

@@ -157,6 +157,7 @@ def test_knowledge_and_change_commands_are_allowed_by_local_transport(tmp_path: 
         for command, args in (
             ("knowledge", ["view", "--course", "POL 2103 - Politics", "--semester", "Fall 2026"]),
             ("change", ["show", "changeset:one", "--semester", "Fall 2026"]),
+            ("intake", ["list", "--semester", "Fall 2026"]),
         ):
             status, _headers, payload = request(
                 server,
@@ -171,6 +172,7 @@ def test_knowledge_and_change_commands_are_allowed_by_local_transport(tmp_path: 
     assert calls == [
         ("knowledge", ["view", "--course", "POL 2103 - Politics", "--semester", "Fall 2026", "--json"]),
         ("change", ["show", "changeset:one", "--semester", "Fall 2026", "--json"]),
+        ("intake", ["list", "--semester", "Fall 2026", "--json"]),
     ]
 
 

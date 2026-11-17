@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { CourseGradesView } from './CourseGradesView'
 import { CourseworkHistoryView } from './CourseworkHistory'
+import { IntakeDialog } from './IntakeDialog'
 import { StudyView } from './StudyView'
 import { CourseCard } from './CourseCard'
 import { SemesterPicker } from './SemesterPicker'
@@ -60,6 +61,7 @@ export function CoursesView({ semesters, semester, courses, items, inbox, loadin
   const [processingFilter, setProcessingFilter] = useState<ProcessingFilter>('all')
   const [query, setQuery] = useState('')
   const [previewItem, setPreviewItem] = useState<LibraryItem | null>(null)
+  const [intakeOpen, setIntakeOpen] = useState(false)
   const selectedCourse = courses.find((course) => course.id === selectedCourseId) ?? null
   const selectedItems = useMemo(() => selectedCourse ? items.filter((item) => item.course_id === selectedCourse.id) : [], [items, selectedCourse])
   const pendingPaths = useMemo(() => new Set(inbox.filter((item) => item.status !== 'ACKNOWLEDGED').map((item) => item.source_path)), [inbox])
@@ -130,7 +132,7 @@ export function CoursesView({ semesters, semester, courses, items, inbox, loadin
     </> : <>
     <div className="course-detail-toolbar"><button className="course-back-button" onClick={onBackHome}><span aria-hidden="true">←</span> Home · all classes</button><SemesterPicker semester={semester} semesters={semesters} loading={loading} onSemesterChange={chooseSemester} /></div>
     <section className="course-material-panel course-own-page">
-      <div className="course-material-heading"><div><p className="eyebrow">Class workspace</p><h3>{selectedCourse.name}</h3><p>{selectedCourse.path}</p></div><div className="course-material-heading-actions"><button className="secondary-button" onClick={() => onOpenActions('import', selectedCourse.id)}><span aria-hidden="true">+</span> Add material</button></div></div>
+      <div className="course-material-heading"><div><p className="eyebrow">Class workspace</p><h3>{selectedCourse.name}</h3><p>{selectedCourse.path}</p></div><div className="course-material-heading-actions"><button className="secondary-button" onClick={() => setIntakeOpen(true)}>Paste announcement</button><button className="secondary-button" onClick={() => onOpenActions('import', selectedCourse.id)}><span aria-hidden="true">+</span> Add material</button></div></div>
       <div className="course-section-tabs" role="tablist" aria-label={`${selectedCourse.name} sections`}><button type="button" role="tab" aria-selected={courseSection === 'material'} className={courseSection === 'material' ? 'active' : ''} onClick={() => setCourseSection('material')}>Course material</button><button type="button" role="tab" aria-selected={courseSection === 'grades'} className={courseSection === 'grades' ? 'active' : ''} onClick={() => setCourseSection('grades')}>Grades</button><button type="button" role="tab" aria-selected={courseSection === 'history'} className={courseSection === 'history' ? 'active' : ''} onClick={() => setCourseSection('history')}>History</button><button type="button" role="tab" aria-selected={courseSection === 'study'} className={courseSection === 'study' ? 'active' : ''} onClick={() => setCourseSection('study')}>Study history</button><span className="course-material-count">{selectedItems.length} item{selectedItems.length === 1 ? '' : 's'}</span></div>
       {courseSection === 'study' ? <StudyView key={`${semester}:${selectedCourse.id}`} course={selectedCourse} semester={semester} materials={selectedItems} resumeSessionId={studyResumeRequest?.courseId === selectedCourse.id ? studyResumeRequest.sessionId : undefined} onResumeConsumed={onStudyResumeConsumed} onOpenConversation={onOpenStudyConversation} onStartStudyChat={onStartStudyChat} /> : courseSection === 'grades' ? <CourseGradesView course={selectedCourse} semester={semester} onOpenHistory={() => setCourseSection('history')} /> : courseSection === 'history' ? <CourseworkHistoryView course={selectedCourse} semester={semester} onHistoryChanged={onHistoryChanged} /> : <>
       <div className="material-category-grid">
@@ -142,6 +144,7 @@ export function CoursesView({ semesters, semester, courses, items, inbox, loadin
     </section>
     </>}
     <FilePreviewDialog item={previewItem} onClose={() => setPreviewItem(null)} />
+    {intakeOpen && selectedCourse && <IntakeDialog course={selectedCourse} semester={semester} onClose={() => setIntakeOpen(false)} onChanged={onHistoryChanged} />}
   </div>
 }
 

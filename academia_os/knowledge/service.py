@@ -132,11 +132,11 @@ class KnowledgeService:
                 stale.add(evidence_id)
         return stale
 
-    def course_view(self, course_id: str) -> dict[str, Any]:
+    def course_view(self, course_id: str, *, include_freshness: bool = True) -> dict[str, Any]:
         course = self._course(course_id)
         assessments, standalone_deadlines, warnings, context = build_assessments(self.store, self.root, self.semester, str(course["id"]))
         evidence_map = self.store.evidence_map()
-        stale_evidence_ids = self._stale_evidence_ids()
+        stale_evidence_ids = self._stale_evidence_ids() if include_freshness else set()
         public = []
         conflicts: list[dict[str, Any]] = []
         for assessment in assessments:
@@ -155,14 +155,15 @@ class KnowledgeService:
             "migration": schema.get("migration", {"status": "not_run"}),
         }
 
-    def assessment_view(self, assessment_id: str, course_id: str | None = None) -> dict[str, Any]:
+    def assessment_view(self, assessment_id: str, course_id: str | None = None, *, include_freshness: bool = True) -> dict[str, Any]:
         assessments, _deadlines, warnings, _context = build_assessments(self.store, self.root, self.semester, course_id)
         selected = resolve_assessment(assessments, assessment_id)
         evidence_map = self.store.evidence_map()
         links = self.store.list_links(assessment_id=selected["id"])
         assertions = self._assertions_for(selected["id"])
         evidence_ids = {evidence_id for assertion in assertions for evidence_id in assertion.get("evidence_ids", [])}
-        view = public_assessment(selected, assertions, evidence_map, links, self._stale_evidence_ids(evidence_ids))
+        stale = self._stale_evidence_ids(evidence_ids) if include_freshness else set()
+        view = public_assessment(selected, assertions, evidence_map, links, stale)
         return {"assessment": view, "warnings": warnings}
 
     def conflicts(self, course_id: str) -> dict[str, Any]:
