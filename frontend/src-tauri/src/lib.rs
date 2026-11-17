@@ -178,6 +178,7 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
         "import-preflight",
         "knowledge",
         "change",
+        "intake",
     ];
     if !allowed.contains(&command.as_str()) {
         return Err(format!("Unsupported Academia command: {command}"));
@@ -205,6 +206,12 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
         let action = args.first().map(String::as_str).unwrap_or("");
         if !["list", "show", "amend", "propose-deadline", "link-task", "pause-link", "resume-link", "approve", "execute", "retry", "cancel", "reverse", "recover"].contains(&action) {
             return Err("Unsupported Academia change action".to_string());
+        }
+    }
+    if command == "intake" {
+        let action = args.first().map(String::as_str).unwrap_or("");
+        if !["paste", "document", "list", "show", "resolve", "propose", "reject"].contains(&action) {
+            return Err("Unsupported Academia intake action".to_string());
         }
     }
     if command == "mcp-connections" {

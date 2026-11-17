@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { CourseGradesView } from './CourseGradesView'
 import { CourseworkHistoryView } from './CourseworkHistory'
+import { IntakeDialog } from './IntakeDialog'
 import { StudyView } from './StudyView'
 import { CourseCard } from './CourseCard'
 import { SemesterPicker } from './SemesterPicker'
@@ -60,6 +61,7 @@ export function CoursesView({ semesters, semester, courses, items, inbox, loadin
   const [processingFilter, setProcessingFilter] = useState<ProcessingFilter>('all')
   const [query, setQuery] = useState('')
   const [previewItem, setPreviewItem] = useState<LibraryItem | null>(null)
+  const [intakeOpen, setIntakeOpen] = useState(false)
   const selectedCourse = courses.find((course) => course.id === selectedCourseId) ?? null
   const selectedItems = useMemo(() => selectedCourse ? items.filter((item) => item.course_id === selectedCourse.id) : [], [items, selectedCourse])
   const pendingPaths = useMemo(() => new Set(inbox.filter((item) => item.status !== 'ACKNOWLEDGED').map((item) => item.source_path)), [inbox])
@@ -130,7 +132,7 @@ export function CoursesView({ semesters, semester, courses, items, inbox, loadin
     </> : <>
     <div className="course-detail-toolbar"><button className="course-back-button" onClick={onBackHome}><span aria-hidden="true">←</span> Home · all classes</button><SemesterPicker semester={semester} semesters={semesters} loading={loading} onSemesterChange={chooseSemester} /></div>
     <section className="course-material-panel course-own-page">
-      <div className="course-material-heading"><div><p className="eyebrow">Class workspace</p><h3>{selectedCourse.name}</h3><p>{selectedCourse.path}</p></div><div className="course-material-heading-actions"><button className="secondary-button" onClick={() => onOpenActions('import', selectedCourse.id)}><span aria-hidden="true">+</span> Add material</button></div></div>
+      <div className="course-material-heading"><div><p className="eyebrow">Class workspace</p><h3>{selectedCourse.name}</h3><p>{selectedCourse.path}</p></div><div className="course-material-heading-actions"><button className="secondary-button" onClick={() => setIntakeOpen(true)}>Paste announcement</button><button className="secondary-button" onClick={() => onOpenActions('import', selectedCourse.id)}><span aria-hidden="true">+</span> Add material</button></div></div>
       <div className="course-section-tabs" role="tablist" aria-label={`${selectedCourse.name} sections`}><button type="button" role="tab" aria-selected={courseSection === 'material'} className={courseSection === 'material' ? 'active' : ''} onClick={() => setCourseSection('material')}>Course material</button><button type="button" role="tab" aria-selected={courseSection === 'grades'} className={courseSection === 'grades' ? 'active' : ''} onClick={() => setCourseSection('grades')}>Grades</button><button type="button" role="tab" aria-selected={courseSection === 'history'} className={courseSection === 'history' ? 'active' : ''} onClick={() => setCourseSection('history')}>History</button><button type="button" role="tab" aria-selected={courseSection === 'study'} className={courseSection === 'study' ? 'active' : ''} onClick={() => setCourseSection('study')}>Study history</button><span className="course-material-count">{selectedItems.length} item{selectedItems.length === 1 ? '' : 's'}</span></div>
       {courseSection === 'study' ? <StudyView key={`${semester}:${selectedCourse.id}`} course={selectedCourse} semester={semester} materials={selectedItems} resumeSessionId={studyResumeRequest?.courseId === selectedCourse.id ? studyResumeRequest.sessionId : undefined} onResumeConsumed={onStudyResumeConsumed} onOpenConversation={onOpenStudyConversation} onStartStudyChat={onStartStudyChat} /> : courseSection === 'grades' ? <CourseGradesView course={selectedCourse} semester={semester} onOpenHistory={() => setCourseSection('history')} /> : courseSection === 'history' ? <CourseworkHistoryView course={selectedCourse} semester={semester} onHistoryChanged={onHistoryChanged} /> : <>
       <div className="material-category-grid">
@@ -142,6 +144,7 @@ export function CoursesView({ semesters, semester, courses, items, inbox, loadin
     </section>
     </>}
     <FilePreviewDialog item={previewItem} onClose={() => setPreviewItem(null)} />
+    {intakeOpen && selectedCourse && <IntakeDialog course={selectedCourse} semester={semester} onClose={() => setIntakeOpen(false)} onChanged={onHistoryChanged} />}
   </div>
 }
 
@@ -174,6 +177,7 @@ function FilePreviewDialog({ item, onClose }: { item: LibraryItem | null; onClos
 }
 
 function getProcessingBucket(item: LibraryItem, pending: boolean): ProcessingFilter {
+  if (item.source_note) return 'processed'
   if (item.processing_status === 'FAILED') return 'failed'
   if (item.processing_status === 'PROCESSING' || item.processing_status === 'VERIFIED') return 'in_progress'
   if (item.processing_status === 'ACKNOWLEDGED') return 'processed'
@@ -181,7 +185,7 @@ function getProcessingBucket(item: LibraryItem, pending: boolean): ProcessingFil
   return 'untracked'
 }
 
-function LibraryFileRow({ item, pending, onOpen }: { item: LibraryItem; pending: boolean; onOpen: () => void }) { const label = categoryLabels[item.category]; const processingLabel = item.processing_status === 'PROCESSING' || item.processing_status === 'PENDING' || item.processing_status === 'DETECTED' ? 'Processing…' : item.processing_status === 'VERIFIED' ? 'Verifying…' : item.processing_status === 'FAILED' ? 'Needs attention' : item.processing_status === 'ACKNOWLEDGED' ? item.extraction_status === 'unsupported_without_ocr' ? 'Processed · OCR needed' : 'Processed' : pending ? 'Awaiting processing' : null; const processingTone = item.processing_status === 'FAILED' ? 'tone-overdue' : item.processing_status === 'ACKNOWLEDGED' && item.extraction_status !== 'unsupported_without_ocr' ? 'tone-completed' : 'tone-soon'; const extension = item.extension.toLowerCase(); const fileTone = extension === '.pdf' ? 'file-pdf' : ['.ppt', '.pptx', '.key'].includes(extension) ? 'file-slides' : ['.doc', '.docx', '.md', '.txt'].includes(extension) ? 'file-text' : 'file-data'; return <button type="button" className="library-file-row" onClick={onOpen} aria-label={`Open ${item.name} preview`}><div className={`library-file-icon ${fileTone}`}>{item.extension.replace('.', '').slice(0, 4).toUpperCase() || 'FILE'}</div><div className="library-file-main"><strong>{item.name}</strong><span>{item.relative_path}</span><small>{label} · {item.semester}</small></div><div className="library-file-meta"><span>{formatBytes(item.size)}</span>{processingLabel && <em className={`file-status ${processingTone}`}>{processingLabel}</em>}{item.intake_status === 'inbox' && <em className="file-intake-status tone-soon">In intake folder</em>}<small>Open preview</small></div></button> }
+function LibraryFileRow({ item, pending, onOpen }: { item: LibraryItem; pending: boolean; onOpen: () => void }) { const label = categoryLabels[item.category]; const processingLabel = item.source_note ? 'Preserved source' : item.processing_status === 'PROCESSING' || item.processing_status === 'PENDING' || item.processing_status === 'DETECTED' ? 'Processing…' : item.processing_status === 'VERIFIED' ? 'Verifying…' : item.processing_status === 'FAILED' ? 'Needs attention' : item.processing_status === 'ACKNOWLEDGED' ? item.extraction_status === 'unsupported_without_ocr' ? 'Processed · OCR needed' : 'Processed' : pending ? 'Awaiting processing' : null; const processingTone = item.source_note ? 'tone-completed' : item.processing_status === 'FAILED' ? 'tone-overdue' : item.processing_status === 'ACKNOWLEDGED' && item.extraction_status !== 'unsupported_without_ocr' ? 'tone-completed' : 'tone-soon'; const extension = item.extension.toLowerCase(); const fileTone = extension === '.pdf' ? 'file-pdf' : ['.ppt', '.pptx', '.key'].includes(extension) ? 'file-slides' : ['.doc', '.docx', '.md', '.txt'].includes(extension) ? 'file-text' : 'file-data'; return <button type="button" className="library-file-row" onClick={onOpen} aria-label={`Open ${item.name} preview`}><div className={`library-file-icon ${fileTone}`}>{item.extension.replace('.', '').slice(0, 4).toUpperCase() || 'FILE'}</div><div className="library-file-main"><strong>{item.name}</strong><span>{item.relative_path}</span><small>{label} · {item.semester}</small></div><div className="library-file-meta"><span>{formatBytes(item.size)}</span>{processingLabel && <em className={`file-status ${processingTone}`}>{processingLabel}</em>}{item.intake_status === 'inbox' && <em className="file-intake-status tone-soon">In intake folder</em>}<small>Open preview</small></div></button> }
 function EmptyCourseState({ onOpenActions }: { onOpenActions: () => void }) { return <article className="course-selection-empty"><div className="empty-mark">◫</div><h3>No classes in this semester yet</h3><p>Import a syllabus or connect a workspace containing a recognized course structure. Academia OS will not invent a class from a filename.</p><button className="secondary-button" onClick={onOpenActions}>Import course material <span>↓</span></button></article> }
 function PageIntro({ eyebrow, title, subtitle }: { eyebrow: string; title: string; subtitle: string }) { return <section className="page-intro"><p className="eyebrow">{eyebrow}</p><h2>{title}</h2><p>{subtitle}</p></section> }
 function formatBytes(value: number): string { if (value < 1024) return `${value} B`; if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`; return `${(value / (1024 * 1024)).toFixed(1)} MB` }

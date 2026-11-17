@@ -71,3 +71,8 @@ def test_knowledge_transport_is_read_only_and_change_transport_is_bounded() -> N
     for args in (["delete", "x"], ["migrate"], []):
         with pytest.raises(ValueError, match="dashboard change command"):
             validate_command("change", args)
+    assert validate_command("intake", ["paste", "--text", "moved to November 20"])[1] == ["paste", "--text", "moved to November 20"]
+    assert validate_command("intake", ["propose", "candidate:one"])[1] == ["propose", "candidate:one"]
+    for args in (["import", "x"], ["delete", "x"], []):
+        with pytest.raises(ValueError, match="dashboard intake command"):
+            validate_command("intake", args)

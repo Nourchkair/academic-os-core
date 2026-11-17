@@ -144,6 +144,13 @@ academia assistant propose-task --action create --title "Read Week 5" --course "
 academia history list --course "COURSE ID" --semester "Fall 2026" --json
 academia history add --course "COURSE ID" --kind essay --title "Essay 1" --status submitted --submitted-on 2026-10-08 --artifact "03_ASSIGNMENTS/A01/Submission/final.docx" --json
 academia history update --course "COURSE ID" --id RECORD_ID --status graded --grade A --json
+academia intake paste --course "COURSE ID" --text "My professor moved the essay deadline to November 20." --semester "Fall 2026" --json
+academia intake document --course "COURSE ID" --source "Fall 2026/COURSE ID/00_INBOX/announcement.pdf" --semester "Fall 2026" --json
+academia intake list --semester "Fall 2026" --json
+academia intake show CANDIDATE_ID --semester "Fall 2026" --json
+academia intake resolve CANDIDATE_ID --assessment ASSESSMENT_ID --semester "Fall 2026" --json
+academia intake propose CANDIDATE_ID --semester "Fall 2026" --json
+academia intake reject CANDIDATE_ID --semester "Fall 2026" --json
 academia review --json
 academia review decide REVIEW_ID use_new --json
 academia review execute REVIEW_ID --json
@@ -210,6 +217,8 @@ An agent may, when operating through the user-approved local interface:
 - prepare a settings diff for the user to review.
 
 AI-created study aids belong in the structured Study workspace as source-linked sets and practice records. Academia does not expose a separate course-document generation or artifact-writing interface. Study data remains AI-generated and non-authoritative, with citations and student practice preserved in the course Study store.
+
+Pasted academic announcements are preserved verbatim as source notes in the selected course `00_INBOX/` (or the semester `00_INBOX/` when the course is unresolved). Imported documents are scanned in place and preserve the original file. `academia intake` creates candidate facts, not active academic values. An exact course and assessment may be resolved automatically; ambiguous or unknown identities require the student to choose. An agent may submit a paste or document and propose a ChangeSet from an already resolved candidate, but may not resolve an ambiguous candidate or reject one. Approval, execution, recovery, and reversal remain the Phase 1 ChangeSet rules.
 
 `SEMESTER_TASKS.md` is the canonical user-task queue; there is no separate task database. One delimited structured block stores personal tasks, and unrelated Markdown is preserved byte-for-byte. Course-derived tasks and domain deadlines are separate read-only evidence. Agents may propose creating or updating a personal task only through `task.propose`, with an existing workspace file as evidence. They may never mark a task complete or reopen one on the student's behalf, and an approved task change never submits coursework, changes a grade, or alters a syllabus deadline. A malformed or duplicate task block fails closed.
 

@@ -93,3 +93,8 @@ def test_desktop_and_dashboard_contracts_include_the_change_slice() -> None:
     assert "recoverChangeSets" in api
     assert "DeadlineChangeDialog" in history
     assert "Change deadline" in history
+    assert '"intake"' in tauri
+    assert '"paste"' in tauri
+    assert "intakePaste" in api
+    assert "intakePropose" in api
+    assert "IntakeDialog" in (ROOT / "frontend" / "src" / "CoursesView.tsx").read_text(encoding="utf-8")

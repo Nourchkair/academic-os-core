@@ -85,6 +85,8 @@ def _category(relative_path: Path) -> str:
 
 
 def _processing_bucket(item: dict[str, Any]) -> str:
+    if item.get("source_note"):
+        return "processed"
     status = str(item.get("processing_status", "")).upper()
     if status == "FAILED":
         return "failed"
@@ -183,6 +185,7 @@ def list_material(workspace_root: Path, semester: str) -> list[dict[str, Any]]:
         semester_relative = path.relative_to(semester_root)
         base_category = _category(semester_relative)
         intake_status = _intake_status(semester_relative)
+        source_note = intake_status == "inbox" and path.name.startswith("Announcement - ")
         items.append(
             {
                 "id": relative.as_posix(),
@@ -197,7 +200,8 @@ def list_material(workspace_root: Path, semester: str) -> list[dict[str, Any]]:
                 "size": stat.st_size,
                 "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
                 "provenance": acquisition.get("provenance") if acquisition else None,
-                "source_type": acquisition.get("source_type") if acquisition else ("Imported" if intake_status == "inbox" else "Workspace material"),
+                "source_type": "Preserved intake source" if source_note else (acquisition.get("source_type") if acquisition else ("Imported" if intake_status == "inbox" else "Workspace material")),
+                "source_note": source_note,
                 **({
                     "processing_status": processing_records[str(resolved)].status.value,
                     "extraction_status": (processing_records[str(resolved)].verification or {}).get("extraction_status"),

@@ -78,6 +78,7 @@ export type LibraryItem = {
   source_type?: string
   processing_status?: 'DETECTED' | 'PENDING' | 'PROCESSING' | 'VERIFIED' | 'ACKNOWLEDGED' | 'FAILED'
   extraction_status?: string | null
+  source_note?: boolean
 }
 
 export type FilePreview = {
@@ -739,4 +740,70 @@ export type ChangeSet = {
   }
   reversal: Record<string, unknown>
   evidence?: Array<Record<string, unknown>>
+}
+
+export type IntakeAssessmentOption = {
+  id: string
+  title: string
+  kind?: string | null
+  due_date?: string | null
+  verification?: string | null
+}
+
+export type IntakeCandidate = {
+  id: string
+  intake_id: string
+  semester: string
+  course_id?: string | null
+  entity_type: string
+  entity_title?: string | null
+  field: string
+  value?: string | null
+  value_type: string
+  source_path: string
+  source_locator?: string | null
+  source_excerpt?: string | null
+  source_kind: string
+  confidence: string
+  specificity: string
+  status: string
+  display_status?: string
+  changeset_status?: string | null
+  resolution: Record<string, unknown>
+  proposed_change_id?: string | null
+  warnings: string[]
+  available_assessments?: IntakeAssessmentOption[]
+  created_at: string
+  created_by: string
+  updated_at: string
+}
+
+export type IntakeRecord = {
+  id: string
+  semester: string
+  course_id?: string | null
+  source_kind: string
+  text_sha256: string
+  source_path: string
+  text: string
+  status: string
+  candidate_ids: string[]
+  warnings: string[]
+  created_at: string
+  created_by: string
+  updated_at: string
+  dedupe_key: string
+}
+
+export type IntakePasteResult = {
+  intake: IntakeRecord
+  candidates: IntakeCandidate[]
+  available_assessments: IntakeAssessmentOption[]
+  warnings: string[]
+}
+
+export type IntakeCandidateShow = {
+  candidate: IntakeCandidate
+  intake: IntakeRecord
+  changeset: ChangeSet | null
 }

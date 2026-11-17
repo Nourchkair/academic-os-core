@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './lib/api'
 import type { ChangeOperation, ChangeSet, Course, CourseworkHistoryRecord, KnowledgeTaskLink, Task } from './types'
 
@@ -8,12 +8,16 @@ type DeadlineChangeProps = {
   course: Course
   semester: string
   record: CourseworkHistoryRecord
+  initialChangeset?: ChangeSet
   onClose: () => void
   onChanged: () => Promise<void>
 }
 
-export function DeadlineChangeDialog({ course, semester, record, onClose, onChanged }: DeadlineChangeProps) {
-  const [step, setStep] = useState<'form' | 'preview' | 'result'>('form')
+export function DeadlineChangeDialog({ course, semester, record, initialChangeset, onClose, onChanged }: DeadlineChangeProps) {
+  const initialStep: 'form' | 'preview' | 'result' = initialChangeset
+    ? (['proposed', 'approved'].includes(initialChangeset.status) ? 'preview' : 'result')
+    : 'form'
+  const [step, setStep] = useState<'form' | 'preview' | 'result'>(initialStep)
   const [newDate, setNewDate] = useState('')
   const [sourceKind, setSourceKind] = useState<SourceKind>('student_report')
   const [sourceLabel, setSourceLabel] = useState('')
@@ -22,15 +26,18 @@ export function DeadlineChangeDialog({ course, semester, record, onClose, onChan
   const [links, setLinks] = useState<KnowledgeTaskLink[]>([])
   const [candidateTaskIds, setCandidateTaskIds] = useState<string[]>([])
   const [newLinkIds, setNewLinkIds] = useState<string[]>([])
-  const [changeset, setChangeset] = useState<ChangeSet | null>(null)
-  const [selectedOperationIds, setSelectedOperationIds] = useState<string[]>([])
+  const [changeset, setChangeset] = useState<ChangeSet | null>(initialChangeset ?? null)
+  const [selectedOperationIds, setSelectedOperationIds] = useState<string[]>(initialChangeset ? initialChangeset.operations.filter((operation) => operation.required || operation.default_selected).map((operation) => operation.id) : [])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const submittingRef = useRef(false)
 
   const assessmentId = `assessment:history:${record.id}`
-  const currentDueDate = record.due_date ?? ''
+  const initialAssessmentOperation = initialChangeset?.operations.find((operation) => operation.type === 'assessment.set_deadline')
+  const currentDueDate = record.due_date ?? initialAssessmentOperation?.before ?? ''
 
   useEffect(() => {
+    if (initialChangeset) return
     let active = true
     void Promise.all([api.tasks(semester), api.knowledgeLinks(course.id, semester)])
       .then(([taskPayload, linkPayload]) => {
@@ -41,7 +48,7 @@ export function DeadlineChangeDialog({ course, semester, record, onClose, onChan
       })
       .catch((reason) => { if (active) setError(String(reason)) })
     return () => { active = false }
-  }, [assessmentId, course.code, course.id, currentDueDate, semester])
+  }, [assessmentId, course.code, course.id, currentDueDate, initialChangeset, semester])
 
   const alreadyLinkedTaskIds = useMemo(() => new Set(links.map((link) => link.task_id)), [links])
   const candidateTasks = tasks.filter((task) => !alreadyLinkedTaskIds.has(task.task_id || task.id))
@@ -92,7 +99,12 @@ export function DeadlineChangeDialog({ course, semester, record, onClose, onChan
   }
 
   const approveAndApply = async () => {
-    if (!changeset) return
+    if (!changeset || submittingRef.current) return
+    if (!['proposed', 'approved'].includes(changeset.status)) {
+      setStep('result')
+      return
+    }
+    submittingRef.current = true
     setBusy(true); setError(null)
     try {
       const approved = changeset.status === 'approved' ? changeset : await api.approveChangeSet(changeset.id, semester, selectedOperationIds)
@@ -102,8 +114,20 @@ export function DeadlineChangeDialog({ course, semester, record, onClose, onChan
       setStep('result')
       await onChanged()
     } catch (reason) {
+      try {
+        const current = await api.showChangeSet(changeset.id, semester)
+        if (!['proposed', 'approved'].includes(current.status)) {
+          setChangeset(current)
+          setStep('result')
+          await onChanged()
+          return
+        }
+      } catch {
+        // Keep the original error when the current state cannot be read.
+      }
       setError(String(reason))
     } finally {
+      submittingRef.current = false
       setBusy(false)
     }
   }
@@ -219,7 +243,7 @@ export function DeadlineChangeDialog({ course, semester, record, onClose, onChan
         {changeset.status === 'verified' && <p className="deadline-change-hint">Every approved operation was read back and verified. The evidence remains unverified until a source confirms it.</p>}
         {changeset.result.operation_results.some((operation) => operation.status === 'conflict') && <p className="deadline-change-warning">A record changed after this preview was created. Nothing was overwritten. Close this dialog and start a new change preview to use the current value.</p>}
         {canRetry && <button type="button" className="secondary-button" onClick={() => void retry()} disabled={busy}>{busy ? 'Retrying…' : 'Retry failed operations'}</button>}
-        <div className="deadline-change-actions">{reversible && ['verified', 'partially_applied'].includes(changeset.status) && <button type="button" className="secondary-button" onClick={() => void undo()} disabled={busy}>{busy ? 'Reversing…' : 'Undo this change'}</button>}<button type="button" className="primary-button" onClick={() => void cancel()} disabled={busy}>Done</button></div>
+        <div className="deadline-change-actions">{reversible && ['verified', 'partially_applied'].includes(changeset.status) && <button type="button" className="secondary-button" onClick={() => void undo()} disabled={busy}>{busy ? 'Please wait…' : 'Undo this change'}</button>}<button type="button" className="primary-button" onClick={() => void cancel()} disabled={busy}>Done</button></div>
       </div>}
     </section>
   </div>
