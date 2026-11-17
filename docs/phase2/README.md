@@ -1,6 +1,6 @@
 # Phase 2 — Universal academic intake
 
-Status: **pasted and imported-document intake implemented on `next/intake`; validated locally, not merged or released**
+Status: **pasted and imported-document intake merged at `main` (`d85b704`) and tagged `phase2-academic-intake`; not released**
 
 This branch begins Phase 2 on top of the merged and tagged Phase 1 engine.
 
@@ -270,7 +270,6 @@ Validation performed on a copied real three-course workspace:
   unapproved.
 
 Lint has no new findings versus the Phase 1 baseline (35 pre-existing problems).
-Imported-document intake remains the next Phase 2 task.
 
 ## Baseline
 
@@ -281,4 +280,11 @@ baseline-pre-phase1-engine   # pre-merge rollback point
 phase1-academic-engine       # validated Phase 1 merge
 ```
 
-This Phase 2 work stays on `next/intake` and does not modify `main` directly.
+Phase 2 is merged at `main` (`d85b704`) and tagged:
+
+```text
+phase2-academic-intake       # validated Phase 2 intake merge
+```
+
+The installed app is still the existing release until a signed build is produced
+and installed.
