@@ -1,6 +1,6 @@
 # 09 — Phase 1 implementation plan
 
-Status: **implemented on `next/academic-engine`; validated locally, not merged or released**
+Status: **implemented, merged at `main` (`02fc461`), and tagged `phase1-academic-engine`; not released**
 
 ## Goal
 

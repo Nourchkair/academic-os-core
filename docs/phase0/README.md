@@ -1,6 +1,6 @@
 # Phase 0 — Academic knowledge and change-coordination contracts
 
-Status: **implemented and locally validated on `next/academic-engine`; not merged or released**
+Status: **Phase 1 merged at `main` (`02fc461`) and tagged `phase1-academic-engine`; not released or installed**
 
 This directory defines the contracts for the first Academic Intelligence Engine
 slice. It is deliberately narrower than the five-phase product roadmap.
@@ -93,5 +93,6 @@ validated with:
 - an end-to-end dashboard command-bridge walkthrough;
 - a read-only check against a real workspace copy.
 
-It is **not merged, released, or installed** into `/Applications/AcademiaOS.app`.
-The installed app and the `academia` launcher still use the existing release.
+It is **merged into `main` and tagged**, but **not released or installed** into
+`/Applications/AcademiaOS.app`. The installed app and the `academia` launcher
+still use the existing release.
