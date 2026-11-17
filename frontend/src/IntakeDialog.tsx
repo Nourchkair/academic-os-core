@@ -98,6 +98,11 @@ export function IntakeDialog({ course, semester, onClose, onChanged }: IntakeDia
     try {
       const value = await api.intakeShow(candidate.id, semester)
       if (!value.changeset) throw new Error('The proposed ChangeSet could not be loaded.')
+      if (['cancelled', 'superseded'].includes(value.changeset.status)) {
+        const changeset = await api.intakePropose(candidate.id, semester)
+        setActiveReview({ candidate: value.candidate, changeset })
+        return
+      }
       setActiveReview({ candidate: value.candidate, changeset: value.changeset })
     } catch (reason) {
       setError(String(reason))
