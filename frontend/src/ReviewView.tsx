@@ -13,6 +13,7 @@ type ReviewViewProps = {
   onDecision: (itemId: string, decision: string) => Promise<void>
   onExecute: (itemId: string) => Promise<void>
   onAmend?: (itemId: string, fields: TaskProposalAmendment) => Promise<void>
+  showIntro?: boolean
 }
 
 const actionLabels: Record<string, string> = {
@@ -23,7 +24,7 @@ const actionLabels: Record<string, string> = {
   configuration_change: 'Settings change',
 }
 
-export function ReviewView({ items, courses, activity, busy, error, focusId, onFocusConsumed, onDecision, onExecute, onAmend }: ReviewViewProps) {
+export function ReviewView({ items, courses, activity, busy, error, focusId, onFocusConsumed, onDecision, onExecute, onAmend, showIntro = true }: ReviewViewProps) {
   const open = items.filter((item) => item.status === 'open')
   const approved = items.filter((item) => item.status === 'approved' && item.action_proposal_id)
   const timeline = activity.filter((event) => event.event_type.startsWith('action.') || event.event_type.startsWith('review.')).slice(0, 16)
@@ -43,11 +44,11 @@ export function ReviewView({ items, courses, activity, busy, error, focusId, onF
   }, [focusId, items])
 
   return <div className="page-stack review-workspace">
-    <section className="page-intro">
+    {showIntro && <section className="page-intro">
       <p className="eyebrow">Human authority</p>
       <h2>Review & approvals</h2>
       <p>Nothing changes until you decide. Approved actions are executed separately, verified against the local workspace, and recorded in the timeline.</p>
-    </section>
+    </section>}
 
     {error && <p className="setup-error" role="alert">{error}</p>}
 

@@ -14,7 +14,7 @@ describe('SemesterPicker', () => {
       />,
     )
 
-    const trigger = screen.getByRole('button', { name: 'Choose semester' })
+    const trigger = screen.getByRole('button', { name: /^Semester/ })
     fireEvent.click(trigger)
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByRole('listbox', { name: 'Available semesters' })).toBeInTheDocument()
@@ -40,7 +40,7 @@ describe('SemesterPicker', () => {
       />,
     )
 
-    const trigger = screen.getByRole('button', { name: 'Choose semester' })
+    const trigger = screen.getByRole('button', { name: /^Semester/ })
     fireEvent.click(trigger)
     fireEvent.keyDown(document, { key: 'Escape' })
 
@@ -52,9 +52,9 @@ describe('SemesterPicker', () => {
     const { rerender } = render(
       <SemesterPicker semester="" semesters={['Fall 2026']} loading onSemesterChange={vi.fn().mockResolvedValue(undefined)} />,
     )
-    expect(screen.getByRole('button', { name: 'Choose semester' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Semester/ })).toBeDisabled()
 
     rerender(<SemesterPicker semester="" semesters={[]} loading={false} onSemesterChange={vi.fn().mockResolvedValue(undefined)} />)
-    expect(screen.getByRole('button', { name: 'Choose semester' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Semester/ })).toBeDisabled()
   })
 })

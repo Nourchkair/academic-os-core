@@ -80,6 +80,7 @@ export function IntakeDialog({ course, semester, onClose, onChanged }: IntakeDia
       setResult(value)
       setSelectedAssessments({})
       await refreshCandidates()
+      void onChanged()
     } catch (reason) {
       setError(String(reason))
     } finally {
@@ -95,6 +96,7 @@ export function IntakeDialog({ course, semester, onClose, onChanged }: IntakeDia
       setResult(value)
       setSelectedAssessments({})
       await refreshCandidates()
+      void onChanged()
     } catch (reason) {
       setError(String(reason))
     } finally {
@@ -114,6 +116,7 @@ export function IntakeDialog({ course, semester, onClose, onChanged }: IntakeDia
     try {
       const value = await api.intakeResolve(candidate.id, semester, { courseId: course.id, assessmentId })
       replaceCandidate(value.candidate)
+      void onChanged()
     } catch (reason) {
       setError(String(reason))
     } finally {
@@ -127,6 +130,7 @@ export function IntakeDialog({ course, semester, onClose, onChanged }: IntakeDia
       const changeset = await api.intakePropose(candidate.id, semester)
       await refreshCandidates()
       setActiveReview({ candidate: { ...candidate, status: 'proposed', proposed_change_id: changeset.id }, changeset })
+      void onChanged()
     } catch (reason) {
       setError(String(reason))
     } finally {
@@ -143,6 +147,7 @@ export function IntakeDialog({ course, semester, onClose, onChanged }: IntakeDia
         const changeset = await api.intakePropose(candidate.id, semester)
         await refreshCandidates()
         setActiveReview({ candidate: value.candidate, changeset })
+        void onChanged()
         return
       }
       setActiveReview({ candidate: value.candidate, changeset: value.changeset })
@@ -158,6 +163,7 @@ export function IntakeDialog({ course, semester, onClose, onChanged }: IntakeDia
     try {
       const value = await api.intakeReject(candidate.id, semester)
       replaceCandidate(value.candidate)
+      void onChanged()
     } catch (reason) {
       setError(String(reason))
     } finally {

@@ -1,14 +1,13 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { CourseGradesView } from './CourseGradesView'
 import { CourseworkHistoryView } from './CourseworkHistory'
 import { IntakeDialog } from './IntakeDialog'
 import { StudyView } from './StudyView'
 import { CourseCard } from './CourseCard'
 import { SemesterPicker } from './SemesterPicker'
-import { api, fileUrl, isTauriEnvironment } from './lib/api'
-import type { Course, FilePreview, LibraryItem, ProcessingRecord } from './types'
+import { LibraryPreviewDialog } from './LibraryPreviewDialog'
+import type { Course, LibraryItem, ProcessingRecord } from './types'
 
-const DocumentReader = lazy(() => import('./DocumentReader').then((module) => ({ default: module.DocumentReader })))
 
 const categories = ['syllabi', 'readings', 'lectures', 'assessments', 'notes', 'other'] as const
 type Category = 'all' | typeof categories[number]
@@ -50,10 +49,12 @@ type CoursesViewProps = {
   onStartStudyChat: (courseId: string, prompt?: string) => void
   courseOpenRequest: { id: string; courseId: string } | null
   onCourseOpenConsumed: () => void
+  intakeOpenRequest: { id: string; courseId: string } | null
+  onIntakeOpenConsumed: () => void
   onBackHome: () => void
 }
 
-export function CoursesView({ semesters, semester, courses, items, inbox, loading, onSemesterChange, onOpenActions, onHistoryChanged, studyResumeRequest, onStudyResumeConsumed, onOpenStudyConversation, onStartStudyChat, courseOpenRequest, onCourseOpenConsumed, onBackHome }: CoursesViewProps) {
+export function CoursesView({ semesters, semester, courses, items, inbox, loading, onSemesterChange, onOpenActions, onHistoryChanged, studyResumeRequest, onStudyResumeConsumed, onOpenStudyConversation, onStartStudyChat, courseOpenRequest, onCourseOpenConsumed, intakeOpenRequest, onIntakeOpenConsumed, onBackHome }: CoursesViewProps) {
   const [selectedCourseId, setSelectedCourseId] = useState('')
   const [courseSection, setCourseSection] = useState<'material' | 'grades' | 'history' | 'study'>('material')
   const [category, setCategory] = useState<Category>('all')
@@ -103,6 +104,15 @@ export function CoursesView({ semesters, semester, courses, items, inbox, loadin
   }, [courseOpenRequest, courses, onCourseOpenConsumed])
 
   useEffect(() => {
+    if (!intakeOpenRequest || !courses.some((course) => course.id === intakeOpenRequest.courseId)) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedCourseId(intakeOpenRequest.courseId)
+    setCourseSection('material')
+    setIntakeOpen(true)
+    onIntakeOpenConsumed()
+  }, [courses, intakeOpenRequest, onIntakeOpenConsumed])
+
+  useEffect(() => {
     if (!studyResumeRequest || !courses.some((course) => course.id === studyResumeRequest.courseId)) return
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedCourseId(studyResumeRequest.courseId)
@@ -143,37 +153,9 @@ export function CoursesView({ semesters, semester, courses, items, inbox, loadin
       </>}
     </section>
     </>}
-    <FilePreviewDialog item={previewItem} onClose={() => setPreviewItem(null)} />
+    <LibraryPreviewDialog item={previewItem} onClose={() => setPreviewItem(null)} />
     {intakeOpen && selectedCourse && <IntakeDialog course={selectedCourse} semester={semester} onClose={() => setIntakeOpen(false)} onChanged={onHistoryChanged} />}
   </div>
-}
-
-function FilePreviewDialog({ item, onClose }: { item: LibraryItem | null; onClose: () => void }) {
-  const [preview, setPreview] = useState<FilePreview | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    if (!item) return
-    let active = true
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setPreview(null)
-    setError(null)
-    setLoading(true)
-    void api.filePreview(item.path, item.semester).then((value) => { if (active) setPreview(value) }).catch((reason) => { if (active) setError(String(reason)) }).finally(() => { if (active) setLoading(false) })
-    return () => { active = false }
-  }, [item])
-
-  useEffect(() => {
-    if (!item) return
-    const handleKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [item, onClose])
-
-  if (!item) return null
-  const assetUrl = preview && ['pdf', 'image'].includes(preview.kind) && !isTauriEnvironment() ? fileUrl(item.path, item.semester) : undefined
-  return <div className="file-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="file-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="file-preview-title"><header className="file-preview-heading"><div><p className="eyebrow">Read-only preview</p><h2 id="file-preview-title">{item.name}</h2><p>{item.relative_path}</p></div><button className="icon-button" aria-label="Close preview" onClick={onClose}>×</button></header>{loading && <div className="file-preview-loading" role="status">Opening a local preview…</div>}{error && <p className="setup-error" role="alert">{error}</p>}{preview && !loading && <><div className="file-preview-meta"><span>{preview.extension.toUpperCase().replace('.', '')} · {formatBytes(preview.size)}</span><span>Source unchanged</span></div><Suspense fallback={<div className="file-preview-loading" role="status">Formatting document…</div>}><DocumentReader preview={preview} assetUrl={assetUrl} emptyMessage="No extractable text was found. The original file remains available in this class." /></Suspense>{preview.truncated && <p className="file-preview-note">This preview is truncated for safety. The original file remains unchanged.</p>}{preview.kind === 'pdf' && isTauriEnvironment() && <p className="file-preview-note">The desktop shell shows extracted PDF text; page layout and scanned images are not included in this view.</p>}</>}</section></div>
 }
 
 function getProcessingBucket(item: LibraryItem, pending: boolean): ProcessingFilter {

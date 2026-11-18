@@ -673,3 +673,8 @@ a { color: #242424; }
   .semester-picker-option:hover, .semester-picker-option:focus-visible, .semester-option-mark { background: var(--surface-raised); }
   .task-toolbar, .task-user-editor { background: var(--surface); border-color: var(--line); }
 }
+
+@media (prefers-color-scheme: dark) {
+  /* Keep the course-card action readable on dark card surfaces. */
+  .course-browser-card-action { color: #b9b9b4; }
+}

@@ -56,7 +56,7 @@ export function SemesterPicker({ semester, semesters, loading, onSemesterChange 
         ref={triggerRef}
         type="button"
         className="semester-picker-trigger"
-        aria-label="Choose semester"
+        aria-label={`Semester ${semester || 'Choose semester'}`}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={menuId}

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { HomeView } from './HomeView'
-import type { Course, ProcessingRecord, StatusPayload, Task } from './types'
+import type { Course, ProcessingRecord, ReviewItem, StatusPayload, Task } from './types'
 
 const course: Course = {
   id: 'POL 2103 - Politics',
@@ -57,10 +57,14 @@ const status: StatusPayload = {
   acquisition: { watched_folders: [], browser: { enabled: false, allowed_sites: [] } },
 }
 
+const reviewItems: ReviewItem[] = [
+  { id: 'review-1', kind: 'deadline_conflict', title: 'Essay deadline needs a decision', course: course.id, status: 'open', priority: 'normal', created_at: '', updated_at: '', details: {} },
+  { id: 'review-2', kind: 'domain_conflict', title: 'Reading list needs a decision', course: course.id, status: 'open', priority: 'normal', created_at: '', updated_at: '', details: {} },
+]
+
 afterEach(() => {
   vi.useRealTimers()
 })
-
 describe('HomeView', () => {
   it('shows verified deadlines, open tasks, review decisions, and intake', () => {
     vi.useFakeTimers()
@@ -74,6 +78,8 @@ describe('HomeView', () => {
         tasks={[task]}
         activity={[]}
         inbox={[inboxItem]}
+        reviews={reviewItems}
+        intakeCandidates={[]}
         semester="Fall 2026"
         semesters={['Fall 2026']}
         loading={false}
@@ -86,13 +92,13 @@ describe('HomeView', () => {
 
     expect(screen.getByRole('heading', { name: 'Good afternoon, Alex' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Read Week 4' })).toBeInTheDocument()
-    expect(screen.getByText('Open decisions')).toBeInTheDocument()
+    expect(screen.getByText('Changes & approvals')).toBeInTheDocument()
     expect(screen.getByText('2')).toBeInTheDocument()
     expect(screen.getByText('Waiting for your input')).toBeInTheDocument()
-    expect(screen.getByText('Items need review or processing')).toBeInTheDocument()
+    expect(screen.getByText('Files need review or processing')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /View tasks/ }))
-    expect(onNavigate).toHaveBeenCalledWith('tasks')
+    fireEvent.click(screen.getByRole('button', { name: /Open planner/ }))
+    expect(onNavigate).toHaveBeenCalledWith('planner')
   })
 
   it('warns when the selected semester is absent from the workspace', () => {
@@ -103,6 +109,8 @@ describe('HomeView', () => {
         tasks={[]}
         activity={[]}
         inbox={[]}
+        reviews={[]}
+        intakeCandidates={[]}
         semester="Winter 2027"
         semesters={['Fall 2026']}
         loading={false}
