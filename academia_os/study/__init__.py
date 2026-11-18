@@ -529,8 +529,9 @@ class StudyService:
                 lines.extend([f"\n### {item['prompt']}", '\n'.join(f'- {option}' for option in item['options']),
                               f"Answer: {item['answer']}", item['explanation']])
                 lines.extend(f"Source: {citation['source_id']} · {citation['locator']} · SHA256 {citation['sha256']}" for citation in item['citations'])
-        lines.extend(['\n## Annotations', *[f"- {note['kind']}: {note['note']} ({note['citation']['source_id']} · {note['citation']['locator']})" for note in state['annotations']],
-                      '\n## Practice history', '```json', json.dumps({'attempts': state['attempts'], 'reviews': state['reviews'], 'exams': state['exams']}, indent=2, ensure_ascii=False), '```'])
+        lines.extend(['\n## Reading status', *[f"- {record.get('title') or record.get('reading_id') or record.get('source_id')}: {record.get('status')}" for record in state.get('readings', {}).values()],
+                      '\n## Annotations', *[f"- {note['kind']}: {note['note']} ({note['citation']['source_id']} · {note['citation']['locator']})" for note in state['annotations']],
+                      '\n## Practice history', '```json', json.dumps({'attempts': state['attempts'], 'reviews': state['reviews'], 'exams': state['exams'], 'readings': state.get('readings', {})}, indent=2, ensure_ascii=False), '```'])
         return {'format': 'markdown', 'filename': f'{self.course}-study.md', 'content': '\n\n'.join(lines)}
 
     def restore(self, payload: dict[str, Any], *, actor: str = 'user') -> dict[str, Any]:
