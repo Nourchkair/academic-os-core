@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { CourseCard } from './CourseCard'
 import { SemesterPicker } from './SemesterPicker'
 import { getTaskUrgency, urgencyLabel } from './lib/task-urgency'
-import type { ActivityEvent, Course, ProcessingRecord, StatusPayload, Task } from './types'
+import { isPendingIntakeCandidate } from './lib/intake'
+import type { ActivityEvent, Course, IntakeCandidate, ProcessingRecord, ReviewItem, StatusPayload, Task } from './types'
 
 type HomeViewProps = {
   status: StatusPayload | null
@@ -10,16 +11,18 @@ type HomeViewProps = {
   tasks: Task[]
   activity: ActivityEvent[]
   inbox: ProcessingRecord[]
+  reviews: ReviewItem[]
+  intakeCandidates: IntakeCandidate[]
   semester: string
   semesters: string[]
   loading: boolean
   onSemesterChange: (semester: string) => Promise<void>
   onOpenCourse: (courseId: string) => void
   onOpenIntake: () => void
-  onNavigate: (view: 'tasks' | 'activity' | 'settings' | 'review') => void
+  onNavigate: (view: 'planner' | 'activity' | 'settings' | 'changes' | 'courses' | 'search') => void
 }
 
-export function HomeView({ status, courses, tasks, activity, inbox, semester, semesters, loading, onSemesterChange, onOpenCourse, onOpenIntake, onNavigate }: HomeViewProps) {
+export function HomeView({ status, courses, tasks, activity, inbox, reviews, intakeCandidates, semester, semesters, loading, onSemesterChange, onOpenCourse, onOpenIntake, onNavigate }: HomeViewProps) {
   const timezone = status?.workspace.timezone || 'America/Toronto'
   const today = localDate(timezone)
   const [now, setNow] = useState(() => new Date())
@@ -39,6 +42,8 @@ export function HomeView({ status, courses, tasks, activity, inbox, semester, se
     .sort((a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999') || (a.due_time || '').localeCompare(b.due_time || '') || a.title.localeCompare(b.title))[0]
   const nextDeadlineUrgency = nextDeadline ? getTaskUrgency(nextDeadline, timezone, now) : 'upcoming'
   const pendingInbox = inbox.filter((item) => item.status !== 'ACKNOWLEDGED')
+  const openReviews = reviews.filter((item) => item.status === 'open').length
+  const pendingIntake = intakeCandidates.filter(isPendingIntakeCandidate).length
   const firstName = (status?.student.name || 'there').split(' ')[0]
   const hour = Number(new Intl.DateTimeFormat('en', { hour: 'numeric', hourCycle: 'h23', timeZone: timezone }).format(now))
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
@@ -57,7 +62,7 @@ export function HomeView({ status, courses, tasks, activity, inbox, semester, se
     <section className="home-deadline" data-tone={nextDeadlineUrgency} aria-label="Next deadline">
       <div className="home-deadline-mark" aria-hidden="true">◷</div>
       <div className="home-deadline-copy"><p className="eyebrow">Next deadline <span className="status-pill deadline-status">{nextDeadline ? urgencyLabel(nextDeadlineUrgency) : 'Clear'}</span></p>{nextDeadline ? <><h2>{nextDeadline.title}</h2><p>{nextDeadline.course || 'Semester'} · {formatDue(nextDeadline)}</p></> : <><h2>No upcoming deadlines recorded</h2><p>You’re clear for the next 7 days.</p></>}</div>
-      <button className="home-deadline-link" onClick={() => onNavigate('tasks')}>View tasks <span>→</span></button>
+      <button className="home-deadline-link" onClick={() => onNavigate('planner')}>Open planner <span>→</span></button>
     </section>
 
     <section className="home-classes-section">
@@ -71,13 +76,13 @@ export function HomeView({ status, courses, tasks, activity, inbox, semester, se
     <div className="home-focus-layout">
       <section className="home-week-panel">
         <div className="home-section-heading compact"><div><p className="eyebrow">Next 7 days</p><h2>Open tasks</h2></div><span className="home-count" data-tone={weekTasks.length ? getTaskUrgency(weekTasks[0], timezone, now) : 'completed'}>{weekTasks.length}</span></div>
-        <div className="home-week-list">{weekTasks.map((task) => { const urgency = getTaskUrgency(task, timezone, now); return <button className="home-week-task" data-tone={urgency} key={task.id} onClick={() => onNavigate('tasks')}><span className="home-week-task-date">{task.due_date ? shortDate(task.due_date) : ''}</span><span className="home-week-task-copy"><strong>{task.title}</strong><small>{task.course || 'Semester'}{task.weight ? ` · ${task.weight}` : ''}</small></span><span className="home-week-task-arrow" aria-hidden="true">→</span></button> })}{!weekTasks.length && <p className="home-empty-note">No open tasks are due within the next 7 days.</p>}</div>
-        <button className="home-inline-link" onClick={() => onNavigate('tasks')}>See all tasks <span>→</span></button>
+        <div className="home-week-list">{weekTasks.map((task) => { const urgency = getTaskUrgency(task, timezone, now); return <button className="home-week-task" data-tone={urgency} key={task.id} onClick={() => onNavigate('planner')}><span className="home-week-task-date">{task.due_date ? shortDate(task.due_date) : ''}</span><span className="home-week-task-copy"><strong>{task.title}</strong><small>{task.course || 'Semester'}{task.weight ? ` · ${task.weight}` : ''}</small></span><span className="home-week-task-arrow" aria-hidden="true">→</span></button> })}{!weekTasks.length && <p className="home-empty-note">No open tasks are due within the next 7 days.</p>}</div>
+        <button className="home-inline-link" onClick={() => onNavigate('planner')}>See all tasks <span>→</span></button>
       </section>
 
       <div className="home-attention-column">
-        <button type="button" className="home-attention-card home-attention-action" data-tone={status?.review_count ? 'soon' : 'completed'} onClick={() => onNavigate('review')}><div className="home-attention-icon" aria-hidden="true">!</div><div><p className="eyebrow">Open decisions</p><strong>{status?.review_count ?? 0}</strong><span>{status?.review_count ? 'Waiting for your input' : 'Nothing waiting for a decision'}</span></div><span className="home-attention-arrow" aria-hidden="true">→</span></button>
-        <button type="button" className="home-attention-card home-attention-action" data-tone={pendingInbox.length ? 'soon' : 'completed'} onClick={() => onNavigate('activity')}><div className="home-attention-icon" aria-hidden="true">↓</div><div><p className="eyebrow">Intake</p><strong>{pendingInbox.length}</strong><span>{pendingInbox.length ? 'Items need review or processing' : 'No pending intake items'}</span></div><span className="home-attention-arrow" aria-hidden="true">→</span></button>
+        <button type="button" className="home-attention-card home-attention-action" data-tone={openReviews + pendingIntake ? 'soon' : 'completed'} onClick={() => onNavigate('changes')}><div className="home-attention-icon" aria-hidden="true">!</div><div><p className="eyebrow">Changes & approvals</p><strong>{openReviews + pendingIntake}</strong><span>{openReviews + pendingIntake ? 'Waiting for your input' : 'Nothing waiting for a decision'}</span></div><span className="home-attention-arrow" aria-hidden="true">→</span></button>
+        <button type="button" className="home-attention-card home-attention-action" data-tone={pendingInbox.length ? 'soon' : 'completed'} onClick={() => onNavigate('activity')}><div className="home-attention-icon" aria-hidden="true">↓</div><div><p className="eyebrow">Processing</p><strong>{pendingInbox.length}</strong><span>{pendingInbox.length ? 'Files need review or processing' : 'No pending processing items'}</span></div><span className="home-attention-arrow" aria-hidden="true">→</span></button>
       </div>
     </div>
 

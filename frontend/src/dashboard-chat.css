@@ -733,6 +733,7 @@
 }
 .top-pill > span:first-child { font-size: 13px; }
 .top-pill:hover { box-shadow: 0 10px 24px rgba(40, 40, 40, .18); transform: translateY(-1px); }
+.top-pill.active { background: var(--surface-raised, #f1efe9); border-color: var(--text-muted, #aaa49a); box-shadow: inset 0 0 0 1px var(--text-muted, #aaa49a); }
 .top-pill:disabled { cursor: wait; opacity: .5; }
 .top-pill-agent { background: var(--surface-raised, #f7f5f0); }
 
@@ -766,6 +767,13 @@
 }
 .agent-icon-button:hover { background: var(--surface-raised, #f2f2f2); color: var(--text-strong, #3f3f3f); }
 .agent-icon-button svg { fill: none; height: 15px; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; width: 15px; }
+
+.agent-workspace-back {
+  align-items: center; background: transparent; border: 1px solid transparent; border-radius: 8px;
+  color: var(--text-muted, #8a8a8a); display: inline-flex; flex: 0 0 auto; gap: 5px;
+  font-size: 12px; font-weight: 650; min-height: 28px; padding: 4px 8px;
+}
+.agent-workspace-back:hover { background: var(--surface-raised, #f2f2f2); color: var(--text-strong, #3f3f3f); }
 
 .agent-drawer-backdrop {
   animation: agent-fade .15s ease-out; background: rgba(12, 12, 12, .42); border-radius: 15px; inset: 0; position: absolute; z-index: 40;

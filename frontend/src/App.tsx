@@ -2,25 +2,27 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { ActionPanel } from './ActionPanel'
+import { ChangesView } from './ChangesView'
 import { CoursesView } from './CoursesView'
 import { DashboardChat } from './DashboardChat'
 import { HomeView } from './HomeView'
 import { getTaskUrgency, urgencyLabel } from './lib/task-urgency'
+import { isPendingIntakeCandidate } from './lib/intake'
 import { Onboarding } from './Onboarding'
-import { ReviewView } from './ReviewView'
+import { SearchView } from './SearchView'
 import { SettingsView } from './SettingsView'
 import { api, BridgeUnavailableError, isTauriEnvironment } from './lib/api'
 import type { StudyChatRequest } from './lib/chat-history'
-import type { ActivityEvent, Course, CourseworkHistoryRecord, CourseworkKind, LibraryItem, ProcessingRecord, ReviewItem, StatusPayload, Task, TaskInput, TaskProposalAmendment } from './types'
+import type { ActivityEvent, Course, CourseworkHistoryRecord, CourseworkKind, IntakeCandidate, LibraryItem, ProcessingRecord, ReviewItem, StatusPayload, Task, TaskInput, TaskProposalAmendment } from './types'
 
 const nav = [
   { id: 'home', label: 'Home', icon: '⌂' },
-  { id: 'review', label: 'Review', icon: '⚖' },
-  { id: 'tasks', label: 'Tasks', icon: '✓' },
-  { id: 'activity', label: 'Activity', icon: '◷' },
+  { id: 'courses', label: 'Courses', icon: '◫' },
+  { id: 'planner', label: 'Planner', icon: '◷' },
+  { id: 'chat', label: 'Agent', icon: '✦' },
 ] as const
 
-type View = 'home' | 'courses' | 'review' | 'chat' | 'tasks' | 'activity' | 'settings'
+type View = 'home' | 'courses' | 'planner' | 'chat' | 'changes' | 'search' | 'activity' | 'settings'
 type StudyResumeRequest = { courseId: string; sessionId: string }
 
 type ActionMode = 'import' | 'migration'
@@ -56,7 +58,6 @@ function AppTooltipLayer() {
       if (!target?.isConnected || !text) { hide(); return }
       const sideAttr = target.dataset.tooltipSide
       let side: TooltipSide = sideAttr === 'left' || sideAttr === 'right' || sideAttr === 'top' || sideAttr === 'bottom' ? sideAttr : 'bottom'
-      const rect = target.getBoundingClientRect()
       setTooltip({ text, side, left: 0, top: 0, arrow: 0, ready: false })
       window.cancelAnimationFrame(frame)
       frame = window.requestAnimationFrame(() => {
@@ -152,6 +153,7 @@ function App() {
   const [taskStateError, setTaskStateError] = useState<string | null>(cachedStartup?.workspace.task_state_error ?? null)
   const [activity, setActivity] = useState<ActivityEvent[]>([])
   const [reviews, setReviews] = useState<ReviewItem[]>([])
+  const [intakeCandidates, setIntakeCandidates] = useState<IntakeCandidate[]>([])
   const [reviewBusy, setReviewBusy] = useState(false)
   const [reviewError, setReviewError] = useState('')
   const [reviewFocusId, setReviewFocusId] = useState<string | null>(null)
@@ -173,16 +175,10 @@ function App() {
   const [dropSequence, setDropSequence] = useState(0)
   const [actionCourseId, setActionCourseId] = useState<string | undefined>()
   const [courseOpenRequest, setCourseOpenRequest] = useState<{ id: string; courseId: string } | null>(null)
-  const chatNavRef = useRef<HTMLDetailsElement>(null)
+  const [intakeOpenRequest, setIntakeOpenRequest] = useState<{ id: string; courseId: string } | null>(null)
   const refreshSequence = useRef(0)
   const reviewRefreshSequence = useRef(0)
   const loadingBackgroundData = useRef(false)
-  const chatMenuItems: { view: View; label: string; icon: string }[] = [
-    { view: 'home', label: 'Home', icon: '⌂' },
-    { view: 'courses', label: 'Courses', icon: '◫' },
-    { view: 'tasks', label: 'Tasks', icon: '✓' },
-    { view: 'settings', label: 'Settings', icon: '⚙' },
-  ]
 
   const beginOnboarding = async () => {
     try {
@@ -286,6 +282,13 @@ function App() {
             if (sequence === refreshSequence.current) setReviewError(`Review decisions could not be loaded: ${String(reason)}`)
           }
           try {
+            const intakeData = await api.intakeList(targetSemester)
+            if (sequence !== refreshSequence.current) return
+            setIntakeCandidates(intakeData.candidates)
+          } catch (reason) {
+            if (sequence === refreshSequence.current) setError(`Academic intake candidates could not be loaded: ${String(reason)}`)
+          }
+          try {
             const activityData = await api.activity()
             if (sequence !== refreshSequence.current) return
             setActivity(activityData)
@@ -337,12 +340,15 @@ function App() {
       if (sequence !== refreshSequence.current) return
       const taskData = await api.tasks(semester)
       if (sequence !== refreshSequence.current) return
+      const intakeData = await api.intakeList(semester)
+      if (sequence !== refreshSequence.current) return
       const libraryData = await api.library({ semester })
       if (sequence !== refreshSequence.current) return
       setSelectedSemester(semester)
       setCourses(courseData)
       setTasks(taskData.tasks)
       setTaskStateError(taskData.task_state_error)
+      setIntakeCandidates(intakeData.candidates)
       setLibraryItems(libraryData)
       setLibraryLoaded(true)
     } catch (reason) {
@@ -378,8 +384,10 @@ function App() {
     setReviewError('')
     try {
       await api.reviewExecute(itemId)
-      await refreshReviews()
       setReviewRevision((current) => current + 1)
+      // Executing an approved action can create or change academic records, so
+      // reload courses, tasks, Library, intake, and reviews from the workspace.
+      await refresh()
       try { setActivity(await api.activity()) } catch { /* Activity is a secondary audit refresh. */ }
     } catch (reason) {
       setReviewError(`The approved action could not be executed: ${String(reason)}`)
@@ -406,7 +414,7 @@ function App() {
 
   const openReviewFromChat = async (reviewId: string) => {
     setReviewFocusId(reviewId)
-    setView('review')
+    setView('changes')
     setReviewError('')
     await refreshReviews()
   }
@@ -415,7 +423,8 @@ function App() {
   useEffect(() => { void refresh(false, true) }, [])
 
   useEffect(() => {
-    if (view === 'review') void refreshReviews()
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (view === 'changes') void refreshReviews()
   }, [view, refreshReviews])
 
   useEffect(() => {
@@ -437,22 +446,6 @@ function App() {
     }
   }, [status])
 
-  useEffect(() => {
-    const closeChatNavigation = (event: PointerEvent) => {
-      const dropdown = chatNavRef.current
-      if (dropdown?.open && event.target instanceof Node && !dropdown.contains(event.target)) dropdown.open = false
-    }
-    const closeChatNavigationOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && chatNavRef.current) chatNavRef.current.open = false
-    }
-    document.addEventListener('pointerdown', closeChatNavigation)
-    document.addEventListener('keydown', closeChatNavigationOnEscape)
-    return () => {
-      document.removeEventListener('pointerdown', closeChatNavigation)
-      document.removeEventListener('keydown', closeChatNavigationOnEscape)
-    }
-  }, [])
-
   const resumeStudySession = useCallback((courseId: string, sessionId: string) => {
     setStudyResumeRequest({ courseId, sessionId })
     setView('courses')
@@ -472,6 +465,15 @@ function App() {
     setView('courses')
   }, [])
   const clearCourseOpenRequest = useCallback(() => setCourseOpenRequest(null), [])
+  const openIntakeCandidate = useCallback((candidate: IntakeCandidate) => {
+    if (!candidate.course_id) {
+      setView('changes')
+      return
+    }
+    setIntakeOpenRequest({ id: crypto.randomUUID(), courseId: candidate.course_id })
+    setView('courses')
+  }, [])
+  const clearIntakeOpenRequest = useCallback(() => setIntakeOpenRequest(null), [])
 
   if (booting) return <main className="connection-screen"><div className="connection-art">✦</div><p className="eyebrow">AcademiaOS</p><h2>Checking your local workspace</h2><p>Your academic files stay on this computer while we check whether setup is already complete.</p></main>
   if (onboarding) return <Onboarding candidates={setupCandidates} onComplete={refresh} onMigration={async () => { await refresh(); setOnboarding(false); setView('home'); setActionMode('migration') }} />
@@ -479,9 +481,12 @@ function App() {
 
   const navigate = (next: View) => {
     setView(next)
-    if (next !== 'review') setReviewFocusId(null)
+    if (next !== 'changes') setReviewFocusId(null)
   }
   const semesters = status ? Array.from(new Set([status.workspace.semester, ...status.workspace.available_semesters])) : []
+  const openReviewCount = reviews.filter((item) => item.status === 'open').length
+  const pendingIntakeCount = intakeCandidates.filter(isPendingIntakeCandidate).length
+  const changesCount = openReviewCount + pendingIntakeCount
   const openActionPanel = (mode: ActionMode, courseId?: string) => { setActionMode(mode); setActionCourseId(courseId); setError(null) }
   const closeActionPanel = () => { if (!migrationBusy) { setActionMode(null); setDroppedFiles([]) } }
 
@@ -518,7 +523,7 @@ function App() {
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M9 4.5v15M15 9l-3 3 3 3" /></svg>
         </button>}
       </div>
-      <nav aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={`nav-item ${view === item.id || (item.id === 'home' && view === 'courses') ? 'active' : ''}`} onClick={() => navigate(item.id)} disabled={migrationBusy} data-tooltip={sidebarCollapsed ? item.label : undefined} data-tooltip-side={sidebarCollapsed ? 'right' : undefined}><span className="nav-icon">{item.icon}</span><span className="nav-label">{item.label}</span></button>)}</nav>
+      <nav aria-label="Primary navigation">{nav.map((item) => <button key={item.id} className={`nav-item ${view === item.id ? 'active' : ''}`} onClick={() => navigate(item.id)} disabled={migrationBusy} data-tooltip={sidebarCollapsed ? item.label : undefined} data-tooltip-side={sidebarCollapsed ? 'right' : undefined}><span className="nav-icon">{item.icon}</span><span className="nav-label">{item.label}</span></button>)}</nav>
       <div className="sidebar-bottom">
         <button className={`profile-button ${view === 'settings' ? 'active' : ''}`} onClick={() => navigate('settings')} disabled={migrationBusy} aria-label="Open profile and settings" data-tooltip="Settings" data-tooltip-side="right">
           <span className="profile-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.2" /><path d="M5.5 19c.6-3.1 2.9-4.8 6.5-4.8s5.9 1.7 6.5 4.8" /></svg></span>
@@ -530,15 +535,17 @@ function App() {
     <main className="main-content">
       
       {view !== 'chat' && <div className="top-actions-pills">
+        <button className={`top-pill ${view === 'search' ? 'active' : ''}`} type="button" onClick={() => navigate('search')} disabled={migrationBusy} aria-label="Search workspace" aria-current={view === 'search' ? 'page' : undefined}><span aria-hidden="true">⌕</span><span>Search</span></button>
+        <button className={`top-pill ${view === 'changes' ? 'active' : ''}`} type="button" onClick={() => navigate('changes')} disabled={migrationBusy} aria-label={`Open changes${changesCount ? `, ${changesCount} waiting` : ''}`} aria-current={view === 'changes' ? 'page' : undefined}><span aria-hidden="true">⚖</span><span>Changes{changesCount ? ` · ${changesCount}` : ''}</span></button>
         <button className="top-pill" type="button" onClick={() => { setDroppedFiles([]); setActionMode('import') }} disabled={migrationBusy} aria-label="Import material"><span aria-hidden="true">＋</span><span>Import</span></button>
-        <button className="top-pill top-pill-agent" type="button" onClick={() => navigate('chat')} disabled={migrationBusy} aria-label="Open Agent"><span aria-hidden="true">✦</span><span>Open Agent</span></button>
       </div>}
       {error && <p className="dashboard-inline-error" role="alert">{error}</p>}
-      {view === 'home' && <HomeView status={status} courses={courses} tasks={tasks} activity={activity} inbox={inbox} semester={selectedSemester || status?.workspace.semester || ''} semesters={semesters} loading={semesterLoading} onSemesterChange={changeSemester} onOpenCourse={openCourse} onOpenIntake={() => openActionPanel('import')} onNavigate={navigate} />}
-      {view === 'review' && <ReviewView items={reviews} courses={courses} activity={activity} busy={reviewBusy} error={reviewError} focusId={reviewFocusId} onFocusConsumed={() => setReviewFocusId(null)} onDecision={decideReview} onExecute={executeReview} onAmend={amendReview} />}
-      {view === 'courses' && <CoursesView semesters={semesters} semester={selectedSemester || status?.workspace.semester || ''} courses={courses} items={libraryItems} inbox={inbox} loading={semesterLoading} onSemesterChange={changeSemester} onOpenActions={openActionPanel} onHistoryChanged={() => refresh()} studyResumeRequest={studyResumeRequest} onStudyResumeConsumed={clearStudyResumeRequest} onOpenStudyConversation={openStudyConversation} onStartStudyChat={startStudyChat} courseOpenRequest={courseOpenRequest} onCourseOpenConsumed={clearCourseOpenRequest} onBackHome={() => setView('home')} />}
+      {view === 'home' && <HomeView status={status} courses={courses} tasks={tasks} activity={activity} inbox={inbox} reviews={reviews} intakeCandidates={intakeCandidates} semester={selectedSemester || status?.workspace.semester || ''} semesters={semesters} loading={semesterLoading} onSemesterChange={changeSemester} onOpenCourse={openCourse} onOpenIntake={() => openActionPanel('import')} onNavigate={navigate} />}
+      {view === 'changes' && <ChangesView reviews={reviews} intakeCandidates={intakeCandidates} courses={courses} activity={activity} busy={reviewBusy} error={reviewError} focusId={reviewFocusId} onFocusConsumed={() => setReviewFocusId(null)} onDecision={decideReview} onExecute={executeReview} onAmend={amendReview} onOpenIntake={openIntakeCandidate} />}
+      {view === 'courses' && <CoursesView semesters={semesters} semester={selectedSemester || status?.workspace.semester || ''} courses={courses} items={libraryItems} inbox={inbox} loading={semesterLoading} onSemesterChange={changeSemester} onOpenActions={openActionPanel} onHistoryChanged={() => refresh()} studyResumeRequest={studyResumeRequest} onStudyResumeConsumed={clearStudyResumeRequest} onOpenStudyConversation={openStudyConversation} onStartStudyChat={startStudyChat} courseOpenRequest={courseOpenRequest} onCourseOpenConsumed={clearCourseOpenRequest} intakeOpenRequest={intakeOpenRequest} onIntakeOpenConsumed={clearIntakeOpenRequest} onBackHome={() => setView('home')} />}
       <div className={`chat-route-shell ${view === 'chat' ? 'active' : ''}`} aria-hidden={view !== 'chat'}><DashboardChat courses={courses} items={libraryItems} libraryLoaded={libraryLoaded} active={view === 'chat'} onReload={() => void refresh()} semester={selectedSemester || status?.workspace.semester || ''} activity={activity}  onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} onProposalCreated={() => void refreshReviews()} reviewRevision={reviewRevision} onResumeStudySession={resumeStudySession} studyChatRequest={studyChatRequest} onStudyChatRequestConsumed={clearStudyChatRequest} onGoHome={() => setView('home')} /></div>
-      {view === 'tasks' && <Tasks tasks={tasks} courses={courses} semester={selectedSemester || status?.workspace.semester || ''} timezone={status?.workspace.timezone} stateError={taskStateError} onNavigate={navigate} onChanged={() => refresh()} />}
+      {view === 'planner' && <PlannerView tasks={tasks} courses={courses} semester={selectedSemester || status?.workspace.semester || ''} timezone={status?.workspace.timezone} stateError={taskStateError} reviews={reviews} intakeCandidates={intakeCandidates} onNavigate={navigate} onOpenChanges={() => navigate('changes')} onChanged={() => refresh()} />}
+      {view === 'search' && <SearchView semester={selectedSemester || status?.workspace.semester || ''} courses={courses} tasks={tasks} libraryItems={libraryItems} reviews={reviews} intakeCandidates={intakeCandidates} activity={activity} onOpenCourse={openCourse} onOpenPlanner={() => navigate('planner')} onOpenChanges={() => navigate('changes')} onOpenActivity={() => navigate('activity')} />}
       {view === 'activity' && <ActivityView activity={activity} processing={inbox} onNavigate={navigate} />}
       {view === 'settings' && status && <SettingsView status={status} onSaved={() => refresh()} onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} />}
     </main>
@@ -572,7 +579,7 @@ function formatDue(task: Task) {
   return `Due ${label}${time ? ` at ${hour % 12 || 12}:${time[2]} ${hour >= 12 ? 'p.m.' : 'a.m.'}` : ''}`
 }
 
-export function Tasks({ tasks, courses, semester, timezone = 'America/Toronto', stateError, onNavigate, onChanged }: { tasks: Task[]; courses: Course[]; semester: string; timezone?: string; stateError?: string | null; onNavigate: (view: View) => void; onChanged: () => Promise<void> }) {
+export function Tasks({ tasks, courses, semester, timezone = 'America/Toronto', stateError, onNavigate, onChanged, intro = true }: { tasks: Task[]; courses: Course[]; semester: string; timezone?: string; stateError?: string | null; onNavigate: (view: View) => void; onChanged: () => Promise<void>; intro?: boolean }) {
   const [filter, setFilter] = useState<'all' | 'week' | 'open' | 'completed'>('all')
   const [creating, setCreating] = useState(false)
   const today = localDate(timezone)
@@ -587,7 +594,7 @@ export function Tasks({ tasks, courses, semester, timezone = 'America/Toronto', 
   }
   const editorOpen = creating && !stateError
   return <div className="page-stack">
-    <PageIntro eyebrow="Plan" title="Tasks & deadlines" subtitle={`Your course assessments, deadlines, and personal tasks. Times use ${timezone}. Personal tasks are stored in this semester's SEMESTER_TASKS.md; course evidence remains read-only.`} />
+    {intro && <PageIntro eyebrow="Plan" title="Tasks & deadlines" subtitle={`Your course assessments, deadlines, and personal tasks. Times use ${timezone}. Personal tasks are stored in this semester's SEMESTER_TASKS.md; course evidence remains read-only.`} />}
     <section className="task-toolbar">
       <div><p className="eyebrow">Personal task queue</p><p>Add work you want to track yourself. Marking one done changes only that task; it never submits coursework or changes a syllabus deadline.</p></div>
       <button type="button" className="primary-button" onClick={() => setCreating((value) => !value)} disabled={!semester || Boolean(stateError)}>{editorOpen ? 'Close editor' : 'Add task'}</button>
@@ -603,6 +610,20 @@ export function Tasks({ tasks, courses, semester, timezone = 'America/Toronto', 
         ? <UserTaskControl task={task} courses={courses} semester={semester} onChanged={onChanged} />
         : <TaskCompletionControl task={task} courses={courses} semester={semester} onChanged={onChanged} />}
     </article> })}{!visible.length && <EmptyCard title={filter === 'completed' ? 'No completed tasks recorded' : filter === 'week' ? 'No recorded deadlines in the next 7 days' : 'No tasks recorded'} body="Personal tasks appear here when you add them. Course deadlines appear after the syllabus has been indexed; an empty list does not confirm that no work is due." action="Go to Home" onClick={() => onNavigate('home')} />}</div>
+  </div>
+}
+
+function PlannerView({ tasks, courses, semester, timezone, stateError, reviews, intakeCandidates, onNavigate, onOpenChanges, onChanged }: { tasks: Task[]; courses: Course[]; semester: string; timezone?: string; stateError?: string | null; reviews: ReviewItem[]; intakeCandidates: IntakeCandidate[]; onNavigate: (view: View) => void; onOpenChanges: () => void; onChanged: () => Promise<void> }) {
+  const openReviews = reviews.filter((item) => item.status === 'open').length
+  const pendingIntake = intakeCandidates.filter(isPendingIntakeCandidate).length
+  return <div className="page-stack planner-workspace">
+    <PageIntro eyebrow="Planner" title="Workload & schedule" subtitle="One view of course deadlines, personal tasks, and the changes that still need your decision. Study history remains inside each course." />
+    <div className="planner-attention">
+      <button type="button" className="planner-attention-card" data-tone={openReviews ? 'soon' : 'completed'} onClick={onOpenChanges}><span className="planner-attention-icon" aria-hidden="true">⚖</span><div><p className="eyebrow">Changes & approvals</p><strong>{openReviews}</strong><span>{openReviews ? 'Decisions waiting' : 'Nothing waiting for a decision'}</span></div><span aria-hidden="true">→</span></button>
+      <button type="button" className="planner-attention-card" data-tone={pendingIntake ? 'soon' : 'completed'} onClick={onOpenChanges}><span className="planner-attention-icon" aria-hidden="true">✦</span><div><p className="eyebrow">Intake candidates</p><strong>{pendingIntake}</strong><span>{pendingIntake ? 'Candidate facts to review' : 'No candidate facts waiting'}</span></div><span aria-hidden="true">→</span></button>
+      <button type="button" className="planner-attention-card" data-tone="completed" onClick={() => onNavigate('courses')}><span className="planner-attention-icon" aria-hidden="true">▤</span><div><p className="eyebrow">Study</p><strong>Courses</strong><span>Open a class → Study history</span></div><span aria-hidden="true">→</span></button>
+    </div>
+    <Tasks tasks={tasks} courses={courses} semester={semester} timezone={timezone} stateError={stateError} onNavigate={onNavigate} onChanged={onChanged} intro={false} />
   </div>
 }
 

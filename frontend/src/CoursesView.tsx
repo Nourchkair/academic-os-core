@@ -50,10 +50,12 @@ type CoursesViewProps = {
   onStartStudyChat: (courseId: string, prompt?: string) => void
   courseOpenRequest: { id: string; courseId: string } | null
   onCourseOpenConsumed: () => void
+  intakeOpenRequest: { id: string; courseId: string } | null
+  onIntakeOpenConsumed: () => void
   onBackHome: () => void
 }
 
-export function CoursesView({ semesters, semester, courses, items, inbox, loading, onSemesterChange, onOpenActions, onHistoryChanged, studyResumeRequest, onStudyResumeConsumed, onOpenStudyConversation, onStartStudyChat, courseOpenRequest, onCourseOpenConsumed, onBackHome }: CoursesViewProps) {
+export function CoursesView({ semesters, semester, courses, items, inbox, loading, onSemesterChange, onOpenActions, onHistoryChanged, studyResumeRequest, onStudyResumeConsumed, onOpenStudyConversation, onStartStudyChat, courseOpenRequest, onCourseOpenConsumed, intakeOpenRequest, onIntakeOpenConsumed, onBackHome }: CoursesViewProps) {
   const [selectedCourseId, setSelectedCourseId] = useState('')
   const [courseSection, setCourseSection] = useState<'material' | 'grades' | 'history' | 'study'>('material')
   const [category, setCategory] = useState<Category>('all')
@@ -101,6 +103,15 @@ export function CoursesView({ semesters, semester, courses, items, inbox, loadin
     setQuery('')
     onCourseOpenConsumed()
   }, [courseOpenRequest, courses, onCourseOpenConsumed])
+
+  useEffect(() => {
+    if (!intakeOpenRequest || !courses.some((course) => course.id === intakeOpenRequest.courseId)) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedCourseId(intakeOpenRequest.courseId)
+    setCourseSection('material')
+    setIntakeOpen(true)
+    onIntakeOpenConsumed()
+  }, [courses, intakeOpenRequest, onIntakeOpenConsumed])
 
   useEffect(() => {
     if (!studyResumeRequest || !courses.some((course) => course.id === studyResumeRequest.courseId)) return

@@ -21,13 +21,17 @@ def test_settings_is_local_setup_only() -> None:
     assert "capabilities" not in source
 
 
-def test_dashboard_has_semester_courses_library_and_activity_surfaces() -> None:
+def test_dashboard_has_semester_courses_library_and_workspace_surfaces() -> None:
     source = (FRONTEND / "App.tsx").read_text(encoding="utf-8")
-    assert "{ id: 'activity', label: 'Activity'" in source
-    assert "{ id: 'review', label: 'Review'" in source
+    assert "{ id: 'home', label: 'Home'" in source
+    assert "{ id: 'courses', label: 'Courses'" in source
+    assert "{ id: 'planner', label: 'Planner'" in source
+    assert "{ id: 'chat', label: 'Agent'" in source
     assert "function ActivityView" in source
-    assert "<ReviewView" in source
+    assert "function PlannerView" in source
+    assert "<ChangesView" in source
     assert "<CoursesView" in source
+    assert "<SearchView" in source
     assert "<ActionPanel" in source
     assert "profile-action" not in source
     assert "<HomeView" in source
@@ -35,6 +39,10 @@ def test_dashboard_has_semester_courses_library_and_activity_surfaces() -> None:
     assert "{ id: 'import'" not in source
     assert "const title = nav.find" not in source
     assert "<h1>{title}</h1>" not in source
+
+    changes = (FRONTEND / "ChangesView.tsx").read_text(encoding="utf-8")
+    assert "<ReviewView" in changes
+    assert "Intake waiting for you" in changes
 
     courses = (FRONTEND / "CoursesView.tsx").read_text(encoding="utf-8")
     assert "Choose a semester" in courses
@@ -45,9 +53,10 @@ def test_dashboard_has_semester_courses_library_and_activity_surfaces() -> None:
     assert "api.filePreview(item.path, item.semester)" in courses
 
     home = (FRONTEND / "HomeView.tsx").read_text(encoding="utf-8")
-    assert "Open decisions" in home
+    assert "Changes & approvals" in home
     assert "Needs input" not in home
-    assert '<p className="eyebrow">Intake</p>' in home
+    assert '<p className="eyebrow">Processing</p>' in home
+    assert "onClick={() => onNavigate('changes')}" in home
     assert "onClick={() => onNavigate('activity')}" in home
 
 
