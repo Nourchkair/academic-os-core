@@ -144,7 +144,7 @@ The following continue to work through their existing components and APIs:
 ## Validation
 
 - `npm run typecheck` in `frontend/`: passes.
-- `npm test` in `frontend/`: 59 tests across 19 files.
+- `npm test` in `frontend/`: 60 tests across 19 files.
 - `npm run build` in `frontend/`: passes.
 - Full Python suite: 658 tests pass.
 - ESLint: 32 remaining problems in pre-existing, unrelated frontend files; the

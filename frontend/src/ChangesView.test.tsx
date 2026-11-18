@@ -24,4 +24,12 @@ describe('ChangesView', () => {
     fireEvent.click(screen.getByRole('button', { name: /Open course intake/ }))
     expect(onOpenIntake).toHaveBeenCalledWith(candidate)
   })
+
+  it('offers a course step for candidates without a resolved course', () => {
+    const onOpenIntake = vi.fn()
+    const unresolved = { ...candidate, id: 'candidate-2', course_id: null, status: 'needs_course', display_status: 'needs_course' }
+    render(<ChangesView reviews={[]} intakeCandidates={[unresolved]} courses={[course]} activity={[]} busy={false} error="" onDecision={vi.fn()} onExecute={vi.fn()} onOpenIntake={onOpenIntake} />)
+    fireEvent.click(screen.getByRole('button', { name: /Choose a course/ }))
+    expect(onOpenIntake).toHaveBeenCalledWith(unresolved)
+  })
 })

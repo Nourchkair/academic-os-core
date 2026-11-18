@@ -467,7 +467,9 @@ function App() {
   const clearCourseOpenRequest = useCallback(() => setCourseOpenRequest(null), [])
   const openIntakeCandidate = useCallback((candidate: IntakeCandidate) => {
     if (!candidate.course_id) {
-      setView('changes')
+      // The candidate needs a course before its intake can be opened. Send the
+      // student to Courses so they can choose the class.
+      setView('courses')
       return
     }
     setIntakeOpenRequest({ id: crypto.randomUUID(), courseId: candidate.course_id })

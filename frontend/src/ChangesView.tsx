@@ -43,7 +43,7 @@ function IntakeChangeCard({ candidate, course, onOpen }: { candidate: IntakeCand
   const status = candidate.display_status || candidate.status
   return <article className={`changes-intake-card status-${status}`}>
     <div className="changes-intake-main"><span className="review-kind">{statusLabel(status)}</span><h3>{candidate.entity_title || 'Assessment to choose'}</h3><p>{course?.name || candidate.course_id || 'Course not resolved'}{candidate.value ? ` · proposed ${formatDate(candidate.value)}` : ''}</p>{candidate.source_excerpt && <blockquote>{candidate.source_excerpt}</blockquote>}</div>
-    <button type="button" className="secondary-button" onClick={onOpen}>Open course intake <span>→</span></button>
+    <button type="button" className="secondary-button" onClick={onOpen}>{candidate.course_id ? 'Open course intake' : 'Choose a course'} <span>→</span></button>
   </article>
 }
 
