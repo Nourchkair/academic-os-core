@@ -5,6 +5,8 @@ import type { IntakeCandidate } from '../types'
  * Applied, reverted, and cancelled candidates are historical.
  */
 export const pendingIntakeStatuses = new Set([
+  'candidate',
+  'conflict',
   'resolved',
   'needs_entity',
   'needs_course',

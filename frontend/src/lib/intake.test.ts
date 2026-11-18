@@ -32,8 +32,10 @@ function candidate(status: string, displayStatus?: string): IntakeCandidate {
 describe('isPendingIntakeCandidate', () => {
   it('treats unresolved and proposed candidates as pending, and applied history as settled', () => {
     expect(isPendingIntakeCandidate(candidate('resolved'))).toBe(true)
+    expect(isPendingIntakeCandidate(candidate('conflict'))).toBe(true)
     expect(isPendingIntakeCandidate(candidate('proposed', 'applied'))).toBe(false)
     expect(isPendingIntakeCandidate(candidate('proposed', 'needs_attention'))).toBe(true)
+    expect(isPendingIntakeCandidate(candidate('no_change'))).toBe(false)
     expect(isPendingIntakeCandidate(candidate('cancelled'))).toBe(false)
   })
 })
