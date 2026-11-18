@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import { isPendingIntakeCandidate } from './lib/intake'
 import type { ActivityEvent, Course, IntakeCandidate, LibraryItem, ReviewItem, Task } from './types'
 
 type SearchViewProps = {
@@ -28,7 +29,7 @@ export function SearchView({ semester, courses, tasks, libraryItems, reviews, in
       library: libraryItems.filter((item) => item.course_id && (matches(item.name) || matches(item.relative_path) || matches(item.category))).slice(0, 8),
       changes: [
         ...reviews.filter((item) => matches(item.title) || matches(item.course) || matches(item.kind)).map((item) => ({ id: item.id, title: item.title, detail: item.course || item.kind, kind: 'Review decision' })),
-        ...intakeCandidates.filter((candidate) => matches(candidate.entity_title) || matches(candidate.course_id) || matches(candidate.value)).map((candidate) => ({ id: candidate.id, title: candidate.entity_title || 'Intake candidate', detail: `${candidate.course_id || 'Course not resolved'} · ${candidate.display_status || candidate.status}`, kind: 'Intake candidate' })),
+        ...intakeCandidates.filter((candidate) => isPendingIntakeCandidate(candidate) && (matches(candidate.entity_title) || matches(candidate.course_id) || matches(candidate.value))).map((candidate) => ({ id: candidate.id, title: candidate.entity_title || 'Intake candidate', detail: `${candidate.course_id || 'Course not resolved'} · ${candidate.display_status || candidate.status}`, kind: 'Intake candidate' })),
       ].slice(0, 8),
       activity: activity.filter((event) => matches(event.title) || matches(event.course)).slice(0, 8),
     }
