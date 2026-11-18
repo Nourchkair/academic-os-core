@@ -217,3 +217,36 @@ def test_syllabus_sync_preview_is_side_effect_free(phase4_workspace):
     assert result["status"] == "preview"
     assert result["reconciliation"]["applied"] is False
     assert DomainProjection(root / ".academia" / "domain.json").counts() == before
+
+
+def test_schedule_respects_the_exclusive_end_of_all_day_events(phase4_workspace):
+    config, root, course, source, source_id, profile = phase4_workspace
+    from academia_os.workspace import build_workspace_snapshot
+    snapshot = build_workspace_snapshot(config, persist=False)
+    snapshot["tasks"] = [{
+        "id": "domain:assignment:quiz", "title": "Quiz 3", "completed": False,
+        "course": course.name, "source": "syllabus", "confidence": "likely", "due_date": "2026-11-20",
+    }]
+    result = schedule_blocks(
+        config, snapshot, minutes=30, days=2, start_time="09:00", end_time="17:00",
+        block_minutes=30,
+        calendar_events=[{"summary": "Reading day", "start": {"date": "2026-11-18"}, "end": {"date": "2026-11-19"}}],
+        now=datetime(2026, 11, 18, 8, 0, tzinfo=timezone.utc),
+    )
+    assert result["blocks"]
+    assert all(block["start"].startswith("2026-11-19") for block in result["blocks"])
+
+
+def test_source_health_does_not_compare_a_reading_file_to_syllabus_evidence(phase4_workspace):
+    config, root, course, source, source_id, profile = phase4_workspace
+    from academia_os.workspace import build_workspace_snapshot
+    syllabus = course / "01_COURSE" / "syllabus.md"
+    syllabus.write_text("# POL 2103 - Politics\n\nRequired Readings\nWeek 4 Reading\n", encoding="utf-8")
+    projection = DomainProjection(root / ".academia" / "domain.json")
+    reading = projection.get("reading", "reading-week-4")
+    reading["evidence"]["source_path"] = syllabus.relative_to(root).as_posix()
+    reading["evidence"]["source_hash"] = __import__("hashlib").sha256(syllabus.read_bytes()).hexdigest()
+    projection.replace_raw("reading", "reading-week-4", reading)
+    health = build_source_health(config, build_workspace_snapshot(config, persist=False), course_id=course.name)
+    row = next(item for item in health["courses"][0]["readings"] if item["reading_id"] == "reading-week-4")
+    assert row["stale"] is False

@@ -45,6 +45,18 @@ def _tokens(value: Any) -> list[str]:
     return [token for token in re.findall(r"[a-z0-9]+", str(value or "").casefold()) if len(token) > 1]
 
 
+def _normalize_path(value: Any, root: Path) -> str:
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    path = Path(value).expanduser()
+    try:
+        if path.is_absolute():
+            return path.resolve().relative_to(root).as_posix()
+        return path.as_posix().lstrip("./")
+    except (OSError, ValueError):
+        return ""
+
+
 def _match_source(reading: Mapping[str, Any], items: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Find one conservative Library match for a domain reading.
 
@@ -134,14 +146,14 @@ def _exam_coverage(exam: Mapping[str, Any], overview: Mapping[str, Any], reading
     }
 
 
-def _sync_status(items: list[dict[str, Any]], entities: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _sync_status(items: list[dict[str, Any]], entities: list[dict[str, Any]], root: Path) -> list[dict[str, Any]]:
     result = []
     for item in items:
         relative = str(item.get("relative_path") or "")
         matches = [
             entity for entity in entities
             if isinstance(entity.get("evidence"), dict)
-            and entity["evidence"].get("source_path") == relative
+            and _normalize_path(entity["evidence"].get("source_path"), root) == relative
         ]
         current = _source_hash(item)
         hashes = {str(entity["evidence"].get("source_hash")) for entity in matches if entity["evidence"].get("source_hash")}
@@ -166,7 +178,12 @@ def _sync_status(items: list[dict[str, Any]], entities: list[dict[str, Any]]) ->
 def build_source_health(config: dict[str, Any], snapshot: dict[str, Any], *, course_id: str | None = None) -> dict[str, Any]:
     root = Path(snapshot["academic_root"]).expanduser().resolve()
     semester = str(snapshot["semester"])
-    courses = [course for course in snapshot.get("courses", []) if not course_id or course.get("id") == course_id]
+    available_courses = list(snapshot.get("courses", []))
+    selected_course = None
+    if course_id:
+        from .course_identity import resolve_course_identifier
+        selected_course = resolve_course_identifier(available_courses, course_id)
+    courses = [course for course in available_courses if selected_course is None or course.get("id") == selected_course["id"]]
     library = list_material(root, semester)
     processing = {str(Path(record.source_path).expanduser().resolve()): record.__dict__ for record in ProcessingStore(root / ".academia" / "processing.json").list()}
     projection = DomainProjection(root / ".academia" / "domain.json")
@@ -195,7 +212,13 @@ def build_source_health(config: dict[str, Any], snapshot: dict[str, Any], *, cou
             if record is None and source_id and source_id in annotated_reads:
                 record = {"status": "read", "basis": "study annotation"}
             evidence = reading.get("evidence") if isinstance(reading.get("evidence"), dict) else {}
-            stale = bool(match and evidence.get("source_hash") and _source_hash(match) != evidence.get("source_hash"))
+            evidence_path = _normalize_path(evidence.get("source_path"), root)
+            stale = bool(
+                match
+                and evidence_path == str(match.get("relative_path") or "")
+                and evidence.get("source_hash")
+                and _source_hash(match) != evidence.get("source_hash")
+            )
             exam_ids = [
                 str(exam.get("id")) for exam in overview.get("exams", [])
                 if source_id and source_id in exam.get("source_ids", [])
@@ -225,7 +248,7 @@ def build_source_health(config: dict[str, Any], snapshot: dict[str, Any], *, cou
             _exam_coverage(exam, overview, reading_rows, by_source)
             for exam in overview.get("exams", [])
         ]
-        syllabus = _sync_status([item for item in course_items if item.get("category") == "syllabi"], entities)
+        syllabus = _sync_status([item for item in course_items if item.get("category") == "syllabi"], entities, root)
         candidate_value = intake.list_candidates(course_id=course_name)
         pending_intake = sum(
             1 for candidate in candidate_value.get("candidates", [])

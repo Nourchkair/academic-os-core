@@ -35,7 +35,7 @@ def _event_interval(event: Mapping[str, Any], zone: ZoneInfo) -> tuple[datetime,
     elif start_dt.tzinfo is None:
         start_dt = start_dt.replace(tzinfo=zone)
     if 'date' in end and 'T' not in str(end_value):
-        end_dt = datetime.combine(end_dt.date(), time(23, 59), zone)
+        end_dt = datetime.combine(end_dt.date(), time(0, 0), zone)
     elif end_dt.tzinfo is None:
         end_dt = end_dt.replace(tzinfo=zone)
     return start_dt.astimezone(zone), end_dt.astimezone(zone)
