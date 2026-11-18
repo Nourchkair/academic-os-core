@@ -1351,7 +1351,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .planner-attention-card strong { color: #3f3f3f; font-size: 19px; letter-spacing: -.03em; }
 .planner-attention-card span:last-child { color: #8b8b8b; font-size: 9px; }
 .planner-attention-card > span:last-child { color: #a0a0a0; }
-@media (max-width: 900px) { .changes-summary, .planner-attention { grid-template-columns: 1fr; }.changes-intake-card { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 900px) { .changes-summary { gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }.changes-summary > div { padding: 12px; }.changes-summary strong { font-size: 19px; }.planner-attention { grid-template-columns: 1fr; }.changes-intake-card { align-items: flex-start; flex-direction: column; } }
 @media (prefers-color-scheme: dark) {
   .changes-summary > div, .changes-intake-card, .search-result, .planner-attention-card { background: #262624; border-color: #3a3a36; }
   .changes-summary strong, .changes-intake-main h3, .search-result strong, .planner-attention-card strong { color: #f0f0f0; }
