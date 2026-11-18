@@ -115,9 +115,34 @@ function ActionApproval({ details, courses, onDecision, onAmend, busy }: Decisio
   if (actionType === 'task_change') {
     return <TaskActionApproval proposal={proposal} before={before} after={after} effects={effects} courses={courses} onDecision={onDecision} onAmend={onAmend} busy={busy} />
   }
+  if (actionType === 'calendar_change') {
+    return <CalendarActionApproval proposal={proposal} before={before} after={after} effects={effects} onDecision={onDecision} busy={busy} />
+  }
   const approveLabel = actionType.includes('calendar') ? 'Approve calendar change' : actionType.includes('file_move') ? 'Approve file move' : actionType.includes('configuration') ? 'Apply this setting' : 'Approve this change'
   const keepLabel = actionType.includes('calendar') ? 'Keep calendar unchanged' : actionType.includes('file_move') ? 'Keep files where they are' : 'Keep current data'
   return <div className="typed-review-content"><p className="review-question">This action is waiting for your approval. Nothing external happens from this screen alone.</p>{failure && <p className="setup-error" role="status">The previous execution failed: {failure}. A new approval is required before retrying.</p>}{before || after ? <div className="comparison-grid"><ComparisonCell label="Before" value={before || 'Unknown'} /><ComparisonCell label="After" value={after || 'Unknown'} emphasis /></div> : null}<div className="effect-list"><strong>This action will:</strong>{effects.length ? <ul>{effects.map((effect) => <li key={String(effect)}>{String(effect)}</li>)}</ul> : <ul><li>record your decision</li><li>preserve the previous source and activity history</li><li>wait for the approved action to be executed and verified</li></ul>}</div><div className="decision-row"><button className="secondary-button" disabled={busy} onClick={() => void onDecision('reject_action')}>{keepLabel}</button><button className="primary-button" disabled={busy} onClick={() => void onDecision('approve_action')}>{approveLabel}</button></div></div>
+}
+
+
+function CalendarActionApproval({ proposal, before, after, effects, onDecision, busy }: {
+  proposal: Record<string, unknown>
+  before: string
+  after: string
+  effects: unknown[]
+  onDecision: (decision: string) => Promise<void>
+  busy: boolean
+}) {
+  const event = record(proposal.event) || {}
+  const start = value(record(event.start) || {}, 'dateTime') || String(event.start || '')
+  const end = value(record(event.end) || {}, 'dateTime') || String(event.end || '')
+  const duplicate = record(proposal.duplicate_check) || {}
+  const action = value(proposal, 'calendar_action') || 'create'
+  return <div className="typed-review-content"><p className="review-question">{action === 'update' ? 'This calendar edit is waiting for your approval.' : 'This study block is ready to become a calendar event.'} Nothing changes in Google Calendar until you approve it and execute the approved action separately.</p><div className="comparison-grid"><ComparisonCell label="Before" value={before || 'No matching event'} /><ComparisonCell label="After" value={after || value(event, 'summary') || 'Calendar event'} emphasis /></div><dl className="metadata-table"><div className="metadata-row"><dt>Event</dt><dd>{value(event, 'summary') || 'Untitled event'}</dd></div><div className="metadata-row"><dt>Start</dt><dd>{formatCalendarTime(start)}</dd></div><div className="metadata-row"><dt>End</dt><dd>{formatCalendarTime(end)}</dd></div>{value(event, 'location') && <div className="metadata-row"><dt>Location</dt><dd>{value(event, 'location')}</dd></div>}{value(event, 'description') && <div className="metadata-row"><dt>Description</dt><dd>{value(event, 'description')}</dd></div>}<div className="metadata-row"><dt>Duplicate check</dt><dd>{String(duplicate.matches ?? 0)} matching event{Number(duplicate.matches ?? 0) === 1 ? '' : 's'} at proposal time</dd></div></dl><div className="effect-list"><strong>This action will:</strong><ul>{effects.length ? effects.map((effect) => <li key={String(effect)}>{String(effect)}</li>) : <li>create exactly one calendar event after approval and a separate execution step</li>}</ul></div><div className="decision-row"><button className="secondary-button" disabled={busy} onClick={() => void onDecision('reject_action')}>Keep calendar unchanged</button><button className="primary-button" disabled={busy} onClick={() => void onDecision('approve_action')}>Approve calendar change</button></div></div>
+}
+
+function formatCalendarTime(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 function TaskActionApproval({ proposal, before, after, effects, courses, onDecision, onAmend, busy }: {

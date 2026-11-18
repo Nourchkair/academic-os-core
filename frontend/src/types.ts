@@ -807,3 +807,158 @@ export type IntakeCandidateShow = {
   intake: IntakeRecord
   changeset: ChangeSet | null
 }
+
+export type StudyBlock = {
+  id: string
+  course_id: string
+  course_name?: string | null
+  title: string
+  reason: string
+  action: string
+  minutes: number
+  start: string
+  end: string
+  summary: string
+  description: string
+  source: string
+}
+
+export type StudySchedulePayload = {
+  schema_version: number
+  generated_at: string
+  timezone: string
+  window: { start_date: string; days: number; start_time: string; end_time: string }
+  minutes_requested: number
+  minutes_scheduled: number
+  blocks: StudyBlock[]
+  unscheduled: Array<Record<string, unknown>>
+  calendar_checked: boolean
+  calendar_error: string | null
+  advisory: boolean
+  calendar_changes: boolean
+  note: string
+}
+
+export type SourceReading = {
+  reading_id: string
+  title: string
+  author?: string | null
+  chapter?: string | null
+  pages?: string | null
+  required?: boolean | null
+  verification_result: string
+  source_id?: string | null
+  source_name?: string | null
+  category?: string | null
+  processing_status?: string | null
+  extraction_status?: string | null
+  readable: boolean
+  stale: boolean
+  read_status: 'read' | 'reading' | 'unread' | 'not_recorded'
+  read_updated_at?: string | null
+  read_basis?: string | null
+  exam_ids: string[]
+}
+
+export type SourceExamCoverage = {
+  exam_id: string
+  title: string
+  date?: string | null
+  topic_count: number
+  covered_topics: number
+  uncovered_topics: string[]
+  source_count: number
+  sources: Array<{
+    source_id: string
+    name: string
+    available: boolean
+    readable: boolean
+    read_status: string
+    stale: boolean
+  }>
+  coverage_percent: number
+}
+
+export type SourceHealthCourse = {
+  course_id: string
+  course_name?: string | null
+  assigned_readings: number
+  linked_sources: number
+  readable_sources: number
+  readings_completed: number
+  unverified_readings: number
+  stale_sources: number
+  missing_sources: number
+  coverage_percent: number
+  readings: SourceReading[]
+  exams: SourceExamCoverage[]
+  sync: {
+    syllabus: Array<{ source_id: string; name: string; relative_path: string; status: string; linked_entities: number }>
+    pending_intake: number
+  }
+}
+
+export type SourceHealthPayload = {
+  schema_version: number
+  generated_at: string
+  semester: string
+  courses: SourceHealthCourse[]
+  totals: {
+    assigned_readings: number
+    linked_sources: number
+    readable_sources: number
+    readings_completed: number
+    unverified_readings: number
+    stale_sources: number
+    missing_sources: number
+    coverage_percent: number
+    pending_intake: number
+    syllabus_changed: number
+    syllabus_not_applied: number
+  }
+  notes: string[]
+}
+
+export type DailyBriefPriority = {
+  kind: 'review' | 'intake' | 'task' | 'study' | 'sources' | string
+  title: string
+  detail: string
+  action: 'changes' | 'planner' | 'courses' | string
+}
+
+export type DailyBriefPayload = {
+  schema_version: number
+  generated_at: string
+  date: string
+  timezone: string
+  semester: string
+  student: string
+  headline: string
+  priorities: DailyBriefPriority[]
+  deadlines: Task[]
+  open_tasks: Task[]
+  decisions: { reviews: number; intake: number; processing: number; failed_processing: number }
+  study: {
+    due_count: number
+    courses: Array<{ course_id: string; course_name?: string | null; due_count: number; set_count: number; exam_count: number }>
+    exams: Array<{ course_id: string; title: string; date?: string | null; exam_id: string }>
+    blocks: StudyBlock[]
+  }
+  sources: SourceHealthPayload
+  activity_cursor?: string | null
+  advisory: boolean
+  note: string
+}
+
+export type StudyReadingRecord = {
+  id: string
+  reading_id?: string | null
+  source_id?: string | null
+  title: string
+  status: 'read' | 'reading' | 'unread'
+  note: string
+  updated_at: string
+  updated_by: string
+  basis: string
+  created_at: string
+}

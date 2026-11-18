@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { CourseCard } from './CourseCard'
+import { DailyBrief } from './DailyBrief'
 import { SemesterPicker } from './SemesterPicker'
 import { getTaskUrgency, urgencyLabel } from './lib/task-urgency'
 import { isPendingIntakeCandidate } from './lib/intake'
@@ -64,6 +65,8 @@ export function HomeView({ status, courses, tasks, activity, inbox, reviews, int
       <div className="home-deadline-copy"><p className="eyebrow">Next deadline <span className="status-pill deadline-status">{nextDeadline ? urgencyLabel(nextDeadlineUrgency) : 'Clear'}</span></p>{nextDeadline ? <><h2>{nextDeadline.title}</h2><p>{nextDeadline.course || 'Semester'} · {formatDue(nextDeadline)}</p></> : <><h2>No upcoming deadlines recorded</h2><p>You’re clear for the next 7 days.</p></>}</div>
       <button className="home-deadline-link" onClick={() => onNavigate('planner')}>Open planner <span>→</span></button>
     </section>
+
+    <DailyBrief semester={semester} onNavigate={onNavigate} />
 
     <section className="home-classes-section">
       <div className="home-section-heading"><div><p className="eyebrow">Current session</p><h2>Your classes</h2></div><SemesterPicker semester={semester} semesters={semesters} loading={loading} onSemesterChange={onSemesterChange} /></div>

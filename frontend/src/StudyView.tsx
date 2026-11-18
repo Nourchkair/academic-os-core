@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from './lib/api'
-import type { Course, LibraryItem } from './types'
+import type { Course, LibraryItem, SourceHealthCourse, SourceReading } from './types'
+import { SourceHealthPanel } from './SourceHealthPanel'
 import { StudyMindMap } from './StudyMindMap'
 import { FlashcardCard } from './FlashcardCard'
 import { listChatConversations, type ChatConversationSummary } from './lib/chat-history'
@@ -13,7 +14,7 @@ type StudySet = { id: string; title: string; kind: string; item_count?: number; 
 type Attempt = { id: string; item_id: string; answer: string; correct: boolean | null; basis: string; rating: string; feedback: string; excluded?: boolean }
 type Session = { id: string; set_id: string; title: string; mode: string; status: string; items: Item[]; attempts: Attempt[]; revealed_ids: string[]; score: { correct: number; graded: number; self_assessed: number } }
 type Annotation = { id: string; kind: string; note: string; quote: string; topic: string; citation: Citation; created_at?: string; created_by?: string; basis?: string; stale_source?: { source_id: string; reason: string } | null }
-type Exam = { id: string; title: string; date: string | null; format: string; topics: string[]; objectives: string[]; source_ids: string[]; coverage?: { topic: string; read_annotations: number; practice: { attempt_count: number; needs_review: boolean } | null }[] }
+type Exam = { id: string; title: string; date: string | null; format: string; topics: string[]; objectives: string[]; source_ids: string[]; coverage?: { topic: string; read_annotations: number; practice: { attempt_count: number; needs_review: boolean } | null }[]; uncovered_topics?: string[]; sources?: { source_id: string; name: string; available: boolean; read_status: string }[] }
 type StudyPreferences = { instructions: string; preferred_kind: string; question_count: number; provider: string; model: string; endpoint: string; protocol: string }
 type Overview = { preferences: StudyPreferences; sets: StudySet[]; due_count: number; attempt_count: number; topics: { topic: string; item_count: number; attempt_count: number; correct_count: number; self_review_count: number; needs_review: boolean }[]; sessions: { id: string; set_id: string; title: string; status: string; created_at: string }[]; annotations: Annotation[]; exams: Exam[] }
 const ratings = ['again', 'hard', 'good', 'easy'] as const
@@ -21,12 +22,15 @@ const ratings = ['again', 'hard', 'good', 'easy'] as const
 export function StudyView({ course, semester, materials, resumeSessionId, onResumeConsumed, onOpenConversation, onStartStudyChat }: { course: Course; semester: string; materials: LibraryItem[]; resumeSessionId?: string; onResumeConsumed: () => void; onOpenConversation: (conversationId: string) => void; onStartStudyChat: (courseId: string, prompt?: string) => void }) {
   const [overview, setOverview] = useState<Overview | null>(null)
   const [conversations, setConversations] = useState<ChatConversationSummary[]>([])
-  const [section, setSection] = useState<'history' | 'exams' | 'progress'>('history')
+  const [section, setSection] = useState<'history' | 'exams' | 'readings' | 'progress'>('history')
   const [filter, setFilter] = useState<'all' | 'chat' | 'material' | 'practice'>('all')
   const [archiveQuery, setArchiveQuery] = useState('')
   const [session, setSession] = useState<Session | null>(null)
   const [opened, setOpened] = useState<StudySet | null>(null)
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null)
+  const [health, setHealth] = useState<SourceHealthCourse | null>(null)
+  const [healthLoading, setHealthLoading] = useState(false)
+  const [healthError, setHealthError] = useState('')
   const [loading, setLoading] = useState(true)
   const [chatHistoryError, setChatHistoryError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -57,10 +61,38 @@ export function StudyView({ course, semester, materials, resumeSessionId, onResu
     return () => { active = false }
   }, [onResumeConsumed, request, resumeSessionId])
 
+  useEffect(() => {
+    if (section !== 'readings') return
+    let active = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHealth(null)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHealthLoading(true)
+    setHealthError('')
+    void api.sourcesHealth(semester, course.id).then((value) => {
+      if (active) setHealth(value.courses[0] ?? null)
+    }).catch((reason) => {
+      if (active) setHealthError(String(reason))
+    }).finally(() => {
+      if (active) setHealthLoading(false)
+    })
+    return () => { active = false }
+  }, [course.id, section, semester])
+
   const perform = async (task: () => Promise<void>) => {
     setBusy(true); setError(null); setNotice('')
     try { await task() } catch (reason) { setError(String(reason)) } finally { setBusy(false) }
   }
+  const markReading = async (reading: SourceReading, status: 'read' | 'reading' | 'unread') => {
+    await perform(async () => {
+      await api.studyReading(course.id, semester, status, { readingId: reading.reading_id, sourceId: reading.source_id || undefined, title: reading.title })
+      const value = await api.sourcesHealth(semester, course.id)
+      setHealth(value.courses[0] ?? null)
+      setNotice(`Reading marked ${status}. This is your report, not an instructor confirmation.`)
+      await refresh()
+    })
+  }
+
   const startSession = (setId: string, mode = 'all', allowStale = false) => perform(async () => {
     setSession(await request<Session>('start', ['--set', setId, '--mode', mode, ...(allowStale ? ['--allow-stale'] : [])]))
     setOpened(null); setSection('history'); setFilter('practice'); await refresh()
@@ -100,7 +132,7 @@ export function StudyView({ course, semester, materials, resumeSessionId, onResu
 
   return <section className="study-workspace study-archive-workspace" aria-label={`${course.code} study history`}>
     <header className="study-heading study-archive-heading"><div><p className="eyebrow">Study history · {course.code}</p><h3>Your class study archive</h3><p>Pick up an earlier conversation, reopen a quiz or mind map, or review a practice session.</p><p className="study-generation-boundary">New study material is created in Study Chat and saved here when it is linked to this class.</p></div><div className="study-archive-header-actions"><span className="study-count">{overview?.due_count ?? 0}<small>due to review</small></span><button className="primary-button" onClick={() => onStartStudyChat(course.id)}>Start study chat</button></div></header>
-    <div className="study-tabs" role="tablist" aria-label="Class study archive sections"><button role="tab" aria-selected={section === 'history'} className={section === 'history' ? 'active' : ''} onClick={() => setSection('history')}>Study history</button><button role="tab" aria-selected={section === 'exams'} className={section === 'exams' ? 'active' : ''} onClick={() => setSection('exams')}>Exam scope</button><button role="tab" aria-selected={section === 'progress'} className={section === 'progress' ? 'active' : ''} onClick={() => setSection('progress')}>Progress & notes</button></div>
+    <div className="study-tabs" role="tablist" aria-label="Class study archive sections"><button role="tab" aria-selected={section === 'history'} className={section === 'history' ? 'active' : ''} onClick={() => setSection('history')}>Study history</button><button role="tab" aria-selected={section === 'exams'} className={section === 'exams' ? 'active' : ''} onClick={() => setSection('exams')}>Exam scope</button><button role="tab" aria-selected={section === 'readings'} className={section === 'readings' ? 'active' : ''} onClick={() => setSection('readings')}>Readings</button><button role="tab" aria-selected={section === 'progress'} className={section === 'progress' ? 'active' : ''} onClick={() => setSection('progress')}>Progress & notes</button></div>
     {error && <p className="setup-error" role="alert">{error}</p>}{notice && <p className="study-notice" role="status">{notice}</p>}{busy && <p role="status" className="study-working">Opening saved study material…</p>}
 
     {section === 'history' && <div className="study-archive-content">
@@ -127,7 +159,9 @@ export function StudyView({ course, semester, materials, resumeSessionId, onResu
       {opened && <section className="study-archive-material-view"><div className="study-session-top"><div><p className="eyebrow">Saved study material</p><h4>{opened.title}</h4></div><button className="secondary-button" onClick={() => setOpened(null)}>Back to history</button></div>{(opened.stale_sources || []).length > 0 && <p className="study-stale study-freshness-note">One or more cited source files have changed. This historical version is preserved for review.</p>}{['mind_map', 'explanation'].includes(opened.kind) ? <ConceptExplorer studySet={opened} onClose={() => setOpened(null)} /> : <div className="study-archive-question-list">{(opened.items || []).map((item, index) => <article className="study-archive-question" key={item.id}><span className="study-kind">{kindLabel(item.kind)} · {item.topic || 'Question ' + (index + 1)}</span><h4>{item.prompt}</h4>{item.options?.length > 0 && <ol type="A">{item.options.map((option) => <li key={option}>{option}</li>)}</ol>}<details><summary>Show answer and explanation</summary><p><strong>{item.answer}</strong></p>{item.explanation && <p>{item.explanation}</p>}<Citations citations={item.citations || []} /></details></article>)}</div>}</section>}
     </div>}
 
-    {section === 'exams' && <div className="study-exam-layout study-archive-exams"><ExamEditor busy={busy} onSave={(input) => perform(async () => { await request('exam-save', ['--payload-json', JSON.stringify({ ...input, source_ids: [] })]); setNotice('Exam scope saved for this class.'); await refresh() })} /><div className="study-exam-list">{overview?.exams.map((exam) => <article key={exam.id} className="study-exam-card"><p className="eyebrow">{exam.date || 'Date to confirm'} · Saved scope</p><h4>{exam.title}</h4><p>{exam.format || 'Format not recorded'}</p>{exam.topics.length > 0 && <p>{exam.topics.join(' · ')}</p>}<ul>{exam.objectives.map((objective) => <li key={objective}>{objective}</li>)}</ul><div className="study-actions"><button className="primary-button" onClick={() => onStartStudyChat(course.id, assessmentPrompt(exam))}>Prepare in Study Chat →</button><button className="secondary-button" disabled={busy} onClick={() => void perform(async () => setSelectedExam(await request<Exam>('exam', ['--exam', exam.id])))}>Review coverage</button></div>{selectedExam?.id === exam.id && selectedExam.coverage && <ul className="study-coverage">{selectedExam.coverage.map((topic) => <li key={topic.topic}><strong>{topic.topic}</strong><span>{topic.read_annotations ? 'Reading recorded' : 'Reading not recorded'} · {topic.practice?.attempt_count ?? 0} practice attempts{topic.practice?.needs_review ? ' · Needs review' : ''}</span></li>)}</ul>}</article>)}{!overview?.exams.length && <StudyEmpty title="No exam scope saved yet" body="Save confirmed exam topics and objectives here. Use Study Chat to work through that scope with relevant course sources." />}</div></div>}
+    {section === 'exams' && <div className="study-exam-layout study-archive-exams"><ExamEditor busy={busy} materials={materials} onSave={(input) => perform(async () => { await request('exam-save', ['--payload-json', JSON.stringify(input)]); setNotice('Exam scope saved for this class.'); await refresh() })} /><div className="study-exam-list">{overview?.exams.map((exam) => <article key={exam.id} className="study-exam-card"><p className="eyebrow">{exam.date || 'Date to confirm'} · Saved scope</p><h4>{exam.title}</h4><p>{exam.format || 'Format not recorded'}</p>{exam.topics.length > 0 && <p>{exam.topics.join(' · ')}</p>}<ul>{exam.objectives.map((objective) => <li key={objective}>{objective}</li>)}</ul><div className="study-actions"><button className="primary-button" onClick={() => onStartStudyChat(course.id, assessmentPrompt(exam))}>Prepare in Study Chat →</button><button className="secondary-button" disabled={busy} onClick={() => void perform(async () => setSelectedExam(await request<Exam>('exam', ['--exam', exam.id])))}>Review coverage</button></div>{selectedExam?.id === exam.id && <div className="study-exam-coverage-detail">{selectedExam.coverage && <ul className="study-coverage">{selectedExam.coverage.map((topic) => <li key={topic.topic}><strong>{topic.topic}</strong><span>{topic.read_annotations ? 'Reading recorded' : 'Reading not recorded'} · {topic.practice?.attempt_count ?? 0} practice attempts{topic.practice?.needs_review ? ' · Needs review' : ''}</span></li>)}</ul>}{selectedExam.uncovered_topics && selectedExam.uncovered_topics.length > 0 && <p className="study-hint">Not yet recorded: {selectedExam.uncovered_topics.join(' · ')}</p>}{selectedExam.sources && selectedExam.sources.length > 0 && <ul className="study-exam-source-list">{selectedExam.sources.map((source) => <li key={source.source_id}><span>{source.name}</span><small>{source.available ? source.read_status === 'read' ? 'Read' : 'Available · not read' : 'Missing source'}</small></li>)}</ul>}</div>}</article>)}{!overview?.exams.length && <StudyEmpty title="No exam scope saved yet" body="Save confirmed exam topics and objectives here. Use Study Chat to work through that scope with relevant course sources." />}</div></div>}
+
+    {section === 'readings' && <div className="study-readings-layout"><SourceHealthPanel health={health} loading={healthLoading} busy={busy} error={healthError} onMark={markReading} /></div>}
 
     {section === 'progress' && <div className="study-progress-layout study-archive-progress"><div><div className="study-section-title"><div><p className="eyebrow">Practice record</p><h4>{overview?.attempt_count ?? 0} saved answers</h4></div></div><p className="study-hint">Practice results and self-ratings help you decide what to revisit. They are not course grades or claims of mastery.</p>{overview?.topics.map((topic) => <article className="study-topic-row" key={topic.topic}><div><strong>{topic.topic}</strong><p>{topic.item_count} items · {topic.attempt_count} attempts · {topic.self_review_count} self-assessments</p></div><span className={topic.needs_review ? 'study-stale' : 'study-hint'}>{topic.needs_review ? 'Revisit this topic' : topic.attempt_count ? 'Practice recorded' : 'Not practiced'}</span></article>)}<h4>Reading notes & learning feedback</h4>{overview?.annotations.slice().reverse().map((note) => <article className="study-annotation" key={note.id}><span className="study-kind">{note.kind.replaceAll('_', ' ')}</span>{note.topic && <h4>{note.topic}</h4>}<p>{note.note}</p>{note.quote && <blockquote>{note.quote}</blockquote>}{note.stale_source && <p className="study-stale study-freshness-note">The cited source is {note.stale_source.reason}. This note is preserved; verify it against a current source before relying on it.</p>}<small>{note.citation.source_name} · {note.citation.locator}{note.created_at ? ' · ' + new Date(note.created_at).toLocaleDateString() : ''}{note.created_by ? ' · ' + note.created_by : ''}{note.basis ? ' · ' + note.basis : ''}</small></article>)}{!overview?.annotations.length && <p className="study-hint">Notes saved from Study Chat or another authorized study interface will appear here.</p>}</div><aside><section className="study-backup"><h4>Back up this class study history</h4><p>Export saved sets, citations, practice attempts, review schedules, exam scope, and annotations.</p><div className="study-actions"><button className="secondary-button" disabled={busy} onClick={() => void download('json')}>JSON backup</button><button className="secondary-button" disabled={busy} onClick={() => void download('markdown')}>Readable archive</button></div></section><details className="study-agent-guide"><summary>Where Study Chat fits</summary><p>Study Chat is where you ask questions and request quizzes, flashcards, or mind maps. This class page keeps the saved conversations and structured study records together for later review.</p></details></aside></div>}
   </section>
@@ -164,13 +198,15 @@ function PracticeSession({ session, busy, onClose, onReveal, onAnswer, onFlag, o
   </section>
 }
 
-function ExamEditor({ busy, onSave }: { busy: boolean; onSave: (input: { title: string; date: string; format: string; topics: string[]; objectives: string[] }) => Promise<void> }) {
+function ExamEditor({ busy, materials, onSave }: { busy: boolean; materials: LibraryItem[]; onSave: (input: { title: string; date: string; format: string; topics: string[]; objectives: string[]; source_ids: string[] }) => Promise<void> }) {
   const [title, setTitle] = useState('')
   const [date, setDate] = useState('')
   const [format, setFormat] = useState('')
   const [topics, setTopics] = useState('')
   const [objectives, setObjectives] = useState('')
-  return <form className="study-exam-editor" onSubmit={(event) => { event.preventDefault(); void onSave({ title, date, format, topics: topics.split('\n').map((value) => value.trim()).filter(Boolean), objectives: objectives.split('\n').map((value) => value.trim()).filter(Boolean) }) }}><p className="eyebrow">Plan with context</p><h4>Add an exam</h4><label>Exam name<input required value={title} onChange={(event) => setTitle(event.target.value)} maxLength={200} /></label><label>Confirmed date <small>(optional)</small><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label>Format<input value={format} onChange={(event) => setFormat(event.target.value)} placeholder="e.g. 3 short essays, 90 minutes" maxLength={500} /></label><label>Covered topics <small>(one per line)</small><textarea value={topics} onChange={(event) => setTopics(event.target.value)} rows={4} /></label><label>Learning objectives <small>(one per line)</small><textarea value={objectives} onChange={(event) => setObjectives(event.target.value)} rows={3} /></label><p className="study-hint">This saves the scope for later. Use Study Chat to prepare with relevant course sources.</p><button className="primary-button" disabled={busy || !title.trim()} type="submit">Save exam scope</button></form>
+  const [sourceIds, setSourceIds] = useState<string[]>([])
+  const examSources = materials.filter((item) => ['syllabi', 'readings', 'lectures', 'notes', 'assessments'].includes(item.category)).slice(0, 24)
+  return <form className="study-exam-editor" onSubmit={(event) => { event.preventDefault(); void onSave({ title, date, format, topics: topics.split('\n').map((value) => value.trim()).filter(Boolean), objectives: objectives.split('\n').map((value) => value.trim()).filter(Boolean), source_ids: sourceIds }) }}><p className="eyebrow">Plan with context</p><h4>Add an exam</h4><label>Exam name<input required value={title} onChange={(event) => setTitle(event.target.value)} maxLength={200} /></label><label>Confirmed date <small>(optional)</small><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label>Format<input value={format} onChange={(event) => setFormat(event.target.value)} placeholder="e.g. 3 short essays, 90 minutes" maxLength={500} /></label><label>Covered topics <small>(one per line)</small><textarea value={topics} onChange={(event) => setTopics(event.target.value)} rows={4} /></label><label>Learning objectives <small>(one per line)</small><textarea value={objectives} onChange={(event) => setObjectives(event.target.value)} rows={3} /></label><fieldset className="study-exam-sources"><legend>Linked sources <small>(optional, up to 12)</small></legend>{examSources.map((item) => <label key={item.id}><input type="checkbox" checked={sourceIds.includes(item.id)} disabled={!sourceIds.includes(item.id) && sourceIds.length >= 12} onChange={(event) => setSourceIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /><span>{item.name}</span></label>)}{!examSources.length && <p className="study-hint">Import or organize course material to link sources.</p>}</fieldset><p className="study-hint">This saves the scope for later. Use Study Chat to prepare with relevant course sources.</p><button className="primary-button" disabled={busy || !title.trim()} type="submit">Save exam scope</button></form>
 }
 
 function ConceptExplorer({ studySet, onClose }: { studySet: StudySet; onClose: () => void }) {

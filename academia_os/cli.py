@@ -50,6 +50,19 @@ def _json_value(value: str) -> Any:
         return value
 
 
+def _json_object(path: Path, label: str) -> dict[str, Any]:
+    source = Path(path).expanduser()
+    if source.is_symlink() or not source.is_file() or source.stat().st_size > 1024 * 1024:
+        raise ValueError(f"{label} must be a regular JSON file of at most 1 MB")
+    try:
+        value = json.loads(source.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise ValueError(f"{label} is not valid JSON") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a JSON object")
+    return value
+
+
 def _profile_path(args: argparse.Namespace) -> Path:
     return Path(args.profile).expanduser().resolve() if args.profile else default_profile().resolve()
 
@@ -872,6 +885,30 @@ def build_parser() -> argparse.ArgumentParser:
     library.add_argument("--query", default="")
     library.add_argument("--semester", help="Read material from a specific semester folder")
     library.add_argument("--json", action="store_true")
+    brief = sub.add_parser("brief", help="Compose a deterministic daily academic brief from local records")
+    brief.add_argument("--semester", help="Compose the brief for a specific semester folder")
+    brief.add_argument("--days", type=int, default=7, help="Task and deadline window in days (1–14)")
+    brief.add_argument("--json", action="store_true")
+    sources = sub.add_parser("sources", help="Read source coverage or propose a reading verification")
+    sources_sub = sources.add_subparsers(dest="sources_command", required=True)
+    sources_health = sources_sub.add_parser("health", help="Read reading, exam, and syllabus source coverage")
+    sources_health.add_argument("--semester", help="Read sources from a specific semester folder")
+    sources_health.add_argument("--course", dest="course_id", help="Limit coverage to one exact course")
+    sources_health.add_argument("--json", action="store_true")
+    sources_verify = sources_sub.add_parser("verify-reading", help="Create a Review proposal from reading metadata verification")
+    sources_verify.add_argument("--course", dest="course_id", required=True)
+    sources_verify.add_argument("--reading", dest="reading_id", required=True)
+    sources_verify.add_argument("--requested", type=Path, required=True)
+    sources_verify.add_argument("--retrieved", type=Path, required=True)
+    sources_verify.add_argument("--semester", help="Resolve the course in a specific semester folder")
+    sources_verify.add_argument("--json", action="store_true")
+    sources_sync = sources_sub.add_parser("sync", help="Preview or apply a syllabus through the existing reconciliation engine")
+    sources_sync.add_argument("--course", dest="course_id", required=True)
+    sources_sync.add_argument("--source", dest="source_id", required=True, help="Exact workspace-relative Library syllabus ID")
+    sources_sync.add_argument("--verified-current", action="store_true", help="Treat the syllabus as the current source after the student verifies it")
+    sources_sync.add_argument("--apply", action="store_true", help="Apply safe projections and create Review items for conflicts")
+    sources_sync.add_argument("--semester", help="Resolve the course in a specific semester folder")
+    sources_sync.add_argument("--json", action="store_true")
     file_preview_command = sub.add_parser("file-preview", help="Read a bounded preview of one active-semester Library file")
     file_preview_command.add_argument("source", type=Path)
     file_preview_command.add_argument("--semester", help="Read the file from a specific semester folder")
@@ -1194,7 +1231,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "status":
             value = _status(args); _emit(value, as_json=args.json, human=_human_status); return 0
-        if args.command in {"process", "study", "chat", "chat-providers", "chat-stream", "chat-cancel", "account", "models", "connectors", "courses", "today", "tasks", "task", "course", "domain", "history", "library", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard", "mcp-connections", "sessions", "actions", "import-preflight", "knowledge", "change", "intake"}:
+        if args.command in {"process", "study", "chat", "chat-providers", "chat-stream", "chat-cancel", "account", "models", "connectors", "courses", "today", "tasks", "task", "course", "domain", "history", "library", "brief", "sources", "file-preview", "extract", "workspace", "review", "inbox", "activity", "agents", "capabilities", "agent", "assistant", "workflow", "semester", "watch", "import", "verify", "verify-source", "settings", "migration", "dashboard", "mcp-connections", "sessions", "actions", "import-preflight", "knowledge", "change", "intake"}:
             return dispatch(args)
     except (OSError, ValueError, KeyError, PermissionError) as exc:
         if getattr(args, "json", False):
@@ -1532,6 +1569,48 @@ def dispatch(args: argparse.Namespace) -> int:
         from .study.cli import dispatch as dispatch_study
         _emit(dispatch_study(args, _profile_path(args)), as_json=args.json)
         return 0
+    if args.command == "brief":
+        from .brief import build_daily_brief
+        config, snapshot, _profile_path_value = _semester_context(args)
+        snapshot["tasks"] = _coursework_tasks(snapshot)
+        _emit(build_daily_brief(config, snapshot, days=args.days), as_json=args.json)
+        return 0
+    if args.command == "sources":
+        from .source_health import build_source_health, propose_reading_verification
+        config, snapshot, _profile_path_value = _semester_context(args)
+        if args.sources_command == "health":
+            _emit(build_source_health(config, snapshot, course_id=args.course_id), as_json=args.json)
+            return 0
+        if args.sources_command == "sync":
+            from .source_sync import sync_syllabus
+            _emit(
+                sync_syllabus(
+                    config,
+                    snapshot,
+                    course_id=args.course_id,
+                    source_id=args.source_id,
+                    verified_current=args.verified_current,
+                    apply=args.apply,
+                ),
+                as_json=args.json,
+            )
+            return 0
+        if args.sources_command == "verify-reading":
+            requested = _json_object(args.requested, "requested metadata")
+            retrieved = _json_object(args.retrieved, "retrieved metadata")
+            _emit(
+                propose_reading_verification(
+                    config,
+                    snapshot,
+                    course_id=args.course_id,
+                    reading_id=args.reading_id,
+                    requested=requested,
+                    retrieved=retrieved,
+                ),
+                as_json=args.json,
+            )
+            return 0
+        raise ValueError(f"unsupported sources command: {args.sources_command}")
     if args.command == "actions":
         from .action_service import ActionService
         service = ActionService(_profile_path(args))
