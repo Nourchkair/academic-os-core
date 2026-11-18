@@ -1,6 +1,6 @@
 # Phase 3 — Student workspace
 
-Status: **implemented on `next/workspace-ui`; merged and tagged only after review; not released**
+Status: **merged at `main` (`05b794c`) and tagged `phase3-workspace-ui`; not released**
 
 Phase 1 added the local academic knowledge engine and ChangeSet approval path.
 Phase 2 added pasted and imported-document intake. Phase 3 makes those layers
@@ -198,13 +198,15 @@ The following continue to work through their existing components and APIs:
 
 ## Baseline
 
-Phase 3 branches from `main` at `c28b83d` (Phase 2 merge). Previous rollback
-points remain:
+Phase 3 branches from `main` at `c28b83d` (Phase 2 merge), is merged at `main`
+(`05b794c`), and is tagged `phase3-workspace-ui`. Previous rollback points
+remain:
 
 ```text
 baseline-pre-phase1-engine   # pre-Phase 1
 phase1-academic-engine       # validated Phase 1 merge
 phase2-academic-intake       # validated Phase 2 merge
+phase3-workspace-ui          # validated Phase 3 workspace merge
 ```
 
 The installed app remains the existing release until a signed build is produced
