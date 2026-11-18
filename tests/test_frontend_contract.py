@@ -123,3 +123,20 @@ def test_each_course_has_a_durable_assignment_and_project_history_surface() -> N
     assert "api.updateCourseworkHistory" in history
     assert "This records coursework in your local workspace" in history
     assert "history', ['list', '--course', courseId, '--semester', semester]" in api
+
+
+def test_phase4_brief_schedule_and_source_health_surfaces() -> None:
+    app = (FRONTEND / "App.tsx").read_text(encoding="utf-8")
+    home = (FRONTEND / "HomeView.tsx").read_text(encoding="utf-8")
+    study = (FRONTEND / "StudyView.tsx").read_text(encoding="utf-8")
+    api_source = (FRONTEND / "lib" / "api.ts").read_text(encoding="utf-8")
+    assert "<DailyBrief" in home
+    assert "<DailyBrief" in app
+    assert "<StudyBlockPlanner" in app
+    assert "<SourceHealthPanel" in study
+    assert "api.brief" in (FRONTEND / "DailyBrief.tsx").read_text(encoding="utf-8")
+    assert "api.studySchedule" in (FRONTEND / "StudyBlockPlanner.tsx").read_text(encoding="utf-8")
+    assert "api.sourcesHealth" in study
+    assert "brief:" in api_source
+    assert "studySchedule:" in api_source
+    assert "sourcesHealth:" in api_source

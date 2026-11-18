@@ -162,6 +162,8 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
         "history",
         "study",
         "library",
+        "brief",
+        "sources",
         "file-preview",
         "extract",
         "migration",
@@ -200,6 +202,12 @@ async fn academia_command(app: tauri::AppHandle, command: String, args: Vec<Stri
         let action = args.first().map(String::as_str).unwrap_or("");
         if !["view", "assessment", "conflicts", "links"].contains(&action) {
             return Err("Unsupported Academia knowledge action".to_string());
+        }
+    }
+    if command == "sources" {
+        let action = args.first().map(String::as_str).unwrap_or("");
+        if action != "health" {
+            return Err("Only read-only source health is available through the app".to_string());
         }
     }
     if command == "change" {

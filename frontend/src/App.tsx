@@ -4,12 +4,14 @@ import { createPortal } from 'react-dom'
 import { ActionPanel } from './ActionPanel'
 import { ChangesView } from './ChangesView'
 import { CoursesView } from './CoursesView'
+import { DailyBrief } from './DailyBrief'
 import { DashboardChat } from './DashboardChat'
 import { HomeView } from './HomeView'
 import { getTaskUrgency, urgencyLabel } from './lib/task-urgency'
 import { isPendingIntakeCandidate } from './lib/intake'
 import { Onboarding } from './Onboarding'
 import { SearchView } from './SearchView'
+import { StudyBlockPlanner } from './StudyBlockPlanner'
 import { SettingsView } from './SettingsView'
 import { api, BridgeUnavailableError, isTauriEnvironment } from './lib/api'
 import type { StudyChatRequest } from './lib/chat-history'
@@ -558,7 +560,7 @@ function App() {
       {view === 'changes' && <ChangesView reviews={reviews} intakeCandidates={intakeCandidates} courses={courses} activity={activity} busy={reviewBusy} error={reviewError} focusId={reviewFocusId} onFocusConsumed={() => setReviewFocusId(null)} onDecision={decideReview} onExecute={executeReview} onAmend={amendReview} onOpenIntake={openIntakeCandidate} />}
       {view === 'courses' && <CoursesView semesters={semesters} semester={selectedSemester || status?.workspace.semester || ''} courses={courses} items={libraryItems} inbox={inbox} loading={semesterLoading} onSemesterChange={changeSemester} onOpenActions={openActionPanel} onHistoryChanged={() => refresh()} studyResumeRequest={studyResumeRequest} onStudyResumeConsumed={clearStudyResumeRequest} onOpenStudyConversation={openStudyConversation} onStartStudyChat={startStudyChat} courseOpenRequest={courseOpenRequest} onCourseOpenConsumed={clearCourseOpenRequest} intakeOpenRequest={intakeOpenRequest} onIntakeOpenConsumed={clearIntakeOpenRequest} onBackHome={() => setView('home')} />}
       <div className={`chat-route-shell ${view === 'chat' ? 'active' : ''}`} aria-hidden={view !== 'chat'}><DashboardChat courses={courses} items={libraryItems} libraryLoaded={libraryLoaded} active={view === 'chat'} onReload={() => void refresh()} semester={selectedSemester || status?.workspace.semester || ''} activity={activity}  onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} onProposalCreated={() => void refreshReviews()} reviewRevision={reviewRevision} onResumeStudySession={resumeStudySession} studyChatRequest={studyChatRequest} onStudyChatRequestConsumed={clearStudyChatRequest} onGoHome={() => setView('home')} /></div>
-      {view === 'planner' && <PlannerView tasks={tasks} courses={courses} semester={selectedSemester || status?.workspace.semester || ''} timezone={status?.workspace.timezone} stateError={taskStateError} reviews={reviews} intakeCandidates={intakeCandidates} onNavigate={navigate} onOpenChanges={() => navigate('changes')} onChanged={() => refresh()} />}
+      {view === 'planner' && <PlannerView tasks={tasks} courses={courses} semester={selectedSemester || status?.workspace.semester || ''} timezone={status?.workspace.timezone} stateError={taskStateError} reviews={reviews} intakeCandidates={intakeCandidates} onNavigate={navigate} onOpenChanges={() => navigate('changes')} onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} onChanged={() => refresh()} />}
       {view === 'search' && <SearchView semester={selectedSemester || status?.workspace.semester || ''} courses={courses} tasks={tasks} libraryItems={libraryItems} reviews={reviews} intakeCandidates={intakeCandidates} activity={activity} onOpenCourse={openCourse} onOpenPlanner={() => navigate('planner')} onOpenChanges={() => navigate('changes')} onOpenActivity={() => navigate('activity')} />}
       {view === 'activity' && <ActivityView activity={activity} processing={inbox} onNavigate={navigate} />}
       {view === 'settings' && status && <SettingsView status={status} onSaved={() => refresh()} onOpenReview={(reviewId) => void openReviewFromChat(reviewId)} />}
@@ -627,11 +629,13 @@ export function Tasks({ tasks, courses, semester, timezone = 'America/Toronto', 
   </div>
 }
 
-function PlannerView({ tasks, courses, semester, timezone, stateError, reviews, intakeCandidates, onNavigate, onOpenChanges, onChanged }: { tasks: Task[]; courses: Course[]; semester: string; timezone?: string; stateError?: string | null; reviews: ReviewItem[]; intakeCandidates: IntakeCandidate[]; onNavigate: (view: View) => void; onOpenChanges: () => void; onChanged: () => Promise<void> }) {
+function PlannerView({ tasks, courses, semester, timezone, stateError, reviews, intakeCandidates, onNavigate, onOpenChanges, onOpenReview, onChanged }: { tasks: Task[]; courses: Course[]; semester: string; timezone?: string; stateError?: string | null; reviews: ReviewItem[]; intakeCandidates: IntakeCandidate[]; onNavigate: (view: View) => void; onOpenChanges: () => void; onOpenReview: (reviewId: string) => void; onChanged: () => Promise<void> }) {
   const openReviews = reviews.filter((item) => item.status === 'open').length
   const pendingIntake = intakeCandidates.filter(isPendingIntakeCandidate).length
   return <div className="page-stack planner-workspace">
     <PageIntro eyebrow="Planner" title="Workload & schedule" subtitle="One view of course deadlines, personal tasks, and the changes that still need your decision. Study history remains inside each course." />
+    <DailyBrief semester={semester} variant="planner" onNavigate={onNavigate} />
+    <StudyBlockPlanner semester={semester} onOpenSettings={() => onNavigate('settings')} onOpenReview={onOpenReview} />
     <div className="planner-attention">
       <button type="button" className="planner-attention-card" data-tone={openReviews ? 'soon' : 'completed'} onClick={onOpenChanges}><span className="planner-attention-icon" aria-hidden="true">⚖</span><div><p className="eyebrow">Changes & approvals</p><strong>{openReviews}</strong><span>{openReviews ? 'Decisions waiting' : 'Nothing waiting for a decision'}</span></div><span aria-hidden="true">→</span></button>
       <button type="button" className="planner-attention-card" data-tone={pendingIntake ? 'soon' : 'completed'} onClick={onOpenChanges}><span className="planner-attention-icon" aria-hidden="true">✦</span><div><p className="eyebrow">Intake candidates</p><strong>{pendingIntake}</strong><span>{pendingIntake ? 'Candidate facts to review' : 'No candidate facts waiting'}</span></div><span aria-hidden="true">→</span></button>

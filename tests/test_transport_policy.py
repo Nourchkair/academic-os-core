@@ -8,6 +8,8 @@ from academia_os.transport_policy import SAFE_COMMANDS, validate_command
 def test_shared_allowlist_contains_expected_read_and_write_surfaces() -> None:
     assert "status" in SAFE_COMMANDS
     assert "study" in SAFE_COMMANDS
+    assert "brief" in SAFE_COMMANDS
+    assert "sources" in SAFE_COMMANDS
     assert "settings" in SAFE_COMMANDS
     assert "dashboard" not in SAFE_COMMANDS
     assert "desktop-bridge" not in SAFE_COMMANDS

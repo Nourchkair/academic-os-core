@@ -61,18 +61,24 @@ class StudyService:
 
     def _empty(self) -> dict[str, Any]:
         return {'schema_version': 1, 'course_id': self.course, 'semester': self.semester,
-                'sets': [], 'sessions': [], 'attempts': [], 'reviews': {}, 'annotations': [], 'exams': []}
+                'sets': [], 'sessions': [], 'attempts': [], 'reviews': {}, 'annotations': [], 'exams': [], 'readings': {}}
 
     def _validate_state(self, state: Any) -> dict[str, Any]:
         if not isinstance(state, dict) or state.get('schema_version') != 1 or state.get('course_id') != self.course or state.get('semester') != self.semester:
             raise ValueError('unsupported study state; preserve and restore it from an export')
-        if set(state) - {'schema_version', 'course_id', 'semester', 'sets', 'sessions', 'attempts', 'reviews', 'annotations', 'exams', 'preferences'}:
+        if set(state) - {'schema_version', 'course_id', 'semester', 'sets', 'sessions', 'attempts', 'reviews', 'annotations', 'exams', 'preferences', 'readings'}:
             raise ValueError('study state contains unsupported fields')
         for key in ('sets', 'sessions', 'attempts', 'annotations', 'exams'):
             if not isinstance(state.get(key), list):
                 raise ValueError(f'invalid study state: {key}')
         if not isinstance(state.get('reviews'), dict):
             raise ValueError('invalid study review state')
+        readings = state.setdefault('readings', {})
+        if not isinstance(readings, dict) or any(not isinstance(value, dict) for value in readings.values()):
+            raise ValueError('invalid study reading state')
+        for value in readings.values():
+            if value.get('status') not in {'read', 'reading', 'unread'}:
+                raise ValueError('invalid study reading status')
         return state
 
     def read(self) -> dict[str, Any]:
@@ -290,6 +296,10 @@ class StudyService:
                 'topics': list(topics.values()), 'attempt_count': len(attempts), 'due_count': sum(review['due_at'] <= timestamp for review in state['reviews'].values() if review['item_id'] not in flags),
                 'sessions': [{key: item[key] for key in ('id', 'set_id', 'title', 'status', 'created_at')} for item in state['sessions'][-20:]],
                 'annotations': annotations, 'exams': state['exams'],
+                'readings': sorted(state.get('readings', {}).values(), key=lambda item: str(item.get('updated_at') or ''), reverse=True),
+                'readings_read': sum(record.get('status') == 'read' for record in state.get('readings', {}).values()),
+                'readings_in_progress': sum(record.get('status') == 'reading' for record in state.get('readings', {}).values()),
+                'readings_unread': sum(record.get('status') == 'unread' for record in state.get('readings', {}).values()),
                 'preferences': self.preferences(),
                 'progress_note': 'Practice and self-assessment only; no course grades or mastery claims.'}
 
@@ -432,6 +442,34 @@ class StudyService:
             return copy.deepcopy(record)
         return self._write('annotation_added', save, actor)
 
+    def reading_status(self, reading_id: str | None = None, source_id: str | None = None) -> dict[str, Any] | None:
+        records = self.read().get('readings', {})
+        if reading_id and reading_id in records:
+            return copy.deepcopy(records[reading_id])
+        if source_id:
+            return next((copy.deepcopy(record) for record in records.values() if record.get('source_id') == source_id), None)
+        return None
+
+    def set_reading_status(self, *, reading_id: str | None = None, source_id: str | None = None, status: str, title: str = '', note: str = '', actor: str = 'user') -> dict[str, Any]:
+        if status not in {'read', 'reading', 'unread'}:
+            raise ValueError('reading status must be read, reading or unread')
+        if not reading_id and not source_id:
+            raise ValueError('a reading ID or source ID is required')
+        reading_id = text(reading_id, 'reading ID', 200, optional=True) if reading_id else None
+        source_id = text(source_id, 'source ID', 500, optional=True) if source_id else None
+        title = text(title, 'reading title', 500, optional=True)
+        note = text(note, 'reading note', 1000, optional=True)
+        key = reading_id or f'source:{source_id}'
+        record = {'id': key, 'reading_id': reading_id, 'source_id': source_id, 'title': title,
+                  'status': status, 'note': note, 'updated_at': now().isoformat(),
+                  'updated_by': text(actor, 'actor', 80), 'basis': 'student-reported'}
+        def save(state: dict[str, Any]) -> dict[str, Any]:
+            records = state.setdefault('readings', {})
+            previous = records.get(key, {}) if isinstance(records.get(key), dict) else {}
+            records[key] = {**previous, **record, 'created_at': previous.get('created_at') or record['updated_at']}
+            return copy.deepcopy(records[key])
+        return self._write('reading_status_updated', save, actor)
+
     def exam(self, payload: dict[str, Any], *, actor: str = 'user') -> dict[str, Any]:
         title = text(payload.get('title'), 'exam title', 200)
         topics = strings(payload.get('topics', []), 'exam topics')
@@ -453,11 +491,28 @@ class StudyService:
         return self._write('exam_saved', save, actor)
 
     def exam_context(self, exam_id: str) -> dict[str, Any]:
-        exam = copy.deepcopy(self._find(self.read()['exams'], exam_id))
+        state = self.read()
+        exam = copy.deepcopy(self._find(state['exams'], exam_id))
         overview = self.overview()
         exam['coverage'] = [{'topic': topic,
                              'read_annotations': sum(note['kind'] == 'read' and note['topic'].casefold() == topic.casefold() for note in overview['annotations']),
                              'practice': next((entry for entry in overview['topics'] if entry['topic'].casefold() == topic.casefold()), None)} for topic in exam['topics']]
+        available = {item['id']: item for item in self.context()['sources']}
+        records = state.get('readings', {})
+        annotated_reads = {note.get('citation', {}).get('source_id') for note in overview['annotations'] if note.get('kind') == 'read'}
+        exam['sources'] = [
+            {
+                'source_id': source_id,
+                'name': (available.get(source_id) or {}).get('name') or Path(source_id).name,
+                'available': source_id in available,
+                'read_status': next((record.get('status') for record in records.values() if record.get('source_id') == source_id), 'read' if source_id in annotated_reads else 'not_recorded'),
+            }
+            for source_id in exam.get('source_ids', [])
+        ]
+        exam['uncovered_topics'] = [
+            entry['topic'] for entry in exam['coverage']
+            if not entry['read_annotations'] and not (entry.get('practice') or {}).get('attempt_count')
+        ]
         exam['coverage_note'] = 'Recorded reading and practice only. Unpracticed topics remain unknown.'
         return exam
 
@@ -474,8 +529,9 @@ class StudyService:
                 lines.extend([f"\n### {item['prompt']}", '\n'.join(f'- {option}' for option in item['options']),
                               f"Answer: {item['answer']}", item['explanation']])
                 lines.extend(f"Source: {citation['source_id']} · {citation['locator']} · SHA256 {citation['sha256']}" for citation in item['citations'])
-        lines.extend(['\n## Annotations', *[f"- {note['kind']}: {note['note']} ({note['citation']['source_id']} · {note['citation']['locator']})" for note in state['annotations']],
-                      '\n## Practice history', '```json', json.dumps({'attempts': state['attempts'], 'reviews': state['reviews'], 'exams': state['exams']}, indent=2, ensure_ascii=False), '```'])
+        lines.extend(['\n## Reading status', *[f"- {record.get('title') or record.get('reading_id') or record.get('source_id')}: {record.get('status')}" for record in state.get('readings', {}).values()],
+                      '\n## Annotations', *[f"- {note['kind']}: {note['note']} ({note['citation']['source_id']} · {note['citation']['locator']})" for note in state['annotations']],
+                      '\n## Practice history', '```json', json.dumps({'attempts': state['attempts'], 'reviews': state['reviews'], 'exams': state['exams'], 'readings': state.get('readings', {})}, indent=2, ensure_ascii=False), '```'])
         return {'format': 'markdown', 'filename': f'{self.course}-study.md', 'content': '\n\n'.join(lines)}
 
     def restore(self, payload: dict[str, Any], *, actor: str = 'user') -> dict[str, Any]:

@@ -147,6 +147,12 @@ academia domain --json
 academia library --json
 academia library --category syllabi --json
 academia library --course "POL 2103 - Politics" --json
+academia brief --json
+academia sources health --json
+academia sources sync --course "POL 2103 - Politics" --source "Fall 2026/POL 2103 - Politics/01_COURSE/syllabus.pdf" --json
+academia sources verify-reading --course "POL 2103 - Politics" --reading READING_ID --requested requested.json --retrieved retrieved.json --json
+academia study schedule --semester "Fall 2026" --minutes 120 --days 7 --json
+academia study reading --course "POL 2103 - Politics" --reading READING_ID --status read --json
 academia file-preview /path/to/active-semester-file.pdf --json
 academia extract syllabus /path/to/syllabus.pdf --course "POL 2103 - Politics" --json
 academia extract syllabus /path/to/syllabus.md --course "POL 2103 - Politics" --verified-current --apply --json
@@ -277,6 +283,14 @@ The dashboard is organized around four working areas:
 
 **Search**, **Changes**, **Import**, and **Settings** stay global. Changes combines Review decisions, approved actions waiting for execution, and intake candidate facts; approval and execution remain separate steps. Search is local across the loaded semester. Activity remains reachable from Home and Changes. See [Phase 3 — student workspace](docs/phase3/README.md).
 
+### Proactive brief, study blocks, and source confidence
+
+Phase 4 adds a deterministic local daily brief composed from recorded deadlines, open tasks, pending decisions, due study reviews, source coverage, and upcoming exams. It is advisory and read-only: `academia brief --json` and Home/Planner render the same payload.
+
+`academia study schedule` turns the existing advisory study plan into concrete time blocks. When Google Calendar is connected, known events are treated as busy time; otherwise blocks are placed without conflict checks. A block becomes a Review proposal only when the student chooses **Add to Calendar**. Approval, separate execution, duplicate checks, and read-back verification are unchanged.
+
+`academia sources health` joins assigned readings, Library files, processing/extraction state, student-reported reading status, exam scope, and syllabus hashes. Reading status lives in the course Study store and is never inferred. `academia sources verify-reading` compares requested and retrieved metadata and creates a linked Review proposal; the reading's `verification_result` changes only after approval and verified execution. See [Phase 4 — proactive planning and source confidence](docs/phase4/README.md).
+
 Settings use a preview/apply model:
 
 ```bash
@@ -308,6 +322,9 @@ Manual imports of PDF, DOCX, PPTX, plain text, Markdown, and common image files 
 - **Inbox / intake** contains files present in course or semester `00_INBOX/` folders. Running `academia inbox` detects pre-existing files into the retryable processing state machine. Detection alone does not classify, move, or delete a file.
 - **Changes / Review** contains only explicit `.academia/review.json` items, such as uncertain imports, source conflicts, or approval-required actions, plus pending intake candidate facts. An unprocessed inbox file is shown as intake until a deliberate Review item is created. Approving a decision and executing an approved action are separate steps.
 - **Activity** is the append-only audit view of changes Academia OS actually completed. Reads, scans, and external agent conversations do not appear as changes unless the core performed a recorded action.
+- **Daily brief** is a deterministic read model composed from the same task, deadline, Review, intake, processing, Study, and source-health reads. It is advisory and does not create a schedule, contact a service, or write academic state.
+- **Source health** joins assigned domain readings, Library files, processing/extraction status, student-reported reading status, exam scope, and syllabus hashes. Reading status is stored in the course Study record and is never inferred. A missing record means unknown.
+- **Study blocks** place the existing advisory study plan into free time. Known Google Calendar events are treated as busy only when the connector is authorized; adding a block still requires a Review proposal, approval, separate execution, and read-back verification.
 - **Coursework History** is a per-course record of assignments, essays, projects, exams, presentations, quizzes, and other academic work. The dashboard can add and update these records; status changes remain in the record’s status log and are reflected in matching tasks. This academic history is separate from dashboard chat history, which is retained in browser storage on the current device and can be deleted from Chat History.
 - **File previews** are read-only and active-semester scoped. Markdown/text/CSV/JSON/YAML are shown as text; DOCX/PPTX text is extracted locally; PDFs open in an in-app browser frame with a text fallback in the desktop shell. Originals are never rewritten.
 

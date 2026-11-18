@@ -27,6 +27,8 @@ SAFE_COMMANDS = frozenset(
         "history",
         "study",
         "library",
+        "brief",
+        "sources",
         "desktop",
         "file-preview",
         "extract",
@@ -77,6 +79,8 @@ def validate_command(
         raise ValueError("the dashboard may only list, create, update, complete, or reopen user tasks")
     if command == "knowledge" and (not values or values[0] not in {"view", "assessment", "conflicts", "links"}):
         raise ValueError("the dashboard may only read knowledge views")
+    if command == "sources" and (not values or values[0] != "health"):
+        raise ValueError("the dashboard may only read source health")
     if command == "change" and (not values or values[0] not in {"list", "show", "amend", "propose-deadline", "link-task", "pause-link", "resume-link", "approve", "execute", "retry", "cancel", "reverse", "recover"}):
         raise ValueError("unsupported dashboard change command")
     if command == "intake" and (not values or values[0] not in {"paste", "document", "list", "show", "resolve", "propose", "reject"}):

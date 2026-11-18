@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -19,7 +19,7 @@ def capabilities() -> dict[str, Any]:
     return {'schema_version': 1, 'agent_first': True, 'dashboard_required': False,
             'generation_optional': True, 'kinds': list(KINDS),
             'commands': ['overview', 'preferences', 'configure', 'context', 'create', 'generate', 'revise', 'show', 'start', 'session', 'reveal', 'answer', 'flag',
-                         'annotate', 'exam-save', 'exam', 'plan', 'export', 'restore', 'progress'],
+                         'annotate', 'exam-save', 'exam', 'plan', 'schedule', 'reading', 'export', 'restore', 'progress'],
             'agent_loop': ['study context --course COURSE --source LIBRARY_ID --json',
                            'study create --course COURSE --source LIBRARY_ID --input - --json',
                            'study start --course COURSE --set SET_ID --json',
@@ -40,10 +40,10 @@ def add_parser(sub: Any) -> None:
         commands.add_parser(name).add_argument('--json', action='store_true')
     for name in capabilities()['commands']:
         parser = commands.add_parser(name)
-        parser.add_argument('--course', dest='course_id', required=name != 'plan')
+        parser.add_argument('--course', dest='course_id', required=name not in {'plan', 'schedule'})
         parser.add_argument('--semester')
         parser.add_argument('--json', action='store_true')
-        if name in {'create', 'generate', 'start', 'reveal', 'answer', 'flag', 'annotate', 'exam-save', 'restore', 'revise', 'configure'}:
+        if name in {'create', 'generate', 'start', 'reveal', 'answer', 'flag', 'annotate', 'exam-save', 'restore', 'revise', 'configure', 'reading'}:
             parser.add_argument('--actor', default='user')
         if name in {'context', 'create', 'generate', 'annotate'}:
             parser.add_argument('--source', action='append', default=[], help='Exact course Library source ID; repeat for several sources')
@@ -95,6 +95,18 @@ def add_parser(sub: Any) -> None:
             parser.add_argument('--exam', required=True)
         if name == 'plan':
             parser.add_argument('--minutes', type=int, default=40)
+        if name == 'schedule':
+            parser.add_argument('--minutes', type=int, default=120)
+            parser.add_argument('--days', type=int, default=7)
+            parser.add_argument('--start-time', default='09:00')
+            parser.add_argument('--end-time', default='21:00')
+            parser.add_argument('--block-minutes', type=int, default=45)
+        if name == 'reading':
+            parser.add_argument('--reading', dest='reading_id')
+            parser.add_argument('--source', dest='source_id')
+            parser.add_argument('--status', required=True, choices=('read', 'reading', 'unread'))
+            parser.add_argument('--title', default='')
+            parser.add_argument('--note', default='')
         if name == 'export':
             parser.add_argument('--format', choices=('json', 'markdown'), default='json')
 
@@ -117,7 +129,7 @@ def _payload(args: argparse.Namespace) -> dict[str, Any]:
     return value
 
 
-def plan(config: dict[str, Any], snapshot: dict[str, Any], minutes: int, course_id: str | None = None) -> dict[str, Any]:
+def plan(config: dict[str, Any], snapshot: dict[str, Any], minutes: int, course_id: str | None = None, *, today: date | None = None) -> dict[str, Any]:
     if not 5 <= minutes <= 240:
         raise ValueError('study time must be between 5 and 240 minutes')
     root = Path(snapshot['academic_root'])
@@ -125,7 +137,7 @@ def plan(config: dict[str, Any], snapshot: dict[str, Any], minutes: int, course_
     if course_id:
         service = StudyService(root, snapshot['semester'], course_id)
         courses = [course for course in courses if course['id'] == service.course]
-    today = datetime.now(ZoneInfo(config['academic']['timezone'])).date()
+    today = today or datetime.now(ZoneInfo(config['academic']['timezone'])).date()
     current_time = datetime.now(timezone.utc).isoformat()
     candidates = []
     for course in courses:
@@ -205,6 +217,70 @@ def dispatch(args: argparse.Namespace, profile: Path) -> Any:
         for course in snapshot['courses']:
             snapshot['tasks'] = apply_history_to_tasks(snapshot['tasks'], list_assignment_history(root, semester, course['id']), course_name=course['name'])
         return plan(config, snapshot, args.minutes, args.course_id)
+    if action == 'schedule':
+        snapshot = build_workspace_snapshot(config, persist=False, semester_override=semester)
+        from ..assignment_history import apply_history_to_tasks, list_assignment_history
+        for course in snapshot['courses']:
+            snapshot['tasks'] = apply_history_to_tasks(snapshot['tasks'], list_assignment_history(root, semester, course['id']), course_name=course['name'])
+        calendar_events = None
+        calendar_error = None
+        from datetime import timedelta
+        from ..config import runtime_directory
+        from ..connectors.google import GoogleConnector, GoogleConnectorError
+        try:
+            state_path = runtime_directory(config) / 'google_connector.json'
+            connector = GoogleConnector(state_path)
+            declared_authorized = False
+            if state_path.is_file():
+                try:
+                    declared_authorized = json.loads(state_path.read_text(encoding='utf-8')).get('auth_status') == 'authorized'
+                except (json.JSONDecodeError, OSError):
+                    declared_authorized = False
+            if declared_authorized and connector.status().get('auth_status') == 'authorized':
+                zone = ZoneInfo(str(config['academic']['timezone']))
+                current = datetime.now(zone)
+                result = connector.calendar_list(
+                    time_min=current.isoformat(),
+                    time_max=(current + timedelta(days=args.days + 1)).isoformat(),
+                    max_results=50,
+                )
+                calendar_events = result.get('events', [])
+            else:
+                calendar_error = 'Google Calendar is not connected; blocks were placed without calendar conflict checks.'
+        except (GoogleConnectorError, OSError, ValueError) as exc:
+            calendar_error = f'Google Calendar could not be read; blocks were placed without calendar conflict checks: {exc}'
+        from .schedule import schedule_blocks
+        return schedule_blocks(
+            config,
+            snapshot,
+            minutes=args.minutes,
+            days=args.days,
+            start_time=args.start_time,
+            end_time=args.end_time,
+            block_minutes=args.block_minutes,
+            course_id=args.course_id,
+            calendar_events=calendar_events,
+            calendar_error=calendar_error,
+        )
+    if action == 'reading':
+        from ..domain import DomainProjection
+        from ..source_identity import validate_source_id
+        if not args.reading_id and not args.source_id:
+            raise ValueError('study reading requires --reading or --source')
+        service = StudyService(root, semester, args.course_id)
+        title = args.title
+        source_id = args.source_id
+        if args.reading_id:
+            reading = DomainProjection(root / '.academia' / 'domain.json').get('reading', args.reading_id)
+            if str(reading.get('course_id')) != service.course:
+                raise ValueError('reading does not belong to the selected course')
+            title = title or str(reading.get('title') or '')
+        if source_id:
+            validate_source_id(root, source_id, semester=semester)
+            if not source_id.startswith(f'{semester}/{service.course}/'):
+                raise ValueError('source must belong to the selected course')
+        return {'course_id': service.course, 'semester': semester,
+                'reading': service.set_reading_status(reading_id=args.reading_id, source_id=source_id, status=args.status, title=title, note=args.note, actor=args.actor)}
     if action == 'progress':
         from .sources import read_progress
         return read_progress(root, semester, args.course_id)

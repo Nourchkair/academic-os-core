@@ -83,11 +83,15 @@ function ApprovedActionCard({ item, busy, onExecute }: { item: ReviewItem; busy:
   const effects = stringList(proposal.effects) || stringList(details.effects)
   const destination = stringValue(proposal.target_id) || stringValue(details.proposed_destination) || stringValue(proposal.destination)
   const source = stringValue(proposal.source_path) || stringValue(details.source_path)
+  const event = record(proposal.event) || {}
+  const start = stringValue(record(event.start)?.dateTime) || stringValue(event.start)
+  const end = stringValue(record(event.end)?.dateTime) || stringValue(event.end)
+  const calendar = actionType === 'calendar_change'
   return <article className="approval-card" aria-label={`Approved ${actionType} ready to execute`}>
     <div className="approval-card-heading"><div><span className="review-kind">{actionLabels[actionType] || 'Approved action'}</span><h3>{item.title}</h3><p>{item.course || 'Workspace'} · approved and waiting for execution</p></div><span className="approval-ready">Ready</span></div>
-    {(source || destination) && <dl className="approval-targets">{source && <div><dt>Source</dt><dd>{source}</dd></div>}{destination && <div><dt>Destination</dt><dd>{destination}</dd></div>}</dl>}
+    {calendar ? <dl className="approval-targets"><div><dt>Event</dt><dd>{stringValue(event.summary) || item.title}</dd></div><div><dt>Start</dt><dd>{formatCalendarTime(start)}</dd></div><div><dt>End</dt><dd>{formatCalendarTime(end)}</dd></div></dl> : (source || destination) ? <dl className="approval-targets">{source && <div><dt>Source</dt><dd>{source}</dd></div>}{destination && <div><dt>Destination</dt><dd>{destination}</dd></div>}</dl> : null}
     {effects.length > 0 && <div className="effect-list"><strong>This will:</strong><ul>{effects.map((effect) => <li key={effect}>{effect}</li>)}</ul></div>}
-    <div className="decision-row"><span className="approval-hint">{actionType === 'calendar_change' ? 'Google Calendar is unchanged until you execute this approved action.' : 'Nothing has been copied or changed yet.'}</span><button className="primary-button" disabled={busy} onClick={() => void onExecute()}>{busy ? 'Executing…' : 'Execute approved action'}</button></div>
+    <div className="decision-row"><span className="approval-hint">{calendar ? 'Google Calendar is unchanged until you execute this approved action.' : 'Nothing has been copied or changed yet.'}</span><button className="primary-button" disabled={busy} onClick={() => void onExecute()}>{busy ? 'Executing…' : 'Execute approved action'}</button></div>
   </article>
 }
 
@@ -107,3 +111,4 @@ function record(value: unknown): Record<string, unknown> | null { return value &
 function stringValue(value: unknown): string { return typeof value === 'string' && value.trim() ? value : '' }
 function stringList(value: unknown): string[] { return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())) : [] }
 function formatDate(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) }
+function formatCalendarTime(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) }

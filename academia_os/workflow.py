@@ -11,7 +11,7 @@ from .review import ReviewItem, ReviewQueue, ReviewStatus, validate_review_decis
 
 def is_review_rejection_decision(decision: str) -> bool:
     normalized = decision.strip()
-    return normalized in {"reject", "dismiss", "keep_current", "keep_existing", "keep_unassigned", "keep_general_intake"} or normalized.startswith("reject_") or normalized.startswith("dismiss_")
+    return normalized in {"reject", "dismiss", "keep_current", "keep_existing", "keep_unassigned", "keep_general_intake", "keep_unverified"} or normalized.startswith("reject_") or normalized.startswith("dismiss_")
 
 
 class ApprovalWorkflow:

@@ -163,3 +163,34 @@ describe('ReviewCard decision help', () => {
     expect(onDecision).toHaveBeenCalledWith('use_new')
   })
 })
+
+  it('renders a calendar study block with an explicit two-stage approval', () => {
+    const onDecision = vi.fn().mockResolvedValue(undefined)
+    const calendarItem: ReviewItem = {
+      ...item,
+      kind: 'action_approval',
+      title: 'Create Google Calendar event: POL 2103 study block',
+      action_proposal_id: 'action-calendar',
+      details: {
+        action_type: 'calendar_change',
+        proposal_details: {
+          action_type: 'calendar_change',
+          calendar_action: 'create',
+          before: 'No matching event found in the primary calendar.',
+          after: 'POL 2103 study block · Nov 18, 2026, 9:00 AM',
+          effects: ['Create exactly one event in the primary calendar.', 'Read the event back and verify it.'],
+          duplicate_check: { checked_at: '2026-11-18T09:00:00Z', matches: 0 },
+          event: {
+            summary: 'POL 2103 study block',
+            start: { dateTime: '2026-11-18T09:00:00-05:00' },
+            end: { dateTime: '2026-11-18T09:30:00-05:00' },
+          },
+        },
+      },
+    }
+    render(<ReviewCard item={calendarItem} courses={[]} busy={false} onDecision={onDecision} />)
+    expect(screen.getByText('POL 2103 study block')).toBeInTheDocument()
+    expect(screen.getByText('0 matching events at proposal time')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Approve calendar change' }))
+    expect(onDecision).toHaveBeenCalledWith('approve_action')
+  })
