@@ -50,7 +50,10 @@ def test_dashboard_has_semester_courses_library_and_workspace_surfaces() -> None
     assert "Readings & references" in courses
     assert "AI-created material" not in courses
     assert "AI-generated" not in courses
-    assert "api.filePreview(item.path, item.semester)" in courses
+    assert "LibraryPreviewDialog" in courses
+
+    preview = (FRONTEND / "LibraryPreviewDialog.tsx").read_text(encoding="utf-8")
+    assert "api.filePreview(item.path, item.semester)" in preview
 
     home = (FRONTEND / "HomeView.tsx").read_text(encoding="utf-8")
     assert "Changes & approvals" in home
