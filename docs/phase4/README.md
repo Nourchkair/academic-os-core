@@ -1,6 +1,6 @@
 # Phase 4 — Proactive planning and source confidence
 
-Status: **implementation on `next/phase4-proactive`; not merged, tagged, or released**
+Status: **merged at `main` (`294b2e5`) and tagged `phase4-proactive-planning`; not released**
 
 Phase 1 added the academic knowledge engine and ChangeSet path. Phase 2 added
 intake. Phase 3 organized the dashboard into Home, Courses, Planner, and Agent.
@@ -98,7 +98,7 @@ execution.
 
 - Python tests for brief composition, schedule placement/conflicts, source
   health, reading status, syllabus sync preview, verification proposals, and CLI
-  contracts: 666 tests pass.
+  contracts: 668 tests pass.
 - Frontend typecheck, 66 tests across 22 files, and production build.
 - Component tests for the daily brief, study-block planner, source-health panel,
   and the typed calendar Review card.
@@ -127,3 +127,20 @@ The dashboard adds:
 - a typed **Calendar change** approval card that shows the event title, time, duplicate check, and effects;
 - a **Readings** tab in Courses → Study with reading coverage, student status controls, exam coverage, and syllabus/announcement sync status;
 - exam-scope source selection and source availability in the existing Exam scope coverage panel.
+
+## Baseline
+
+Phase 4 branches from `main` at `e6a8aa7` (Phase 3 status merge), is merged at
+`main` (`294b2e5`), and is tagged `phase4-proactive-planning`. Previous rollback
+points remain:
+
+```text
+baseline-pre-phase1-engine   # pre-Phase 1
+phase1-academic-engine       # validated Phase 1 merge
+phase2-academic-intake       # validated Phase 2 merge
+phase3-workspace-ui          # validated Phase 3 workspace merge
+phase4-proactive-planning    # validated Phase 4 planning merge
+```
+
+The installed app remains the existing release until a signed build is produced
+and installed with explicit approval.
