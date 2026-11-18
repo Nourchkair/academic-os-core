@@ -201,6 +201,16 @@ function App() {
     }
   }, [])
 
+  const refreshIntake = useCallback(async (semester: string) => {
+    if (!semester) return
+    try {
+      const value = await api.intakeList(semester)
+      setIntakeCandidates(value.candidates)
+    } catch {
+      // Keep the current candidates; a later refresh can catch up.
+    }
+  }, [])
+
   const refresh = async (allowDuringMigration = false, fastFirstPaint = false) => {
     if (migrationBusy && !allowDuringMigration) return
     const sequence = ++refreshSequence.current
@@ -423,9 +433,11 @@ function App() {
   useEffect(() => { void refresh(false, true) }, [])
 
   useEffect(() => {
+    if (view !== 'changes') return
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (view === 'changes') void refreshReviews()
-  }, [view, refreshReviews])
+    void refreshReviews()
+    void refreshIntake(selectedSemester || status?.workspace.semester || '')
+  }, [view, refreshReviews, refreshIntake, selectedSemester, status?.workspace.semester])
 
   useEffect(() => {
     let mounted = true

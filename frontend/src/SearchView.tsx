@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import { LibraryPreviewDialog } from './LibraryPreviewDialog'
 import { isPendingIntakeCandidate } from './lib/intake'
 import type { ActivityEvent, Course, IntakeCandidate, LibraryItem, ReviewItem, Task } from './types'
 
@@ -19,6 +20,7 @@ type SearchViewProps = {
 
 export function SearchView({ semester, courses, tasks, libraryItems, reviews, intakeCandidates, activity, onOpenCourse, onOpenPlanner, onOpenChanges, onOpenActivity }: SearchViewProps) {
   const [query, setQuery] = useState('')
+  const [previewItem, setPreviewItem] = useState<LibraryItem | null>(null)
   const normalized = query.trim().toLowerCase()
   const results = useMemo(() => {
     if (!normalized) return null
@@ -26,7 +28,7 @@ export function SearchView({ semester, courses, tasks, libraryItems, reviews, in
     return {
       courses: courses.filter((course) => matches(course.code) || matches(course.name)).slice(0, 6),
       tasks: tasks.filter((task) => matches(task.title) || matches(task.course) || matches(task.source)).slice(0, 8),
-      library: libraryItems.filter((item) => item.course_id && (matches(item.name) || matches(item.relative_path) || matches(item.category))).slice(0, 8),
+      library: libraryItems.filter((item) => matches(item.name) || matches(item.relative_path) || matches(item.category)).slice(0, 8),
       changes: [
         ...reviews.filter((item) => matches(item.title) || matches(item.course) || matches(item.kind)).map((item) => ({ id: item.id, title: item.title, detail: item.course || item.kind, kind: 'Review decision' })),
         ...intakeCandidates.filter((candidate) => isPendingIntakeCandidate(candidate) && (matches(candidate.entity_title) || matches(candidate.course_id) || matches(candidate.value))).map((candidate) => ({ id: candidate.id, title: candidate.entity_title || 'Intake candidate', detail: `${candidate.course_id || 'Course not resolved'} · ${candidate.display_status || candidate.status}`, kind: 'Intake candidate' })),
@@ -44,10 +46,11 @@ export function SearchView({ semester, courses, tasks, libraryItems, reviews, in
     {results && count > 0 && <div className="search-results">
       {results.courses.length > 0 && <SearchGroup title="Courses">{results.courses.map((course) => <SearchResult key={course.id} title={course.name} detail={`${course.code} · ${course.material_count} material item${course.material_count === 1 ? '' : 's'}`} action="Open course" onClick={() => onOpenCourse(course.id)} />)}</SearchGroup>}
       {results.tasks.length > 0 && <SearchGroup title="Planner">{results.tasks.map((task) => <SearchResult key={task.id} title={task.title} detail={`${task.course || 'Semester'}${task.due_date ? ` · due ${task.due_date}` : ''}`} action="Open planner" onClick={onOpenPlanner} />)}</SearchGroup>}
-      {results.library.length > 0 && <SearchGroup title="Library">{results.library.map((item) => <SearchResult key={item.id} title={item.name} detail={`${item.relative_path} · ${item.category}`} action="Open course" onClick={() => item.course_id && onOpenCourse(item.course_id)} />)}</SearchGroup>}
+      {results.library.length > 0 && <SearchGroup title="Library">{results.library.map((item) => <SearchResult key={item.id} title={item.name} detail={`${item.relative_path} · ${item.category}`} action={item.course_id ? 'Open course' : 'Preview file'} onClick={() => item.course_id ? onOpenCourse(item.course_id) : setPreviewItem(item)} />)}</SearchGroup>}
       {results.changes.length > 0 && <SearchGroup title="Changes">{results.changes.map((item) => <SearchResult key={item.id} title={item.title} detail={`${item.kind} · ${item.detail}`} action="Open changes" onClick={onOpenChanges} />)}</SearchGroup>}
       {results.activity.length > 0 && <SearchGroup title="Activity">{results.activity.map((event) => <SearchResult key={event.id} title={event.title} detail={`${event.course || 'Workspace'} · ${event.event_type}`} action="Open activity" onClick={onOpenActivity} />)}</SearchGroup>}
     </div>}
+    <LibraryPreviewDialog item={previewItem} onClose={() => setPreviewItem(null)} />
   </div>
 }
 

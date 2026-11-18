@@ -77,6 +77,9 @@ components and endpoints remain the implementation behind Planner and Changes.
   - approved actions waiting for the separate execution step;
   - intake candidate facts that still need a decision.
 - Shows the review/decision/execution timeline from Activity.
+- Reloads review and intake state when the student opens Changes. Intake paste,
+  document scan, resolve, dismiss, and proposal actions also refresh the
+  aggregate candidate state in Home, Planner, and Changes.
 - Opens the exact course intake dialog for a candidate when the candidate has a
   course. A candidate without a course routes to Courses so the student can pick
   the class.
@@ -90,6 +93,8 @@ components and endpoints remain the implementation behind Planner and Changes.
   tree or call a search service.
 - Searches courses, tasks/deadlines, Library metadata, Review/intake records, and
   Activity titles.
+- Includes course and semester-level Library files. Semester-level inbox files
+  open the shared read-only preview instead of requiring a course.
 - Links results to Courses, Planner, Changes, or Activity.
 - Shows a clear empty state and never claims to search outside the selected
   semester.
@@ -145,7 +150,7 @@ The following continue to work through their existing components and APIs:
 ## Validation
 
 - `npm run typecheck` in `frontend/`: passes.
-- `npm test` in `frontend/`: 60 tests across 19 files.
+- `npm test` in `frontend/`: 61 tests across 19 files.
 - `npm run build` in `frontend/`: passes.
 - Full Python suite: 658 tests pass.
 - ESLint: 32 remaining problems in pre-existing, unrelated frontend files; the

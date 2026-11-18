@@ -33,4 +33,12 @@ describe('SearchView', () => {
     fireEvent.change(screen.getByLabelText('Search workspace'), { target: { value: 'Old Applied Essay' } })
     expect(screen.getByText('No matches in Fall 2026')).toBeInTheDocument()
   })
+
+  it('includes semester-level inbox files and opens a read-only preview', () => {
+    const semesterItem = { ...library[0], id: 'file-2', name: 'Semester announcement.md', relative_path: 'Fall 2026/00_INBOX/Semester announcement.md', course_id: null }
+    render(<SearchView semester="Fall 2026" courses={[course]} tasks={[task]} libraryItems={[...library, semesterItem]} reviews={[]} intakeCandidates={[]} activity={[]} onOpenCourse={vi.fn()} onOpenPlanner={vi.fn()} onOpenChanges={vi.fn()} onOpenActivity={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('Search workspace'), { target: { value: 'Semester announcement' } })
+    fireEvent.click(screen.getByRole('button', { name: /Preview file/ }))
+    expect(screen.getByRole('heading', { name: 'Semester announcement.md' })).toBeInTheDocument()
+  })
 })
