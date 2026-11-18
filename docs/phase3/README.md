@@ -78,7 +78,8 @@ components and endpoints remain the implementation behind Planner and Changes.
   - intake candidate facts that still need a decision.
 - Shows the review/decision/execution timeline from Activity.
 - Opens the exact course intake dialog for a candidate when the candidate has a
-  course.
+  course. A candidate without a course routes to Courses so the student can pick
+  the class.
 - Approving a decision and executing an approved action remain separate actions.
 - After execution, courses, tasks, Library, and intake are reloaded so Planner and
   Home reflect the verified result without a manual refresh.
@@ -161,6 +162,8 @@ The following continue to work through their existing components and APIs:
   8. Search finds a task, Library file, intake candidate, and Activity event.
   9. Agent chat opens, and **Workspace** returns to Home.
   10. Settings and Import remain reachable and load normally.
+- Lighthouse accessibility score: 1.0 on Home, Planner, and Changes in the
+  browser dashboard.
 
 ## Acceptance criteria
 

@@ -538,8 +538,8 @@ function App() {
       
       {view !== 'chat' && <div className="top-actions-pills">
         <button className={`top-pill ${view === 'search' ? 'active' : ''}`} type="button" onClick={() => navigate('search')} disabled={migrationBusy} aria-label="Search workspace" aria-current={view === 'search' ? 'page' : undefined}><span aria-hidden="true">⌕</span><span>Search</span></button>
-        <button className={`top-pill ${view === 'changes' ? 'active' : ''}`} type="button" onClick={() => navigate('changes')} disabled={migrationBusy} aria-label={`Open changes${changesCount ? `, ${changesCount} waiting` : ''}`} aria-current={view === 'changes' ? 'page' : undefined}><span aria-hidden="true">⚖</span><span>Changes{changesCount ? ` · ${changesCount}` : ''}</span></button>
-        <button className="top-pill" type="button" onClick={() => { setDroppedFiles([]); setActionMode('import') }} disabled={migrationBusy} aria-label="Import material"><span aria-hidden="true">＋</span><span>Import</span></button>
+        <button className={`top-pill ${view === 'changes' ? 'active' : ''}`} type="button" onClick={() => navigate('changes')} disabled={migrationBusy} aria-current={view === 'changes' ? 'page' : undefined}><span aria-hidden="true">⚖</span><span>Changes{changesCount ? ` · ${changesCount}` : ''}</span></button>
+        <button className="top-pill" type="button" onClick={() => { setDroppedFiles([]); setActionMode('import') }} disabled={migrationBusy}><span aria-hidden="true">＋</span><span>Import</span></button>
       </div>}
       {error && <p className="dashboard-inline-error" role="alert">{error}</p>}
       {view === 'home' && <HomeView status={status} courses={courses} tasks={tasks} activity={activity} inbox={inbox} reviews={reviews} intakeCandidates={intakeCandidates} semester={selectedSemester || status?.workspace.semester || ''} semesters={semesters} loading={semesterLoading} onSemesterChange={changeSemester} onOpenCourse={openCourse} onOpenIntake={() => openActionPanel('import')} onNavigate={navigate} />}
